@@ -34,11 +34,11 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
 
   const transactions = useMemo(() => {
     if (!account) return [];
-    return data.transactions
+    return (data?.transactions || [])
       .filter(t => t.accountId === account.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 20);
-  }, [data.transactions, account]);
+  }, [data?.transactions, account]);
 
   const chartData = useMemo(() => {
     if (!account) return [];

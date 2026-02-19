@@ -80,10 +80,10 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
 
   const transactions = useMemo(() => {
     if (!holding) return [];
-    return data.transactions
+    return (data?.transactions || [])
       .filter(t => t.type === 'investing' && t.symbol === holding.symbol)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [data.transactions, holding]);
+  }, [data?.transactions, holding]);
 
   const nativeCurrency = useMemo(() => {
     const tx = transactions.find(t => t.currency);

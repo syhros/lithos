@@ -52,7 +52,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
     if (!account) return [];
     const map = new Map<string, { symbol: string; quantity: number; totalCost: number; currency: string }>();
 
-    data.transactions.forEach(tx => {
+    (data?.transactions || []).forEach(tx => {
       if (tx.type === 'investing' && tx.symbol && tx.quantity && tx.accountId === account.id) {
         const cur = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, currency: tx.currency || 'GBP' };
         cur.quantity += tx.quantity;
