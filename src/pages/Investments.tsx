@@ -76,24 +76,23 @@ export const Investments: React.FC = () => {
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
-            <div className="flex items-end justify-between mb-12">
-                <div className="flex items-end gap-6">
-                    <div>
-                        <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
-                        <h1 className="text-4xl font-bold text-white tracking-tight">Investments</h1>
+            <div className="flex items-start justify-between mb-12 mt-4">
+                <div>
+                    <div className="flex justify-between items-center mb-1">
+                        <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Portfolio Value</span>
                     </div>
-                    <button
-                        onClick={() => setIsAddAccountModalOpen(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)] mb-1"
-                    >
-                        <Plus size={14} />
-                        Add Account
-                    </button>
+                    <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
+                        {userCurrencySymbol}{parseInt(portfolioValue.toString()).toLocaleString()}
+                        <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
+                    </h1>
                 </div>
-                <div className="text-right">
-                    <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
-                    <span className="text-3xl font-bold text-white tracking-tight">{userCurrencySymbol}{portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                </div>
+                <button
+                    onClick={() => setIsAddAccountModalOpen(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
+                >
+                    <Plus size={14} />
+                    Add Account
+                </button>
             </div>
 
             {/* Section 1: Accounts */}
