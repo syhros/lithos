@@ -34,8 +34,8 @@ const ACCOUNT_FIELDS: FieldDef[] = [
 const INVESTMENT_FIELDS: FieldDef[] = [
   { key: 'symbol',      label: 'Ticker',      required: true,  description: 'e.g. AAPL, TSLA — rows without a ticker are skipped' },
   { key: 'date',        label: 'Date',         required: true,  description: '2024-01-15 — or a datetime column (Trading212 "Time")' },
-  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'For buy/sell: number of shares. For dividends: dividend per share. Rows without qty are skipped' },
-  { key: 'price',       label: 'Price / Unit', required: true,  description: 'For buy/sell: price per share. For dividends: multiply by qty for total dividend. Rows without price are skipped' },
+  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'For buy/sell: shares purchased. For dividends: number of shares held that received dividend. Rows without qty are skipped' },
+  { key: 'price',       label: 'Price / Unit', required: true,  description: 'For buy/sell: price per share. For dividends: dividend per share. Total dividend = qty × price' },
   { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, or dividend — required to identify dividends (defaults to buy)' },
   { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
@@ -414,7 +414,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             ? rawCurrency as Currency : 'GBP';
 
           if (tradeType === 'dividend') {
-            // Dividend value = qty * price (qty = dividend per share, price = share price / dividend amount)
+            // Dividend value = qty * price (qty = shares owned, price = dividend per share)
             const dividendNative = qty * price;
             const dividendGbp = validCurrency === 'USD' ? dividendNative * USD_TO_GBP : dividendNative;
 
@@ -427,9 +427,13 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               const checkDate = format(subDays(parseISO(dateStr), d), 'yyyy-MM-dd');
               if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
             }
-            // Fall back to the price column if no historical data
-            const sharePrice = historicalPrice ?? price;
-            const fxSharePrice = validCurrency === 'USD' ? sharePrice * USD_TO_GBP : sharePrice;
+            // For dividends, we need the actual stock price, not the dividend per share
+            // If no historical price, fall back to a reasonable estimate (can't use the dividend per share)
+            if (!historicalPrice) {
+              newErrors.push(`Row ${i + 2}: No historical price available for ${symbol} on ${dateStr} to reinvest dividend.`);
+              return;
+            }
+            const fxSharePrice = validCurrency === 'USD' ? historicalPrice * USD_TO_GBP : historicalPrice;
             const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
             totalInvestments += dividendGbp;
             addTransaction({
@@ -441,7 +445,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               accountId: selectedAccountId,
               symbol,
               quantity: sharesEarned,
-              price: sharePrice,
+              price: historicalPrice,
               currency: validCurrency,
             });
           } else {
