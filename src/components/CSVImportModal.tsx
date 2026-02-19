@@ -393,7 +393,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
       if (symbolsToFetch.length > 0) {
         setLoadingStatus(`Fetching historical prices for ${symbolsToFetch.length} ticker${symbolsToFetch.length === 1 ? '' : 's'}...`);
         try {
-          const historyRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-history?symbols=${symbolsToFetch.join(',')}`);
+          const historyRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-history?symbols=${symbolsToFetch.join(',')}`, {
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            }
+          });
           if (historyRes.ok) {
             const historyData = await historyRes.json();
             setLoadingStatus(`Received historical data for ${Object.keys(historyData).length} ticker${Object.keys(historyData).length === 1 ? '' : 's'}`);
