@@ -108,6 +108,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
 
     let currentQty = 0;
     let txIndex = 0;
+    let lastKnownPrice = currentPrices[holding.symbol]?.price || 100;
 
     return dates.map(date => {
       const dateStr = format(date, 'yyyy-MM-dd');
@@ -118,7 +119,8 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
         txIndex++;
       }
 
-      const price = history[dateStr] || currentPrices[holding.symbol]?.price || 100;
+      const price = history[dateStr] !== undefined ? history[dateStr] : lastKnownPrice;
+      if (history[dateStr] !== undefined) lastKnownPrice = history[dateStr];
       const marketValueGbp = currentQty * price * fxRate;
 
       return {

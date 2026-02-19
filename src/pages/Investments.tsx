@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { useFinance } from '../context/FinanceContext';
+import { useFinance, USD_TO_GBP } from '../context/FinanceContext';
 import { LineChart, Wallet, TrendingUp, TrendingDown, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AddAccountModal } from '../components/AddAccountModal';
@@ -8,6 +8,7 @@ import { HoldingDetailModal } from '../components/HoldingDetailModal';
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices } = useFinance();
+    const userCurrency = data.user.currency;
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     
@@ -35,29 +36,42 @@ export const Investments: React.FC = () => {
             }
         });
 
-        // 2. Calculate Derived Metrics using LIVE prices
+        // 2. Calculate Derived Metrics using LIVE prices with FX conversion
         return Array.from(map.values()).map(h => {
             const marketData = currentPrices[h.symbol];
-            const currentPrice = marketData ? marketData.price : 0;
-            const currentValue = h.quantity * currentPrice;
+            const nativeCurrency = marketData?.currency || data.transactions.find(t => t.symbol === h.symbol && t.currency)?.currency || 'GBP';
+            const stockIsUsd = nativeCurrency === 'USD';
+            const userIsUsd = userCurrency === 'USD';
+
+            // FX rate to convert stock price to user's display currency
+            let fxRate = 1;
+            if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
+            if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+
+            const nativePrice = marketData ? marketData.price : 0;
+            const displayPrice = nativePrice * fxRate;
+            const currentValue = h.quantity * displayPrice;
             const avgPrice = h.quantity > 0 ? h.totalCost / h.quantity : 0;
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
             return {
                 ...h,
-                currentPrice,
+                nativeCurrency,
+                nativePrice,
+                displayPrice,
                 currentValue,
                 avgPrice,
                 profitValue,
                 profitPercent,
-                marketData
+                marketData,
+                fxRate
             };
-        }).sort((a, b) => b.currentValue - a.currentValue); // Sort by highest value
+        }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices]);
 
-    // Calculate Total Portfolio Value from holdings to display in header or cross-check
     const portfolioValue = holdings.reduce((acc, curr) => acc + curr.currentValue, 0);
+    const userCurrencySymbol = userCurrency === 'USD' ? '$' : '£';
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -69,7 +83,7 @@ export const Investments: React.FC = () => {
                 </div>
                 <div className="text-right">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
-                    <span className="text-3xl font-bold text-white tracking-tight">£{portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    <span className="text-3xl font-bold text-white tracking-tight">{userCurrencySymbol}{portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                 </div>
             </div>
 
@@ -127,9 +141,12 @@ export const Investments: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {holdings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
+                        const nativeSymbol = stock.nativeCurrency === 'USD' ? '$' : '£';
+                        const dayChange = stock.marketData?.changePercent ?? 0;
+                        const isDayUp = dayChange >= 0;
                         return (
-                            <div 
-                                key={stock.symbol} 
+                            <div
+                                key={stock.symbol}
                                 onClick={() => setSelectedHolding(stock)}
                                 className="bg-[#161618] border border-white/5 p-6 rounded-sm relative hover:bg-white/[0.02] transition-colors group cursor-pointer"
                             >
@@ -137,12 +154,12 @@ export const Investments: React.FC = () => {
                                 <div className="flex justify-between items-start mb-6">
                                     <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center text-white font-bold tracking-wider text-xs border border-white/5">
-                                            {stock.symbol.substring(0, 2)}
+                                            {stock.symbol.substring(0, 2).toUpperCase()}
                                         </div>
                                         <div>
                                             <h3 className="text-lg font-bold text-white leading-none">{stock.symbol}</h3>
-                                            <span className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">
-                                                {stock.marketData?.currency || 'USD'}
+                                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold text-white uppercase tracking-wider" style={{ backgroundColor: '#e85d04' }}>
+                                                {stock.nativeCurrency}
                                             </span>
                                         </div>
                                     </div>
@@ -155,40 +172,39 @@ export const Investments: React.FC = () => {
                                 {/* Main Value (Big) */}
                                 <div className="mb-6">
                                     <div className="text-4xl font-bold text-white tracking-tight">
-                                        £{stock.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        {userCurrencySymbol}{stock.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                         <span className="text-lg text-iron-dust opacity-50">.{(stock.currentValue % 1).toFixed(2).substring(2)}</span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-1">
                                         <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest">Market Value</p>
-                                        {stock.marketData?.changePercent && (
-                                            <span className={clsx("text-[9px] font-mono", stock.marketData.changePercent > 0 ? "text-emerald-vein" : "text-magma")}>
-                                                ({stock.marketData.changePercent > 0 ? '+' : ''}{stock.marketData.changePercent.toFixed(2)}% today)
-                                            </span>
-                                        )}
+                                        <span className={clsx(
+                                            "text-[9px] font-mono font-bold px-1.5 py-0.5 rounded",
+                                            isDayUp ? "bg-emerald-vein/10 text-emerald-vein" : "bg-magma/10 text-magma"
+                                        )}>
+                                            {isDayUp ? '+' : ''}{dayChange.toFixed(2)}%
+                                        </span>
                                     </div>
                                 </div>
 
                                 {/* Detailed Stats Grid (Small Mono) */}
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-8 border-t border-white/5 pt-4">
-                                    {/* Row 1 */}
                                     <div>
                                         <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Shares Held</span>
                                         <span className="font-mono text-xs text-white">{stock.quantity.toFixed(4)}</span>
                                     </div>
                                     <div className="text-right">
                                         <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Avg Price</span>
-                                        <span className="font-mono text-xs text-white">£{stock.avgPrice.toFixed(2)}</span>
+                                        <span className="font-mono text-xs text-white">{userCurrencySymbol}{stock.avgPrice.toFixed(2)}</span>
                                     </div>
 
-                                    {/* Row 2 */}
                                     <div>
-                                        <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Current Price</span>
-                                        <span className="font-mono text-xs text-white">£{stock.currentPrice.toFixed(2)}</span>
+                                        <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Current Price ({stock.nativeCurrency})</span>
+                                        <span className="font-mono text-xs text-white">{nativeSymbol}{stock.nativePrice.toFixed(2)}</span>
                                     </div>
                                     <div className="text-right">
                                         <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Profit/Loss</span>
                                         <span className={clsx("font-mono text-xs", isProfit ? "text-emerald-vein" : "text-magma")}>
-                                            {isProfit ? '+' : ''}£{stock.profitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            {isProfit ? '+' : ''}{userCurrencySymbol}{stock.profitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 </div>
