@@ -613,7 +613,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const refreshData = async () => {
-    await loadUserData();
+    setLoading(true);
+    try {
+      await loadUserData();
+      await fetchMarketData(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

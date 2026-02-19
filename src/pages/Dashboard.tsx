@@ -231,7 +231,7 @@ export const Dashboard: React.FC = () => {
             const m = format(new Date(t.date), 'MMM yy');
             monthlySpend.set(m, (monthlySpend.get(m) || 0) + Math.abs(t.amount));
         });
-      
+
       // Convert to array (last 6 months)
       const months = [];
       const today = new Date();
@@ -242,16 +242,19 @@ export const Dashboard: React.FC = () => {
           const key = format(date, 'MMM yy');
           const shortName = format(date, 'MMM');
           // Full name for tooltip: 'Nov 23'
-          months.push({ 
+          months.push({
               name: shortName, // X-axis label
               fullName: key, // Tooltip label
-              amount: monthlySpend.get(key) || 0 
+              amount: monthlySpend.get(key) || 0
           });
       }
-      return months; 
+      return months;
   }, [data.transactions]);
 
-  if (loading && data.assets.length === 0 && data.transactions.length === 0) {
+  const isLoading = loading && data.assets.length === 0 && data.transactions.length === 0;
+  const isEmpty = data.assets.length === 0;
+
+  if (isLoading) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-[#0a0a0c]">
         <div className="text-center">
@@ -262,7 +265,7 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  if (data.assets.length === 0) {
+  if (isEmpty) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-[#0a0a0c]">
         <div className="text-center max-w-md">

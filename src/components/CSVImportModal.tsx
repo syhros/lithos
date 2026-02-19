@@ -187,7 +187,7 @@ const MappingSelect: React.FC<{
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose }) => {
-  const { data, addTransaction, currencySymbol, historicalPrices } = useFinance();
+  const { data, addTransaction, currencySymbol, historicalPrices, refreshData } = useFinance();
 
   const [mode, setMode] = useState<ImportMode>('accounts');
   const [step, setStep] = useState<Step>('upload');
@@ -564,6 +564,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setLoadingStatus('');
     if (newErrors.length === 0) {
       setStep('done');
+      await refreshData();
     }
   };
 
