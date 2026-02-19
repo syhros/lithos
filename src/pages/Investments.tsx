@@ -154,7 +154,7 @@ export const Investments: React.FC = () => {
                             <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
                         </p>
                     </div>
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-4">
                         <button
                             onClick={() => setIsAddAccountModalOpen(true)}
                             className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
@@ -162,26 +162,11 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-                        <div className="flex items-center gap-3 px-4 py-3 bg-[#161618] border border-white/5 rounded-sm">
-                            <div className="flex items-center gap-2">
-                                <span className={clsx(
-                                    'w-2 h-2 rounded-full animate-pulse',
-                                    loading ? 'bg-yellow-400' : isStale ? 'bg-red-500' : 'bg-emerald-vein'
-                                )} />
-                                <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[2px]">
-                                    {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
-                                </span>
-                            </div>
-                            <span className="font-mono text-[10px] text-iron-dust">
-                                Updated {format(lastUpdated, 'HH:mm')}
+                        <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5 w-fit">
+                            <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
+                            <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
+                                {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
                             </span>
-                            <button
-                                onClick={() => refreshData()}
-                                disabled={loading}
-                                className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
-                            >
-                                <RefreshCw size={14} />
-                            </button>
                         </div>
                     </div>
                 </div>

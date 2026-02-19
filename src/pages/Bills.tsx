@@ -62,6 +62,7 @@ export const Bills: React.FC = () => {
                         <h4 className="text-sm font-bold text-white mb-1">{bill.name}</h4>
                         <div className="flex items-center gap-3 text-[10px] font-mono text-iron-dust">
                             <span>{bill.category}</span>
+                            {bill.isRecurring && <span className="px-1.5 py-0.5 bg-white/5 rounded capitalize">{bill.frequency}</span>}
                             {bill.autoPay && <span className="px-1.5 py-0.5 bg-white/5 rounded">Auto-pay</span>}
                         </div>
                     </div>

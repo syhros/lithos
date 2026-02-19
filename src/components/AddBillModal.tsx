@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { X } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { X, ChevronDown } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { Bill } from '../data/mockData';
 import { clsx } from 'clsx';
@@ -10,30 +10,51 @@ interface AddBillModalProps {
   billToEdit?: Bill;
 }
 
-const CATEGORIES = ['Utilities', 'Insurance', 'Subscriptions', 'Rent', 'Loan', 'Medical', 'Other'];
+const DEFAULT_CATEGORIES = ['Utilities', 'Insurance', 'Subscriptions', 'Rent', 'Loan', 'Medical', 'Housing', 'Software', 'Other'];
 
 export const AddBillModal: React.FC<AddBillModalProps> = ({
   isOpen,
   onClose,
   billToEdit,
 }) => {
-  const { addBill, updateBill } = useFinance();
+  const { data, addBill, updateBill } = useFinance();
   const isEditing = !!billToEdit;
 
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [category, setCategory] = useState('Other');
+  const [category, setCategory] = useState('');
+  const [categoryInput, setCategoryInput] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [recurringEndDate, setRecurringEndDate] = useState('');
   const [autoPay, setAutoPay] = useState(false);
-  const [isPaid, setIsPaid] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+  const existingCategories = useMemo(() => {
+    const cats = new Set(DEFAULT_CATEGORIES);
+    data.bills.forEach(bill => {
+      if (bill.category) cats.add(bill.category);
+    });
+    return Array.from(cats).sort();
+  }, [data.bills]);
+
+  const filteredCategories = useMemo(() => {
+    const input = categoryInput.toLowerCase();
+    return existingCategories.filter(cat => cat.toLowerCase().includes(input));
+  }, [categoryInput, existingCategories]);
 
   const resetForm = useCallback(() => {
     setName('');
     setAmount('');
     setDueDate('');
-    setCategory('Other');
+    setCategory('');
+    setCategoryInput('');
+    setIsRecurring(false);
+    setFrequency('monthly');
+    setRecurringEndDate('');
     setAutoPay(false);
-    setIsPaid(false);
+    setShowCategoryDropdown(false);
   }, []);
 
   useEffect(() => {
@@ -42,8 +63,11 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
       setAmount(billToEdit.amount.toString());
       setDueDate(billToEdit.dueDate);
       setCategory(billToEdit.category);
+      setCategoryInput('');
+      setIsRecurring(billToEdit.isRecurring || false);
+      setFrequency(billToEdit.frequency || 'monthly');
+      setRecurringEndDate(billToEdit.recurringEndDate || '');
       setAutoPay(billToEdit.autoPay);
-      setIsPaid(billToEdit.isPaid);
     } else if (!isOpen) {
       resetForm();
     }
@@ -52,15 +76,18 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
   if (!isOpen) return null;
 
   const handleSave = () => {
-    if (!name || !amount || !dueDate) return;
+    const finalCategory = categoryInput || category;
+    if (!name || !amount || !dueDate || !finalCategory) return;
 
     const billData = {
       name,
       amount: parseFloat(amount),
       dueDate,
-      category,
+      category: finalCategory,
       autoPay,
-      isPaid,
+      isRecurring,
+      frequency: isRecurring ? frequency : undefined,
+      recurringEndDate: isRecurring && recurringEndDate ? recurringEndDate : undefined,
     };
 
     if (isEditing && billToEdit) {
@@ -99,19 +126,43 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
             />
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
               Category
             </label>
-            <select
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-            >
-              {CATEGORIES.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <input
+                type="text"
+                value={categoryInput || category}
+                onChange={e => {
+                  setCategoryInput(e.target.value);
+                  setShowCategoryDropdown(true);
+                }}
+                onFocus={() => setShowCategoryDropdown(true)}
+                placeholder="Select or type category"
+                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none pr-8"
+              />
+              <ChevronDown size={14} className="absolute right-3 top-3.5 text-iron-dust pointer-events-none" />
+
+              {showCategoryDropdown && filteredCategories.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1c1e] border border-white/10 rounded-sm shadow-xl z-10">
+                  {filteredCategories.map(cat => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setCategory(cat);
+                        setCategoryInput('');
+                        setShowCategoryDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -147,6 +198,53 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
 
           <div className="border border-white/5 rounded-sm p-4 bg-black/20 space-y-3">
             <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Recurring Bill</span>
+              <button
+                onClick={() => setIsRecurring(r => !r)}
+                className={clsx(
+                  'w-10 h-5 rounded-full transition-all relative',
+                  isRecurring ? 'bg-emerald-vein' : 'bg-white/10'
+                )}
+              >
+                <span className={clsx(
+                  'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all',
+                  isRecurring ? 'left-5' : 'left-0.5'
+                )} />
+              </button>
+            </div>
+
+            {isRecurring && (
+              <>
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
+                    Frequency
+                  </label>
+                  <select
+                    value={frequency}
+                    onChange={e => setFrequency(e.target.value as 'weekly' | 'monthly' | 'yearly')}
+                    className="w-full bg-black/20 border border-white/10 p-2.5 text-sm text-white rounded-sm focus:border-magma outline-none"
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
+                    End Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={recurringEndDate}
+                    onChange={e => setRecurringEndDate(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-2.5 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center justify-between pt-2 border-t border-white/5">
               <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Auto-Pay Enabled</span>
               <button
                 onClick={() => setAutoPay(a => !a)}
@@ -158,22 +256,6 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
                 <span className={clsx(
                   'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all',
                   autoPay ? 'left-5' : 'left-0.5'
-                )} />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Mark as Paid</span>
-              <button
-                onClick={() => setIsPaid(p => !p)}
-                className={clsx(
-                  'w-10 h-5 rounded-full transition-all relative',
-                  isPaid ? 'bg-emerald-vein' : 'bg-white/10'
-                )}
-              >
-                <span className={clsx(
-                  'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all',
-                  isPaid ? 'left-5' : 'left-0.5'
                 )} />
               </button>
             </div>
@@ -189,7 +271,7 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={!name || !amount || !dueDate}
+            disabled={!name || !amount || !dueDate || !(categoryInput || category)}
             className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Save

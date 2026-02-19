@@ -65,6 +65,9 @@ export interface Bill {
   isPaid: boolean;
   autoPay: boolean;
   category: string;
+  isRecurring: boolean;
+  frequency?: Frequency;
+  recurringEndDate?: string;
 }
 
 export interface Recurring {
@@ -270,12 +273,12 @@ export const initialData: MockData = {
   ],
   transactions: generateLedger(),
   bills: [
-    { id: '1', name: 'Council Tax', amount: 145.00, dueDate: '2023-11-01', isPaid: true, autoPay: true, category: 'Housing' },
-    { id: '2', name: 'Electricity', amount: 85.40, dueDate: '2023-11-15', isPaid: false, autoPay: true, category: 'Utilities' },
-    { id: '3', name: 'Water', amount: 32.00, dueDate: '2023-11-20', isPaid: false, autoPay: false, category: 'Utilities' },
-    { id: '4', name: 'Internet', amount: 45.00, dueDate: '2023-11-22', isPaid: false, autoPay: true, category: 'Utilities' },
-    { id: '5', name: 'Adobe CC', amount: 54.99, dueDate: '2023-11-25', isPaid: false, autoPay: true, category: 'Software' },
-    { id: '6', name: 'Insurance', amount: 22.50, dueDate: '2023-11-28', isPaid: false, autoPay: true, category: 'Insurance' }
+    { id: '1', name: 'Council Tax', amount: 145.00, dueDate: '2023-11-01', isPaid: true, autoPay: true, category: 'Housing', isRecurring: true, frequency: 'monthly' },
+    { id: '2', name: 'Electricity', amount: 85.40, dueDate: '2023-11-15', isPaid: false, autoPay: true, category: 'Utilities', isRecurring: true, frequency: 'monthly' },
+    { id: '3', name: 'Water', amount: 32.00, dueDate: '2023-11-20', isPaid: false, autoPay: false, category: 'Utilities', isRecurring: true, frequency: 'monthly' },
+    { id: '4', name: 'Internet', amount: 45.00, dueDate: '2023-11-22', isPaid: false, autoPay: true, category: 'Utilities', isRecurring: true, frequency: 'monthly' },
+    { id: '5', name: 'Adobe CC', amount: 54.99, dueDate: '2023-11-25', isPaid: false, autoPay: true, category: 'Software', isRecurring: true, frequency: 'monthly' },
+    { id: '6', name: 'Insurance', amount: 22.50, dueDate: '2023-11-28', isPaid: false, autoPay: true, category: 'Insurance', isRecurring: true, frequency: 'monthly' }
   ],
   recurring: [
     { id: '1', name: 'Netflix', amount: 15.99, frequency: 'monthly', nextDate: '2023-11-29', category: 'Entertainment', active: true },
