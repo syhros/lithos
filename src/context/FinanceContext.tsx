@@ -197,7 +197,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                             headers: { 'Authorization': `Bearer ${supabaseKey}` }
                         });
                         if (hRes.ok) {
-                            const rows: { date: string; close: number }[] = await hRes.json();
+                            const response = await hRes.json();
+                            const rows: { date: string; close: number }[] = response[sym] || [];
                             rows.forEach(row => { history[row.date] = row.close; });
                             console.info(`Loaded live history for ${sym}: ${rows.length} points`);
                         } else {
