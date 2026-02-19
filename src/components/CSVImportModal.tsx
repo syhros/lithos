@@ -200,8 +200,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [errors, setErrors] = useState<string[]>([]);
   const [importCount, setImportCount] = useState(0);
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
-  const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
-  const [dividendReinvest, setDividendReinvest] = useState(true);
+  const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>();
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -218,7 +217,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setStep('upload'); setFileName(''); setCsvHeaders([]); setCsvRows([]);
     setMapping({}); setSelectedAccountId(''); setErrors([]);
     setImportCount(0); setImportStats({ income: 0, expense: 0, netChange: 0, investments: 0 });
-    setTickerOverrides({}); setDividendReinvest(true); setIsDragging(false);
+    setTickerOverrides({}); setIsDragging(false);
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -337,7 +336,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   };
 
   const hasDividendRows = useMemo(() => {
-    if (mode !== 'investments' || !mapping['tradeType']) return false;
+    if (mode !== 'investments') return false;
     return csvRows.some(row => {
       const raw = getCellValue(row, 'tradeType').toLowerCase().trim();
       return raw === 'dividend' || raw === 'dividends';
@@ -415,49 +414,36 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             ? rawCurrency as Currency : 'GBP';
 
           if (tradeType === 'dividend') {
-            // Dividend value = qty * price (in native currency)
+            // Dividend value = qty * price (qty = dividend per share, price = share price / dividend amount)
             const dividendNative = qty * price;
             const dividendGbp = validCurrency === 'USD' ? dividendNative * USD_TO_GBP : dividendNative;
 
-            if (dividendReinvest) {
-              // Reinvest: look up historical price on that day to calculate fractional shares received
-              const dateStr = txDate.split('T')[0];
-              const histForSymbol = historicalPrices[symbol] || {};
-              // Walk back up to 7 days to find a trading day price
-              let historicalPrice: number | null = null;
-              for (let d = 0; d < 7; d++) {
-                const checkDate = format(subDays(parseISO(dateStr), d), 'yyyy-MM-dd');
-                if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
-              }
-              // Fall back to the price column if no historical data
-              const sharePrice = historicalPrice ?? price;
-              const fxSharePrice = validCurrency === 'USD' ? sharePrice * USD_TO_GBP : sharePrice;
-              const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
-              totalInvestments += dividendGbp;
-              addTransaction({
-                date: txDate,
-                description: `Dividend reinvested — ${description}`,
-                amount: dividendGbp,
-                type: 'investing',
-                category: 'Dividend',
-                accountId: selectedAccountId,
-                symbol,
-                quantity: sharesEarned,
-                price: sharePrice,
-                currency: validCurrency,
-              });
-            } else {
-              // Not reinvested: record as cash dividend to the investing account
-              totalInvestments += dividendGbp;
-              addTransaction({
-                date: txDate,
-                description: `Dividend — ${description}`,
-                amount: dividendGbp,
-                type: 'investing',
-                category: 'Dividend',
-                accountId: selectedAccountId,
-              });
+            // Always reinvest dividends: look up historical price on that day to calculate fractional shares
+            const dateStr = txDate.split('T')[0];
+            const histForSymbol = historicalPrices[symbol] || {};
+            // Walk back up to 7 days to find a trading day price
+            let historicalPrice: number | null = null;
+            for (let d = 0; d < 7; d++) {
+              const checkDate = format(subDays(parseISO(dateStr), d), 'yyyy-MM-dd');
+              if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
             }
+            // Fall back to the price column if no historical data
+            const sharePrice = historicalPrice ?? price;
+            const fxSharePrice = validCurrency === 'USD' ? sharePrice * USD_TO_GBP : sharePrice;
+            const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
+            totalInvestments += dividendGbp;
+            addTransaction({
+              date: txDate,
+              description: `Dividend reinvested — ${description}`,
+              amount: dividendGbp,
+              type: 'investing',
+              category: 'Dividend',
+              accountId: selectedAccountId,
+              symbol,
+              quantity: sharesEarned,
+              price: sharePrice,
+              currency: validCurrency,
+            });
           } else {
             // buy or sell
             const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
@@ -902,51 +888,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                     </div>
                   </div>
 
-                  {/* Dividend reinvestment toggle — only shown if dividend rows detected */}
                   {hasDividendRows && (
-                    <div className="bg-black/20 border border-white/5 rounded-sm p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-white font-mono font-bold mb-0.5">Dividend Reinvestment</p>
-                          <p className="text-[10px] text-iron-dust">
-                            {dividendReinvest
-                              ? 'Dividends will be converted to fractional shares using the historical price on the dividend date.'
-                              : 'Dividends will be recorded as cash income credited to the investing account.'}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setDividendReinvest(v => !v)}
-                          className={clsx(
-                            'relative flex-shrink-0 ml-4 w-10 h-5 rounded-full transition-colors duration-200',
-                            dividendReinvest ? 'bg-emerald-vein' : 'bg-white/10'
-                          )}
-                        >
-                          <span className={clsx(
-                            'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
-                            dividendReinvest ? 'translate-x-5' : 'translate-x-0.5'
-                          )} />
-                        </button>
-                      </div>
-                      <div className="mt-3 flex gap-3">
-                        <button
-                          onClick={() => setDividendReinvest(true)}
-                          className={clsx(
-                            'px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded-sm border transition-all',
-                            dividendReinvest ? 'bg-emerald-vein/10 border-emerald-vein/40 text-emerald-vein' : 'border-white/10 text-iron-dust hover:text-white'
-                          )}
-                        >
-                          Auto Reinvest
-                        </button>
-                        <button
-                          onClick={() => setDividendReinvest(false)}
-                          className={clsx(
-                            'px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded-sm border transition-all',
-                            !dividendReinvest ? 'bg-blue-400/10 border-blue-400/40 text-blue-400' : 'border-white/10 text-iron-dust hover:text-white'
-                          )}
-                        >
-                          Cash Only
-                        </button>
-                      </div>
+                    <div className="bg-emerald-vein/10 border border-emerald-vein/20 rounded-sm p-4">
+                      <p className="text-xs text-emerald-vein font-mono font-bold">Dividends detected</p>
+                      <p className="text-[10px] text-iron-dust mt-1">
+                        Dividends will be automatically converted to fractional shares using the historical price on the dividend date.
+                      </p>
                     </div>
                   )}
                 </>
