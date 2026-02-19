@@ -1,10 +1,40 @@
 import React, { useMemo, useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Calendar, Check, AlertCircle, Plus } from 'lucide-react';
-import { format, parseISO, isPast, isToday, isThisMonth } from 'date-fns';
+import { format, parseISO, isPast, isToday, isThisMonth, startOfMonth, endOfMonth } from 'date-fns';
 import { clsx } from 'clsx';
 import { Bill } from '../data/mockData';
 import { AddBillModal } from '../components/AddBillModal';
+
+const getNextDueDate = (bill: Bill): Date => {
+    if (!bill.isRecurring) {
+        return parseISO(bill.dueDate);
+    }
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    if (bill.frequency === 'monthly') {
+        const dayOfMonth = parseInt(bill.dueDate, 10);
+        const nextDate = new Date(currentYear, currentMonth, dayOfMonth);
+        if (nextDate <= now) {
+            nextDate.setMonth(nextDate.getMonth() + 1);
+        }
+        return nextDate;
+    } else if (bill.frequency === 'weekly') {
+        const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const targetDay = dayNames.indexOf(bill.dueDate.toLowerCase());
+        const currentDay = now.getDay();
+        let daysUntil = targetDay - currentDay;
+        if (daysUntil <= 0) daysUntil += 7;
+        const nextDate = new Date(now);
+        nextDate.setDate(nextDate.getDate() + daysUntil);
+        return nextDate;
+    } else {
+        return parseISO(bill.dueDate);
+    }
+};
 
 export const Bills: React.FC = () => {
     const { data, currencySymbol } = useFinance();
@@ -20,7 +50,7 @@ export const Bills: React.FC = () => {
         const overdueBills = [];
 
         data.bills.forEach(bill => {
-            const dueDate = parseISO(bill.dueDate);
+            const dueDate = getNextDueDate(bill);
             if (bill.isPaid) {
                 paidBills.push(bill);
             } else if (isPast(dueDate) && !isToday(dueDate)) {
@@ -36,16 +66,24 @@ export const Bills: React.FC = () => {
         const totalMonthly = thisMonth.reduce((sum, bill) => sum + bill.amount, 0);
 
         return {
-            upcoming: upcomingBills.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()),
-            paid: paidBills.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime()),
-            overdue: overdueBills.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()),
+            upcoming: upcomingBills.sort((a, b) => getNextDueDate(a).getTime() - getNextDueDate(b).getTime()),
+            paid: paidBills.sort((a, b) => getNextDueDate(b).getTime() - getNextDueDate(a).getTime()),
+            overdue: overdueBills.sort((a, b) => getNextDueDate(a).getTime() - getNextDueDate(b).getTime()),
             monthly: totalMonthly,
         };
     }, [data.bills]);
 
     const BillCard: React.FC<{ bill: Bill; isDue?: boolean }> = ({ bill, isDue }) => {
-        const dueDate = parseISO(bill.dueDate);
+        const dueDate = getNextDueDate(bill);
         const daysUntilDue = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+
+        const dueDateLabel = bill.isRecurring
+            ? bill.frequency === 'weekly'
+                ? `Every ${bill.dueDate.charAt(0).toUpperCase() + bill.dueDate.slice(1)}`
+                : bill.frequency === 'monthly'
+                    ? `Day ${bill.dueDate}`
+                    : format(dueDate, 'MMM dd')
+            : format(dueDate, 'MMM dd');
 
         return (
             <div onClick={() => setBillToEdit(bill)} className="bg-[#161618] border border-white/5 p-5 rounded-sm flex items-center justify-between group hover:border-white/10 transition-all cursor-pointer">
@@ -76,7 +114,7 @@ export const Bills: React.FC = () => {
                         bill.isPaid ? 'text-emerald-vein' :
                             isDue ? 'text-magma' : 'text-iron-dust'
                     )}>
-                        {bill.isPaid ? 'Paid' : format(dueDate, 'MMM dd')}
+                        {bill.isPaid ? 'Paid' : dueDateLabel}
                         {!bill.isPaid && daysUntilDue >= 0 && <span className="ml-1">({daysUntilDue}d)</span>}
                     </div>
                 </div>
