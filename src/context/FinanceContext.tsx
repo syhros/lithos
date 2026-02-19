@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { initialData, MockData, Transaction, UserProfile, currentStockPrices as fallbackPrices } from '../data/mockData';
+import { initialData, MockData, Transaction, Asset, Debt, UserProfile, currentStockPrices as fallbackPrices } from '../data/mockData';
 import { isBefore, parseISO, subDays, format, isEqual, startOfDay, eachDayOfInterval, addDays } from 'date-fns';
 import { supabase } from '../lib/supabase';
 
@@ -40,6 +40,9 @@ interface FinanceContextType {
   // Actions
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
   deleteTransaction: (id: string) => void;
+  deleteTransactions: (ids: string[]) => void;
+  addAccount: (account: Omit<Asset, 'id'>) => void;
+  addDebt: (debt: Omit<Debt, 'id'>) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
@@ -470,6 +473,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
+  const deleteTransactions = (ids: string[]) => {
+    const idSet = new Set(ids);
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.filter(t => !idSet.has(t.id))
+    }));
+  };
+
+  const addAccount = (account: Omit<Asset, 'id'>) => {
+    const newAccount: Asset = { ...account, id: crypto.randomUUID() };
+    setData(prev => ({ ...prev, assets: [...prev.assets, newAccount] }));
+  };
+
+  const addDebt = (debt: Omit<Debt, 'id'>) => {
+    const newDebt: Debt = { ...debt, id: crypto.randomUUID() };
+    setData(prev => ({ ...prev, debts: [...prev.debts, newDebt] }));
+  };
+
   const updateUserProfile = (updates: Partial<UserProfile>) => {
       setData(prev => ({ ...prev, user: { ...prev.user, ...updates } }));
   };
@@ -490,6 +511,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       getTotalNetWorth,
       addTransaction,
       deleteTransaction,
+      deleteTransactions,
+      addAccount,
+      addDebt,
       updateUserProfile,
       refreshData,
       currencySymbol: getCurrencySymbol(data.user.currency)

@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Plus, Wallet } from 'lucide-react';
 import { AddAccountModal } from '../components/AddAccountModal';
+import { AccountDetailModal } from '../components/AccountDetailModal';
+import { Asset } from '../data/mockData';
 
 export const Accounts: React.FC = () => {
     const { data, currentBalances, currencySymbol } = useFinance();
     const [showAddModal, setShowAddModal] = useState(false);
+    const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
 
     // Filter for Checking and Savings
     const liquidAssets = data.assets.filter(a => a.type === 'checking' || a.type === 'savings');
@@ -30,7 +33,7 @@ export const Accounts: React.FC = () => {
                 {liquidAssets.map(asset => {
                     const balance = currentBalances[asset.id] || 0;
                     return (
-                        <div key={asset.id} className="group bg-[#161618] border border-white/5 p-8 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1">
+                        <div key={asset.id} onClick={() => setSelectedAccount(asset)} className="group bg-[#161618] border border-white/5 p-8 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer">
                             <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
                             
                             <div className="flex justify-between items-start mb-8">
@@ -55,6 +58,11 @@ export const Accounts: React.FC = () => {
             </div>
 
             <AddAccountModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} />
+            <AccountDetailModal
+                isOpen={!!selectedAccount}
+                onClose={() => setSelectedAccount(null)}
+                account={selectedAccount}
+            />
         </div>
     );
 };

@@ -30,7 +30,8 @@ export interface Asset {
   institution: string;
   color?: string;
   startingValue: number;
-  symbol?: string; // For single-asset accounts like "Bitcoin Wallet" or "Tesla Shares"
+  interestRate?: number;
+  symbol?: string;
 }
 
 export interface Debt {
@@ -248,7 +249,7 @@ export const initialData: MockData = {
   },
   assets: [
     { id: '1', name: 'Monzo Current', type: 'checking', currency: 'GBP', institution: 'Monzo', color: '#00f2ad', startingValue: 2500.00 },
-    { id: '2', name: 'Marcus Savings', type: 'savings', currency: 'GBP', institution: 'Marcus', color: '#d4af37', startingValue: 12000.00 },
+    { id: '2', name: 'Marcus Savings', type: 'savings', currency: 'GBP', institution: 'Marcus', color: '#d4af37', startingValue: 12000.00, interestRate: 5.1 },
     { id: '3', name: 'Vanguard ISA', type: 'investment', currency: 'GBP', institution: 'Vanguard', color: '#3b82f6', startingValue: 0.00 }, // Started at 0, filled via txs
   ],
   debts: [

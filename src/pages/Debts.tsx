@@ -1,16 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
-import { CreditCard, AlertCircle } from 'lucide-react';
+import { CreditCard, Plus } from 'lucide-react';
+import { AddAccountModal } from '../components/AddAccountModal';
 
 export const Debts: React.FC = () => {
     const { data, currentBalances, currencySymbol } = useFinance();
     const debts = data.debts;
+    const [showAddDebt, setShowAddDebt] = useState(false);
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
-             <div className="mb-12">
-                <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
-                <h1 className="text-4xl font-bold text-white tracking-tight">Debts & Liabilities</h1>
+             <div className="mb-12 flex items-end justify-between">
+                <div>
+                    <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
+                    <h1 className="text-4xl font-bold text-white tracking-tight">Debts & Liabilities</h1>
+                </div>
+                <button
+                    onClick={() => setShowAddDebt(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
+                >
+                    <Plus size={14} />
+                    Add Debt
+                </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -65,6 +76,11 @@ export const Debts: React.FC = () => {
                     );
                 })}
             </div>
+            <AddAccountModal
+                isOpen={showAddDebt}
+                onClose={() => setShowAddDebt(false)}
+                mode="debt"
+            />
         </div>
     );
 };
