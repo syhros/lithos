@@ -85,9 +85,50 @@ export const Accounts: React.FC = () => {
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
                 {liquidAssets.map(asset => <AccountTile key={asset.id} asset={asset} />)}
             </div>
+
+            {liquidAssets.length > 0 && (
+                <div className="mb-12">
+                    <h3 className="text-sm font-mono uppercase tracking-[2px] text-iron-dust mb-4">Account Summary</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Assets</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{Object.entries(currentBalances)
+                                    .filter(([id]) => (data?.assets || []).some(a => a.id === id && !a.isClosed && (a.type === 'checking' || a.type === 'savings')))
+                                    .reduce((sum, [, v]) => sum + v, 0)
+                                    .toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Checking Balance</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{Object.entries(currentBalances)
+                                    .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'checking' && !a.isClosed))
+                                    .reduce((sum, [, v]) => sum + v, 0)
+                                    .toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Savings Balance</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{Object.entries(currentBalances)
+                                    .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'savings' && !a.isClosed))
+                                    .reduce((sum, [, v]) => sum + v, 0)
+                                    .toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Account Count</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {liquidAssets.length}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {closedAssets.length > 0 && (
                 <div className="mt-4">

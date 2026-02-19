@@ -185,14 +185,43 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
 
             <div>
               <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
-                Due Date
+                {isRecurring ? (
+                  frequency === 'weekly' ? 'Day of Week' : frequency === 'monthly' ? 'Day of Month' : 'Due Date'
+                ) : 'Due Date'}
               </label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={e => setDueDate(e.target.value)}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
-              />
+              {isRecurring && frequency === 'weekly' ? (
+                <select
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                >
+                  <option value="">Select day</option>
+                  <option value="monday">Monday</option>
+                  <option value="tuesday">Tuesday</option>
+                  <option value="wednesday">Wednesday</option>
+                  <option value="thursday">Thursday</option>
+                  <option value="friday">Friday</option>
+                  <option value="saturday">Saturday</option>
+                  <option value="sunday">Sunday</option>
+                </select>
+              ) : isRecurring && frequency === 'monthly' ? (
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                  placeholder="1-31"
+                  className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                />
+              ) : (
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                />
+              )}
             </div>
           </div>
 
