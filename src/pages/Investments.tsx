@@ -76,7 +76,7 @@ export const Investments: React.FC = () => {
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
-            <div className="flex items-start justify-between mb-12 mt-4">
+            <div className="flex items-start justify-between mb-4 mt-4">
                 <div>
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Module</span>
                     <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>

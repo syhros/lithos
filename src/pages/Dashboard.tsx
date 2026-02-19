@@ -184,7 +184,7 @@ export const Dashboard: React.FC = () => {
         <div className="flex flex-col h-full overflow-y-auto p-12 custom-scrollbar">
             
             {/* 1. Hero Section & Header Metrics */}
-            <div className="mb-12 mt-4 slide-up">
+            <div className="mb-4 mt-4 slide-up">
                 {/* Header Row: Label + Metadata on same line */}
                 <div className="flex justify-between items-center mb-1">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
