@@ -200,7 +200,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [errors, setErrors] = useState<string[]>([]);
   const [importCount, setImportCount] = useState(0);
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
-  const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>();
+  const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
 
   const fileRef = useRef<HTMLInputElement>(null);
 
