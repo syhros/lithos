@@ -11,13 +11,16 @@ export const Accounts: React.FC = () => {
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
     const [closedExpanded, setClosedExpanded] = useState(false);
-    const [accountToEdit, setAccountToEdit] = useState<Asset | null>(null);
 
     const liquidAssets = data?.assets?.filter(a => (a.type === 'checking' || a.type === 'savings') && !a.isClosed) || [];
     const closedAssets = data?.assets?.filter(a => (a.type === 'checking' || a.type === 'savings') && a.isClosed) || [];
 
     const AccountTile = ({ asset }: { asset: Asset }) => {
         const balance = currentBalances[asset.id] || 0;
+        const change = balance - asset.startingValue;
+        const changePercent = asset.startingValue > 0 ? (change / asset.startingValue) * 100 : 0;
+        const isPositive = change >= 0;
+
         return (
             <div key={asset.id} onClick={() => setSelectedAccount(asset)} className="group bg-[#161618] border border-white/5 p-8 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer">
                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
@@ -26,9 +29,14 @@ export const Accounts: React.FC = () => {
                     <div className="p-3 bg-white/5 rounded-sm text-white">
                         <Wallet size={20} />
                     </div>
-                    <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">
-                        {asset.type}
-                    </span>
+                    <div className="flex gap-2">
+                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">
+                            {asset.currency}
+                        </span>
+                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">
+                            {asset.type}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="mb-6">
@@ -37,19 +45,22 @@ export const Accounts: React.FC = () => {
                 </div>
 
                 <div className="mb-4">
-                    <div className="text-3xl font-bold text-white tracking-tight mb-2">
+                    <div className="text-3xl font-bold text-white tracking-tight mb-3">
                         {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className={clsx('text-[11px] font-mono', isPositive ? 'text-emerald-vein' : 'text-magma')}>
+                        {isPositive ? '+' : ''}{currencySymbol}{Math.abs(change).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({changePercent.toFixed(2)}%)
                     </div>
                 </div>
 
                 {asset.interestRate && (
-                    <div className="text-[11px] text-emerald-vein font-mono uppercase">
+                    <div className="text-[11px] text-emerald-vein font-mono uppercase mb-2">
                         {asset.interestRate}% APY
                     </div>
                 )}
 
                 {asset.openedDate && (
-                    <div className="text-[11px] text-iron-dust font-mono mt-2">
+                    <div className="text-[11px] text-iron-dust font-mono">
                         Opened {format(parseISO(asset.openedDate), 'MMM yyyy')}
                     </div>
                 )}
@@ -121,19 +132,11 @@ export const Accounts: React.FC = () => {
                 </div>
             )}
 
-            <AddAccountModal
-                isOpen={showAddModal || !!accountToEdit}
-                onClose={() => { setShowAddModal(false); setAccountToEdit(null); }}
-                accountToEdit={accountToEdit || undefined}
-            />
+            <AddAccountModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} />
             <AccountDetailModal
                 isOpen={!!selectedAccount}
                 onClose={() => setSelectedAccount(null)}
                 account={selectedAccount}
-                onEditClick={(account) => {
-                    setSelectedAccount(null);
-                    setAccountToEdit(account);
-                }}
             />
         </div>
     );

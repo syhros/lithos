@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Edit2 } from 'lucide-react';
+import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
@@ -10,12 +10,11 @@ interface AccountDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   account: Asset | null;
-  onEditClick?: (account: Asset) => void;
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
-export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account, onEditClick }) => {
+export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account }) => {
   const { data, currentBalances, updateAccount, getHistory, currencySymbol } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
@@ -25,6 +24,9 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
   const [editInterestRate, setEditInterestRate] = useState('');
   const [editStartingValue, setEditStartingValue] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [editIsClosed, setEditIsClosed] = useState(false);
+  const [editOpenedDate, setEditOpenedDate] = useState('');
+  const [editClosedDate, setEditClosedDate] = useState('');
 
   const balance = account ? currentBalances[account.id] || 0 : 0;
 
@@ -74,6 +76,9 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
     setEditInterestRate(account.interestRate?.toString() || '');
     setEditStartingValue(account.startingValue.toString());
     setEditColor(account.color || COLORS[0]);
+    setEditIsClosed(account.isClosed || false);
+    setEditOpenedDate(account.openedDate || '');
+    setEditClosedDate(account.closedDate || '');
     setEditMode(true);
   };
 
@@ -86,6 +91,9 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
       startingValue: parseFloat(editStartingValue) || account.startingValue,
       interestRate: account.type === 'savings' && editInterestRate ? parseFloat(editInterestRate) : undefined,
       color: editColor,
+      isClosed: editIsClosed,
+      openedDate: editOpenedDate || undefined,
+      closedDate: editIsClosed && editClosedDate ? editClosedDate : undefined,
     });
     setEditMode(false);
   };
@@ -123,15 +131,6 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
               {editMode ? <Check size={13} /> : <Pencil size={13} />}
               {editMode ? 'Save' : 'Edit'}
             </button>
-            {!editMode && onEditClick && account && (
-              <button
-                onClick={() => onEditClick(account)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors border bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20"
-              >
-                <Edit2 size={13} />
-                Edit Full
-              </button>
-            )}
             <button onClick={() => { setEditMode(false); onClose(); }} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors">
               <X size={20} />
             </button>
@@ -205,6 +204,47 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
                   />
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Opened Date</label>
+                  <input
+                    type="date"
+                    value={editOpenedDate}
+                    onChange={e => setEditOpenedDate(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="border border-white/5 rounded-sm p-4 bg-black/20">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Mark as Closed</span>
+                  <button
+                    onClick={() => setEditIsClosed(c => !c)}
+                    className={clsx(
+                      'w-10 h-5 rounded-full transition-all relative',
+                      editIsClosed ? 'bg-red-600' : 'bg-white/10'
+                    )}
+                  >
+                    <span className={clsx(
+                      'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all',
+                      editIsClosed ? 'left-5' : 'left-0.5'
+                    )} />
+                  </button>
+                </div>
+                {editIsClosed && (
+                  <div>
+                    <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Closed Date</label>
+                    <input
+                      type="date"
+                      value={editClosedDate}
+                      onChange={e => setEditClosedDate(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                    />
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-3">Accent Color</label>

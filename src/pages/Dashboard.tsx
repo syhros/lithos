@@ -48,11 +48,6 @@ const GridBox: React.FC<{
                 <div className="text-4xl font-bold text-white tracking-tight">
                     {currencySymbol}{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
-                {plValue !== undefined && plPercent !== undefined && (
-                    <div className={clsx('text-xs font-mono mt-1 flex items-center gap-1', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                        {isProfit ? '+' : ''}{currencySymbol}{(Math.floor(Math.abs(plValue) * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({plPercent.toFixed(1)}%)
-                    </div>
-                )}
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 h-24 w-full px-4 pb-2">
@@ -220,8 +215,8 @@ export const Dashboard: React.FC = () => {
                     {/* Actions Group */}
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
-                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px]", isStale ? "bg-iron-dust shadow-none" : "bg-emerald-vein shadow-emerald-vein animate-pulse")}></div>
-                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-iron-dust" : "text-white")}>
+                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
+                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
                                {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
                            </span>
                         </div>

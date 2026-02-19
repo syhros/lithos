@@ -162,11 +162,11 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-                        <div className="flex items-center gap-3 px-3 py-2">
+                        <div className="flex items-center gap-3 px-4 py-3 bg-[#161618] border border-white/5 rounded-sm">
                             <div className="flex items-center gap-2">
                                 <span className={clsx(
                                     'w-2 h-2 rounded-full animate-pulse',
-                                    loading ? 'bg-yellow-400' : isStale ? 'bg-red-400' : 'bg-emerald-vein'
+                                    loading ? 'bg-yellow-400' : isStale ? 'bg-red-500' : 'bg-emerald-vein'
                                 )} />
                                 <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[2px]">
                                     {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
@@ -205,6 +205,8 @@ export const Investments: React.FC = () => {
                         const acctUp = acctLast >= acctFirst;
                         const acctColor = '#3b82f6';
                         const acctMin = acctChart.length > 0 ? Math.min(...acctChart.map(d => d.value)) * 0.97 : 'auto';
+                        const acctChange = acctLast - acctFirst;
+                        const acctChangePercent = acctFirst > 0 ? (acctChange / acctFirst) * 100 : 0;
 
                         const whole = Math.floor(balance).toLocaleString();
                         const pence = balance.toFixed(2).split('.')[1];
@@ -261,7 +263,7 @@ export const Investments: React.FC = () => {
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
-                                        {acctUp ? '+' : ''}{acctFirst > 0 ? (((acctLast - acctFirst) / acctFirst) * 100).toFixed(2) : '0.00'}% (1M)
+                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctChange).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctChangePercent.toFixed(2)}%)
                                     </div>
                                 </div>
                             </div>
