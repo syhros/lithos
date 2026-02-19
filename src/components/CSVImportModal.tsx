@@ -362,6 +362,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     const errs = validateMapping();
     if (errs.length) { setErrors(errs); return; }
 
+    setStep('confirm');
     setIsLoading(true);
     setLoadingStatus('');
     setErrors([]);
