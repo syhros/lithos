@@ -320,25 +320,72 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     loadUserData();
   }, []);
 
+  const getHoldingsByAccount = (accountId: string) => {
+    const USD_TO_GBP = 1.27;
+    const userCurrency = data.user.currency || 'GBP';
+    const map = new Map<string, any>();
+
+    data.transactions
+      .filter(t => t.type === 'investing' && t.accountId === accountId && t.symbol && t.quantity)
+      .forEach(t => {
+        if (!map.has(t.symbol)) {
+          map.set(t.symbol, {
+            symbol: t.symbol,
+            quantity: 0,
+            totalCost: 0,
+            currency: t.currency || 'GBP'
+          });
+        }
+        const h = map.get(t.symbol)!;
+        h.quantity += t.quantity || 0;
+        h.totalCost += (t.amount || 0);
+        if (t.currency) h.currency = t.currency;
+      });
+
+    return Array.from(map.values()).map(h => {
+      const marketData = currentPrices[h.symbol];
+      const nativeCurrency = marketData?.currency || h.currency || 'GBP';
+      const stockIsUsd = nativeCurrency === 'USD';
+      const userIsUsd = userCurrency === 'USD';
+
+      let fxRate = 1;
+      if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
+      if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+
+      const nativePrice = marketData ? marketData.price : 0;
+      const displayPrice = nativePrice * fxRate;
+      const currentValue = h.quantity * displayPrice;
+
+      return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
+    });
+  };
+
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
 
     data.assets.forEach(asset => {
-      balances[asset.id] = asset.startingValue;
+      if (asset.type === 'investment') {
+        const holdings = getHoldingsByAccount(asset.id);
+        balances[asset.id] = holdings.reduce((sum, h) => sum + h.currentValue, 0);
+      } else {
+        balances[asset.id] = asset.startingValue;
+      }
     });
 
     data.transactions.forEach(tx => {
-      if (tx.accountId && balances[tx.accountId] !== undefined) {
+      if (tx.accountId && balances[tx.accountId] !== undefined && tx.type !== 'investing') {
         balances[tx.accountId] += tx.amount;
       }
     });
 
     return balances;
-  }, [data.assets, data.transactions]);
+  }, [data.assets, data.transactions, currentPrices]);
 
   const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
     const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
     const points: HistoricalPoint[] = [];
+    const USD_TO_GBP = 1.27;
+    const userCurrency = data.user.currency || 'GBP';
 
     for (let i = days; i >= 0; i--) {
       const d = subDays(new Date(), i);
@@ -347,9 +394,53 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       let checking = 0, savings = 0, investing = 0;
 
       data.assets.forEach(asset => {
-        if (asset.type === 'checking') checking += asset.startingValue;
-        else if (asset.type === 'savings') savings += asset.startingValue;
-        else if (asset.type === 'investment') investing += asset.startingValue;
+        if (asset.type === 'checking') {
+          checking += asset.startingValue;
+          data.transactions
+            .filter(t => t.accountId === asset.id && t.type !== 'investing' && new Date(t.date) <= d)
+            .forEach(t => { checking += t.amount; });
+        }
+        else if (asset.type === 'savings') {
+          savings += asset.startingValue;
+          data.transactions
+            .filter(t => t.accountId === asset.id && t.type !== 'investing' && new Date(t.date) <= d)
+            .forEach(t => { savings += t.amount; });
+        }
+        else if (asset.type === 'investment') {
+          const investingTxns = data.transactions
+            .filter(t => t.type === 'investing' && t.accountId === asset.id && t.symbol && t.quantity && new Date(t.date) <= d);
+
+          const holdings = new Map<string, any>();
+          investingTxns.forEach(t => {
+            if (!holdings.has(t.symbol!)) {
+              holdings.set(t.symbol!, {
+                symbol: t.symbol,
+                quantity: 0,
+                currency: t.currency || 'GBP'
+              });
+            }
+            const h = holdings.get(t.symbol!)!;
+            h.quantity += t.quantity || 0;
+          });
+
+          Array.from(holdings.values()).forEach(h => {
+            const historicalData = historicalPrices[h.symbol] || {};
+            const priceOnDate = historicalData[dateStr];
+            if (priceOnDate !== undefined) {
+              const marketData = currentPrices[h.symbol];
+              const nativeCurrency = marketData?.currency || h.currency || 'GBP';
+              const stockIsUsd = nativeCurrency === 'USD';
+              const userIsUsd = userCurrency === 'USD';
+
+              let fxRate = 1;
+              if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
+              if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+
+              const displayPrice = priceOnDate * fxRate;
+              investing += h.quantity * displayPrice;
+            }
+          });
+        }
       });
 
       let assets = checking + savings + investing;
