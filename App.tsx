@@ -15,7 +15,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     <div className="grid grid-cols-[280px_1fr] h-screen w-full bg-slate gap-[2px] p-[2px] overflow-hidden">
       <Sidebar />
       
-      <main className="strata-panel relative h-full overflow-y-auto flex flex-col bg-gradient-to-b from-[#131517] to-shale">
+      <main className="strata-panel relative h-full overflow-hidden flex flex-col bg-gradient-to-b from-[#131517] to-shale">
         {/* Children content area */}
         <div className="flex-1 min-h-0">
             {children}
@@ -26,7 +26,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
-  <div className="p-16 max-w-7xl mx-auto slide-up">
+  <div className="p-16 max-w-7xl mx-auto h-full slide-up overflow-y-auto custom-scrollbar">
     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
     <h1 className="text-4xl font-bold text-white tracking-tight mb-4">{title}</h1>
     <div className="mt-12 border border-dashed border-white/10 rounded-sm h-64 flex items-center justify-center text-iron-dust font-mono text-xs bg-quartz uppercase tracking-widest">

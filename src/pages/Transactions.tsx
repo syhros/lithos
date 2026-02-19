@@ -26,7 +26,7 @@ export const Transactions: React.FC = () => {
   });
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col slide-up relative">
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
         <div>
           <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>

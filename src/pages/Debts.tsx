@@ -7,7 +7,7 @@ export const Debts: React.FC = () => {
     const debts = data.debts;
 
     return (
-        <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up">
+        <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
              <div className="mb-12">
                 <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
                 <h1 className="text-4xl font-bold text-white tracking-tight">Debts & Liabilities</h1>
