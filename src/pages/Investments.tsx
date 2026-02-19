@@ -77,9 +77,18 @@ export const Investments: React.FC = () => {
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
             <div className="flex items-end justify-between mb-12">
-                <div>
-                    <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
-                    <h1 className="text-4xl font-bold text-white tracking-tight">Investments</h1>
+                <div className="flex items-end gap-6">
+                    <div>
+                        <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
+                        <h1 className="text-4xl font-bold text-white tracking-tight">Investments</h1>
+                    </div>
+                    <button
+                        onClick={() => setIsAddAccountModalOpen(true)}
+                        className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)] mb-1"
+                    >
+                        <Plus size={14} />
+                        Add Account
+                    </button>
                 </div>
                 <div className="text-right">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
@@ -94,13 +103,6 @@ export const Investments: React.FC = () => {
                         <Wallet size={16} className="text-magma" />
                         Accounts
                     </h2>
-                    <button 
-                        onClick={() => setIsAddAccountModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-sm text-xs font-mono text-white uppercase tracking-wider transition-colors"
-                    >
-                        <Plus size={14} />
-                        Add Account
-                    </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {investmentAssets.map(asset => {
@@ -214,9 +216,10 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
             
-            <AddAccountModal 
-                isOpen={isAddAccountModalOpen} 
-                onClose={() => setIsAddAccountModalOpen(false)} 
+            <AddAccountModal
+                isOpen={isAddAccountModalOpen}
+                onClose={() => setIsAddAccountModalOpen(false)}
+                defaultType="investing"
             />
             
             <HoldingDetailModal

@@ -1,11 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
+
+type AccountType = 'checking' | 'savings' | 'investing';
 
 interface AddAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
+  defaultType?: AccountType;
 }
 
-export const AddAccountModal: React.FC<AddAccountModalProps> = ({ isOpen, onClose }) => {
+export const AddAccountModal: React.FC<AddAccountModalProps> = ({ isOpen, onClose, defaultType = 'checking' }) => {
+  const [type, setType] = useState<AccountType>(defaultType);
+
   if (!isOpen) return null;
 
   return (
@@ -19,9 +24,14 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({ isOpen, onClos
           </div>
           <div>
             <label className="block text-xs font-mono text-iron-dust mb-2">Type</label>
-            <select className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-              <option>Checking</option>
-              <option>Savings</option>
+            <select
+              value={type}
+              onChange={e => setType(e.target.value as AccountType)}
+              className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
+            >
+              <option value="checking">Checking</option>
+              <option value="savings">Savings</option>
+              <option value="investing">Investing</option>
             </select>
           </div>
           <div className="flex gap-4 mt-8">
