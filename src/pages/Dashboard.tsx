@@ -98,6 +98,7 @@ const ActivityItem: React.FC<{
     currencySymbol: string;
 }> = ({ title, subtitle, amount, currencySymbol }) => {
     const isPositive = amount > 0;
+    const truncatedTitle = title.length > 24 ? title.substring(0, 24) + '...' : title;
     return (
         <div className="flex justify-between items-center py-4 border-b border-white/5 last:border-0 group cursor-pointer hover:bg-white/[0.02] px-2 -mx-2 rounded-sm transition-colors">
             <div className="flex items-center gap-3">
@@ -105,7 +106,7 @@ const ActivityItem: React.FC<{
                     {isPositive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
                 </div>
                 <div>
-                    <h4 className="text-xs font-bold text-white mb-0.5 group-hover:text-magma transition-colors">{title}</h4>
+                    <h4 className="text-xs font-bold text-white mb-0.5 group-hover:text-magma transition-colors">{truncatedTitle}</h4>
                     <p className="font-mono text-[9px] text-iron-dust uppercase tracking-wider">{subtitle}</p>
                 </div>
             </div>

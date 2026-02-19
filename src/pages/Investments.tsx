@@ -196,7 +196,11 @@ export const Investments: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {investmentAssets.map(asset => {
-                        const balance = currentBalances[asset.id] || 0;
+                        const acctHoldings = holdings.filter(h => {
+                          const holdingTx = data.transactions.find(t => t.symbol === h.symbol && t.type === 'investing' && t.accountId === asset.id);
+                          return holdingTx !== undefined;
+                        });
+                        const balance = acctHoldings.reduce((sum, h) => sum + h.currentValue, 0);
                         const acctChart = accountChartData[asset.id] || [];
                         const acctFirst = acctChart[0]?.value ?? 0;
                         const acctLast = acctChart[acctChart.length - 1]?.value ?? 0;
