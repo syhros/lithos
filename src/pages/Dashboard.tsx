@@ -25,13 +25,14 @@ const Sparkline: React.FC<{ data: any[], dataKey: string, color: string, classNa
     </div>
 );
 
-const GridBox: React.FC<{ 
-    label: string; 
-    value: number; 
+const GridBox: React.FC<{
+    label: string;
+    value: number;
     color: string;
     history: any[];
     dataKey: string;
-}> = ({ label, value, color, history, dataKey }) => {
+    currencySymbol: string;
+}> = ({ label, value, color, history, dataKey, currencySymbol }) => {
     return (
         <div className="group relative bg-[#161618] border border-white/5 p-6 rounded-sm h-[220px] flex flex-col justify-between overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:bg-[#1a1c1e]">
             {/* Dynamic Accent Line: slides up/fills on hover */}
@@ -40,7 +41,7 @@ const GridBox: React.FC<{
             <div className="relative z-10">
                 <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[3px] block mb-2 group-hover:text-white transition-colors">{label}</span>
                 <div className="text-4xl font-bold text-white tracking-tight">
-                    £{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    {currencySymbol}{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
             </div>
             
@@ -55,7 +56,8 @@ const ActivityItem: React.FC<{
     title: string;
     subtitle: string;
     amount: number;
-}> = ({ title, subtitle, amount }) => {
+    currencySymbol: string;
+}> = ({ title, subtitle, amount, currencySymbol }) => {
     const isPositive = amount > 0;
     return (
         <div className="flex justify-between items-center py-4 border-b border-white/5 last:border-0 group cursor-pointer hover:bg-white/[0.02] px-2 -mx-2 rounded-sm transition-colors">
@@ -69,13 +71,13 @@ const ActivityItem: React.FC<{
                 </div>
             </div>
             <div className={`font-mono text-xs font-bold ${isPositive ? 'text-emerald-vein' : 'text-white'}`}>
-                {amount > 0 ? '+' : ''}£{Math.abs(amount).toFixed(2)}
+                {amount > 0 ? '+' : ''}{currencySymbol}{Math.abs(amount).toFixed(2)}
             </div>
         </div>
     );
 };
 
-const BillItem: React.FC<{ name: string; date: string; amount: number }> = ({ name, date, amount }) => (
+const BillItem: React.FC<{ name: string; date: string; amount: number; currencySymbol: string }> = ({ name, date, amount, currencySymbol }) => (
     <div className="flex justify-between items-center py-3 border-b border-white/5 last:border-0">
         <div className="flex items-center gap-3">
             <Calendar size={14} className="text-iron-dust" />
@@ -84,23 +86,23 @@ const BillItem: React.FC<{ name: string; date: string; amount: number }> = ({ na
                 <p className="font-mono text-[9px] text-iron-dust">Due {format(new Date(date), 'MMM dd')}</p>
             </div>
         </div>
-        <div className="font-mono text-xs text-white">£{amount}</div>
+        <div className="font-mono text-xs text-white">{currencySymbol}{amount}</div>
     </div>
 );
 
 // --- Custom Tooltips ---
 
-const CustomSpendingTooltip = ({ active, payload, label, data }: any) => {
+const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }: any) => {
     if (active && payload && payload.length) {
         const currentItem = payload[0].payload;
         // Find current index to compare with previous
         const index = data.findIndex((d: any) => d.name === currentItem.name);
         const prevItem = data[index - 1];
-        
+
         // Calculate % change
         let pctChange = 0;
         let isUp = false;
-        
+
         if (prevItem && prevItem.amount > 0) {
             pctChange = ((currentItem.amount - prevItem.amount) / prevItem.amount) * 100;
             isUp = pctChange > 0;
@@ -112,7 +114,7 @@ const CustomSpendingTooltip = ({ active, payload, label, data }: any) => {
                     {currentItem.fullName}
                 </p>
                 <p className="text-[10px] text-iron-dust font-mono mb-1">
-                    Amount: <span className="text-white">£{currentItem.amount.toLocaleString()}</span>
+                    Amount: <span className="text-white">{currencySymbol}{currentItem.amount.toLocaleString()}</span>
                 </p>
                 {prevItem && (
                     <p className={clsx("text-[10px] font-mono font-bold flex items-center gap-1", isUp ? "text-magma" : "text-emerald-vein")}>
@@ -128,7 +130,7 @@ const CustomSpendingTooltip = ({ active, payload, label, data }: any) => {
 // --- Main Dashboard ---
 
 export const Dashboard: React.FC = () => {
-  const { data, getTotalNetWorth, currentBalances, getHistory, lastUpdated, refreshData, loading } = useFinance();
+  const { data, getTotalNetWorth, currentBalances, getHistory, lastUpdated, refreshData, loading, currencySymbol } = useFinance();
   
   // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
@@ -211,7 +213,7 @@ export const Dashboard: React.FC = () => {
                 </div>
 
                 <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                    £{parseInt(nwInt).toLocaleString()}
+                    {currencySymbol}{parseInt(nwInt).toLocaleString()}
                     <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
                 </h1>
             </div>
@@ -284,12 +286,12 @@ export const Dashboard: React.FC = () => {
                                     tick={{fill: '#8e8e93', fontSize: 10, fontFamily: 'JetBrains Mono'}} 
                                     tickLine={false} 
                                     axisLine={false} 
-                                    tickFormatter={(val) => `£${val/1000}k`}
+                                    tickFormatter={(val) => `${currencySymbol}${val/1000}k`}
                                 />
-                                <Tooltip 
+                                <Tooltip
                                     contentStyle={{ backgroundColor: '#1a1c1e', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '12px', fontFamily: 'JetBrains Mono' }}
                                     itemStyle={{ padding: 0, textTransform: 'capitalize' }}
-                                    formatter={(value: number, name: string) => [`£${value.toLocaleString()}`, name]}
+                                    formatter={(value: number, name: string) => [`${currencySymbol}${value.toLocaleString()}`, name]}
                                 />
                                 {visibleSeries.assets && (
                                     <Area type="monotone" name="Assets" dataKey="assets" stroke="#d4af37" strokeWidth={2} fill="url(#gradAsset)" isAnimationActive={true} />
@@ -308,33 +310,37 @@ export const Dashboard: React.FC = () => {
 
             {/* 3. Asset/Liability Grid (2x2) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 slide-up" style={{ animationDelay: '0.2s' }}>
-                <GridBox 
-                    label="Accounts" 
-                    value={currentBalances['1']} 
-                    color="#00f2ad" 
-                    history={historyData} 
-                    dataKey="checking" 
+                <GridBox
+                    label="Accounts"
+                    value={currentBalances['1']}
+                    color="#00f2ad"
+                    history={historyData}
+                    dataKey="checking"
+                    currencySymbol={currencySymbol}
                 />
-                <GridBox 
-                    label="Savings" 
-                    value={currentBalances['2']} 
-                    color="#d4af37" 
-                    history={historyData} 
-                    dataKey="savings" 
+                <GridBox
+                    label="Savings"
+                    value={currentBalances['2']}
+                    color="#d4af37"
+                    history={historyData}
+                    dataKey="savings"
+                    currencySymbol={currencySymbol}
                 />
-                <GridBox 
-                    label="Stocks" 
-                    value={currentBalances['3']} 
-                    color="#3b82f6" 
-                    history={historyData} 
-                    dataKey="investing" 
+                <GridBox
+                    label="Stocks"
+                    value={currentBalances['3']}
+                    color="#3b82f6"
+                    history={historyData}
+                    dataKey="investing"
+                    currencySymbol={currencySymbol}
                 />
-                <GridBox 
-                    label="Liabilities" 
-                    value={currentBalances['4']} 
-                    color="#ff4d00" 
-                    history={historyData} 
-                    dataKey="debts" 
+                <GridBox
+                    label="Liabilities"
+                    value={currentBalances['4']}
+                    color="#ff4d00"
+                    history={historyData}
+                    dataKey="debts"
+                    currencySymbol={currencySymbol}
                 />
             </div>
         </div>
@@ -352,11 +358,12 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                     {data.transactions.slice(0, 6).map(tx => (
-                        <ActivityItem 
-                            key={tx.id} 
-                            title={tx.description.split('-')[0].trim()} 
-                            subtitle={tx.category} 
-                            amount={tx.amount} 
+                        <ActivityItem
+                            key={tx.id}
+                            title={tx.description.split('-')[0].trim()}
+                            subtitle={tx.category}
+                            amount={tx.amount}
+                            currencySymbol={currencySymbol}
                         />
                     ))}
                 </div>
@@ -372,7 +379,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                     {data.bills.slice(0, 5).map(bill => (
-                        <BillItem key={bill.id} name={bill.name} date={bill.dueDate} amount={bill.amount} />
+                        <BillItem key={bill.id} name={bill.name} date={bill.dueDate} amount={bill.amount} currencySymbol={currencySymbol} />
                     ))}
                 </div>
             </div>
@@ -385,7 +392,7 @@ export const Dashboard: React.FC = () => {
                         <BarChart data={spendingTrend}>
                             <Tooltip 
                                 cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                                content={<CustomSpendingTooltip data={spendingTrend} />}
+                                content={<CustomSpendingTooltip data={spendingTrend} currencySymbol={currencySymbol} />}
                             />
                             <Bar dataKey="amount" radius={[2, 2, 0, 0]}>
                                 {spendingTrend.map((entry, index) => (

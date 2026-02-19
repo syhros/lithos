@@ -1,13 +1,13 @@
 
 import React, { useMemo, useState } from 'react';
-import { useFinance, USD_TO_GBP } from '../context/FinanceContext';
+import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart, Wallet, TrendingUp, TrendingDown, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 
 export const Investments: React.FC = () => {
-    const { data, currentBalances, currentPrices } = useFinance();
+    const { data, currentBalances, currentPrices, currencySymbol } = useFinance();
     const userCurrency = data.user.currency;
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
@@ -71,7 +71,6 @@ export const Investments: React.FC = () => {
     }, [data.transactions, currentPrices]);
 
     const portfolioValue = holdings.reduce((acc, curr) => acc + curr.currentValue, 0);
-    const userCurrencySymbol = userCurrency === 'USD' ? '$' : '£';
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -82,7 +81,7 @@ export const Investments: React.FC = () => {
                     <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>
                     <span className="mb-4 font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
                     <p className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                        {userCurrencySymbol}{parseInt(portfolioValue.toString()).toLocaleString()}
+                        {currencySymbol}{parseInt(portfolioValue.toString()).toLocaleString()}
                         <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
                     </p>
                 </div>
@@ -123,7 +122,7 @@ export const Investments: React.FC = () => {
                                     <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
                                     <p className="text-xs text-iron-dust font-mono mb-6">{asset.currency} • ISA</p>
                                     <div className="text-3xl font-bold text-white tracking-tight">
-                                        £{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </div>
                                 </div>
                             </div>
@@ -142,7 +141,7 @@ export const Investments: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {holdings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
-                        const nativeSymbol = stock.nativeCurrency === 'USD' ? '$' : '£';
+                        const nativeSymbol = getCurrencySymbol(stock.nativeCurrency);
                         const dayChange = stock.marketData?.changePercent ?? 0;
                         const isDayUp = dayChange >= 0;
                         return (
@@ -173,7 +172,7 @@ export const Investments: React.FC = () => {
                                 {/* Main Value (Big) */}
                                 <div className="mb-6">
                                     <div className="text-4xl font-bold text-white tracking-tight">
-                                        {userCurrencySymbol}{stock.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        {currencySymbol}{stock.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                         <span className="text-lg text-iron-dust opacity-50">.{(stock.currentValue % 1).toFixed(2).substring(2)}</span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-1">
@@ -195,7 +194,7 @@ export const Investments: React.FC = () => {
                                     </div>
                                     <div className="text-right">
                                         <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Avg Price</span>
-                                        <span className="font-mono text-xs text-white">{userCurrencySymbol}{stock.avgPrice.toFixed(2)}</span>
+                                        <span className="font-mono text-xs text-white">{currencySymbol}{stock.avgPrice.toFixed(2)}</span>
                                     </div>
 
                                     <div>
@@ -205,7 +204,7 @@ export const Investments: React.FC = () => {
                                     <div className="text-right">
                                         <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Profit/Loss</span>
                                         <span className={clsx("font-mono text-xs", isProfit ? "text-emerald-vein" : "text-magma")}>
-                                            {isProfit ? '+' : ''}{userCurrencySymbol}{stock.profitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            {isProfit ? '+' : ''}{currencySymbol}{stock.profitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 </div>

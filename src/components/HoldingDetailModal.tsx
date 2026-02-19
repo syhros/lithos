@@ -3,7 +3,7 @@ import { X, Calendar, DollarSign } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, eachDayOfInterval, isBefore, parseISO, addDays, subWeeks, subMonths } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance, USD_TO_GBP } from '../context/FinanceContext';
+import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
 
 type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 type ChartMode = 'VALUE' | 'STOCK';
@@ -46,7 +46,7 @@ const getDateFormat = (range: TimeRange): string => {
   }
 };
 
-const CustomTooltip = ({ active, payload, label, mode, nativeCurrency }: any) => {
+const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, nativeSymbol }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
     const isUsd = nativeCurrency === 'USD';
@@ -55,19 +55,17 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency }: any) =>
         <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest mb-2">{label}</p>
         <p className="text-xs font-bold text-white font-mono">
           {mode === 'VALUE'
-            ? `£${value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-            : isUsd
-              ? `$${value?.toFixed(2)}`
-              : `£${value?.toFixed(2)}`
+            ? `${currencySymbol}${value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+            : `${nativeSymbol}${value?.toFixed(2)}`
           }
         </p>
         {mode === 'STOCK' && isUsd && (
           <p className="text-[9px] font-mono text-iron-dust mt-0.5">
-            ≈ £{(value * USD_TO_GBP)?.toFixed(2)} GBP
+            ≈ {currencySymbol}{(value * USD_TO_GBP)?.toFixed(2)} GBP
           </p>
         )}
         <p className="text-[9px] font-mono text-iron-dust mt-0.5 uppercase">
-          {mode === 'VALUE' ? 'Portfolio Value (GBP)' : `Stock Price (${nativeCurrency || 'GBP'})`}
+          {mode === 'VALUE' ? `Portfolio Value (${nativeCurrency || 'GBP'})` : `Stock Price (${nativeCurrency || 'GBP'})`}
         </p>
       </div>
     );
@@ -76,7 +74,7 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency }: any) =>
 };
 
 export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, onClose, holding }) => {
-  const { data, historicalPrices, currentPrices } = useFinance();
+  const { data, historicalPrices, currentPrices, currencySymbol } = useFinance();
   const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
   const [chartMode, setChartMode] = useState<ChartMode>('VALUE');
 
@@ -184,13 +182,13 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
             <div className="text-right">
               <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Current Value</span>
               <span className="text-2xl font-bold text-white tracking-tight">
-                £{holding.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                {currencySymbol}{holding.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </span>
             </div>
             <div className="text-right">
               <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Total Return</span>
               <span className={clsx('text-xl font-bold font-mono', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                {isProfit ? '+' : ''}£{holding.profitValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                {isProfit ? '+' : ''}{currencySymbol}{holding.profitValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </span>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors ml-4">
@@ -264,11 +262,11 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                       domain={[chartMin, 'auto']}
                       tickFormatter={(val) =>
                         chartMode === 'VALUE'
-                          ? `£${(val / 1000).toFixed(0)}k`
+                          ? `${currencySymbol}${(val / 1000).toFixed(0)}k`
                           : `${nativeSymbol}${val.toFixed(0)}`
                       }
                     />
-                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} />} />
+                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} nativeSymbol={nativeSymbol} />} />
                     <Area
                       key={chartMode}
                       type="monotone"
@@ -300,7 +298,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                 <span className="text-lg font-mono text-white">{nativeSymbol}{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
                 {isUsd && (
                   <span className="text-[10px] font-mono text-iron-dust block">
-                    ≈ £{((currentPrices[holding.symbol]?.price || 0) * USD_TO_GBP).toFixed(2)}
+                    ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) * USD_TO_GBP).toFixed(2)}
                   </span>
                 )}
               </div>
@@ -333,10 +331,10 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-bold text-white">
-                      {tx.quantity ? `${tx.quantity.toFixed(2)} shares` : ''} @ {tx.currency === 'USD' ? '$' : '£'}{tx.price?.toFixed(2)}
+                      {tx.quantity ? `${tx.quantity.toFixed(2)} shares` : ''} @ {getCurrencySymbol(tx.currency || 'GBP')}{tx.price?.toFixed(2)}
                     </p>
                     <p className="text-[10px] font-mono text-iron-dust">
-                      Total: £{Math.abs(tx.amount).toLocaleString()}
+                      Total: {currencySymbol}{Math.abs(tx.amount).toLocaleString()}
                     </p>
                   </div>
                 </div>

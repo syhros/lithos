@@ -42,6 +42,9 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
+
+  // Currency
+  currencySymbol: string;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -49,6 +52,14 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 // --- Helpers ---
 
 export const USD_TO_GBP = 0.74;
+
+export const getCurrencySymbol = (currency: string): string => {
+    switch (currency) {
+        case 'USD': return '$';
+        case 'EUR': return '€';
+        default: return '£';
+    }
+};
 
 // Forward Fill Algorithm for missing historical prices (e.g., weekends)
 const getPriceAtDate = (dateStr: string, history: Record<string, number>, lastKnown: number): number => {
@@ -468,8 +479,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   return (
-    <FinanceContext.Provider value={{ 
-      data, 
+    <FinanceContext.Provider value={{
+      data,
       loading,
       lastUpdated,
       currentPrices,
@@ -480,7 +491,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       addTransaction,
       deleteTransaction,
       updateUserProfile,
-      refreshData
+      refreshData,
+      currencySymbol: getCurrencySymbol(data.user.currency)
     }}>
       {children}
     </FinanceContext.Provider>

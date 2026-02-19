@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 import { AddTransactionModal } from '../components/AddTransactionModal';
 
 export const Transactions: React.FC = () => {
-  const { data, deleteTransaction } = useFinance();
+  const { data, deleteTransaction, currencySymbol } = useFinance();
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
@@ -114,7 +114,7 @@ export const Transactions: React.FC = () => {
                     "py-4 px-6 text-sm font-mono font-bold text-right",
                     tx.amount > 0 ? "text-emerald-vein" : tx.type === 'investing' ? "text-white" : "text-white"
                   )}>
-                    {tx.amount > 0 ? '+' : ''}£{Math.abs(tx.amount).toFixed(2)}
+                    {tx.amount > 0 ? '+' : ''}{currencySymbol}{Math.abs(tx.amount).toFixed(2)}
                   </td>
                   <td className="py-4 px-6 text-right">
                     <button 

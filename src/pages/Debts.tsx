@@ -3,7 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { CreditCard, AlertCircle } from 'lucide-react';
 
 export const Debts: React.FC = () => {
-    const { data, currentBalances } = useFinance();
+    const { data, currentBalances, currencySymbol } = useFinance();
     const debts = data.debts;
 
     return (
@@ -33,8 +33,8 @@ export const Debts: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <span className="block text-3xl font-bold text-white tracking-tight">£{balance.toLocaleString()}</span>
-                                    <span className="text-xs text-iron-dust font-mono">of £{debt.limit.toLocaleString()} limit</span>
+                                    <span className="block text-3xl font-bold text-white tracking-tight">{currencySymbol}{balance.toLocaleString()}</span>
+                                    <span className="text-xs text-iron-dust font-mono">of {currencySymbol}{debt.limit.toLocaleString()} limit</span>
                                 </div>
                              </div>
 
@@ -57,7 +57,7 @@ export const Debts: React.FC = () => {
                                      </div>
                                      <div>
                                          <span className="block text-[10px] text-iron-dust uppercase font-bold mb-1">Min Payment</span>
-                                         <span className="text-sm text-white font-mono">£{debt.minPayment}</span>
+                                         <span className="text-sm text-white font-mono">{currencySymbol}{debt.minPayment}</span>
                                      </div>
                                  </div>
                              </div>

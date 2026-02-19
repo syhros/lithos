@@ -11,7 +11,7 @@ interface AddTransactionModalProps {
 }
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose }) => {
-  const { data, addTransaction } = useFinance();
+  const { data, addTransaction, currencySymbol } = useFinance();
   
   // -- Form State --
   const [type, setType] = useState<TransactionType>('expense');
@@ -416,7 +416,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     <div>
                         <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
                         <div className="relative">
-                            <span className="absolute left-3 top-3 text-iron-dust text-xs">£</span>
+                            <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
                             <input 
                                 type="number" 
                                 placeholder="0.00"
@@ -482,7 +482,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div>
                     <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
                     <div className="relative">
-                        <span className="absolute left-3 top-3 text-iron-dust text-xs">£</span>
+                        <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
                         <input 
                             type="number" 
                             placeholder="0.00"
@@ -520,13 +520,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost</span>
                     {investCurrency === 'USD' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = £{USD_TO_GBP}
+                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{USD_TO_GBP}
                         </span>
                     )}
                 </div>
                 <div className="flex items-center gap-2">
                      <Calculator size={14} className="text-magma" />
-                     <span className="text-xl font-bold text-white font-mono">£{amount || '0.00'}</span>
+                     <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
                 </div>
             </div>
           )}

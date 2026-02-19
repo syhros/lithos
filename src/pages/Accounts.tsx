@@ -4,7 +4,7 @@ import { Plus, Wallet } from 'lucide-react';
 import { AddAccountModal } from '../components/AddAccountModal';
 
 export const Accounts: React.FC = () => {
-    const { data, currentBalances } = useFinance();
+    const { data, currentBalances, currencySymbol } = useFinance();
     const [showAddModal, setShowAddModal] = useState(false);
 
     // Filter for Checking and Savings
@@ -46,7 +46,7 @@ export const Accounts: React.FC = () => {
                                 <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
                                 <p className="text-xs text-iron-dust font-mono mb-6">{asset.institution}</p>
                                 <div className="text-3xl font-bold text-white tracking-tight">
-                                    £{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </div>
                         </div>
