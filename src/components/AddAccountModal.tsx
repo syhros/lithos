@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { AssetType, Currency, DebtType, MinPaymentType, Debt } from '../data/mockData';
@@ -45,6 +45,24 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   const [promoApr, setPromoApr] = useState('0');
   const [promoEndDate, setPromoEndDate] = useState('');
 
+  const resetForm = useCallback(() => {
+    setName('');
+    setInstitution('');
+    setStartingValue('');
+    setCurrency('GBP');
+    setColor(COLORS[0]);
+    setInterestRate('');
+    setDebtType('credit_card');
+    setDebtLimit('');
+    setDebtApr('');
+    setDebtMinPaymentType('fixed');
+    setDebtMinPaymentValue('');
+    setDebtStarting('');
+    setHasPromo(false);
+    setPromoApr('0');
+    setPromoEndDate('');
+  }, []);
+
   useEffect(() => {
     if (isEditing && debtToEdit) {
       setName(debtToEdit.name);
@@ -61,27 +79,9 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
     } else if (!isOpen) {
       resetForm();
     }
-  }, [isEditing, debtToEdit, isOpen]);
+  }, [isEditing, debtToEdit, isOpen, resetForm]);
 
   if (!isOpen) return null;
-
-  const resetForm = () => {
-    setName('');
-    setInstitution('');
-    setStartingValue('');
-    setCurrency('GBP');
-    setColor(COLORS[0]);
-    setInterestRate('');
-    setDebtType('credit_card');
-    setDebtLimit('');
-    setDebtApr('');
-    setDebtMinPaymentType('fixed');
-    setDebtMinPaymentValue('');
-    setDebtStarting('');
-    setHasPromo(false);
-    setPromoApr('0');
-    setPromoEndDate('');
-  };
 
   const handleSave = () => {
     if (!name) return;
