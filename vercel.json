@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "api/live.ts": {
+      "includeFiles": "node_modules/yahoo-finance2/**"
+    },
+    "api/history.ts": {
+      "includeFiles": "node_modules/yahoo-finance2/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

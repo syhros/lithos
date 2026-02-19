@@ -116,7 +116,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             let liveApiAvailable = false;
 
             try {
-                const res = await fetch(`/api/live?symbols=${uniqueSymbols.join(',')}`);
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+                const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
+                    headers: { 'Authorization': `Bearer ${supabaseKey}` }
+                });
                 if (res.ok) {
                     fetchedPrices = await res.json();
                     liveApiAvailable = true;
@@ -172,7 +176,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 // 2. Supabase miss — call API route (which will also write to Supabase cache)
                 if (liveApiAvailable) {
                     try {
-                        const hRes = await fetch(`/api/history?symbol=${sym}&from=${period1}`);
+                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+                        const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
+                            headers: { 'Authorization': `Bearer ${supabaseKey}` }
+                        });
                         if (hRes.ok) {
                             const rows: { date: string; close: number }[] = await hRes.json();
                             rows.forEach(row => { history[row.date] = row.close; });
