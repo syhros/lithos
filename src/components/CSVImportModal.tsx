@@ -39,7 +39,6 @@ const INVESTMENT_FIELDS: FieldDef[] = [
   { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, dividend — defaults to buy if blank' },
   { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
-  { key: 'category',    label: 'Asset Type',   required: false, description: 'Stock, ETF, Crypto...' },
   { key: 'time',        label: 'Time',         required: false, description: 'HH:MM — map to same column as Date to extract time from datetime' },
 ];
 
@@ -105,8 +104,9 @@ const AUTO_MAPPING: Record<string, string[]> = {
   amount:      ['amount', 'value', 'transaction amount', 'debit', 'debit amount', 'withdrawals'],
   credit:      ['credit', 'credit amount', 'deposits', 'deposit', 'in'],
   description: ['description', 'merchant', 'payee', 'reference', 'narrative', 'details', 'memo', 'name'],
-  category:    ['category', 'action', 'action type'],
-  type:        ['type', 'transaction type', 'trans type'],
+  category:    ['category', 'action type'],
+  type:        ['transaction type', 'trans type'],
+  tradeType:   ['type', 'action', 'trade type', 'order type'],
   time:        ['time', 'transaction time'],
   accountId:   ['account', 'account name', 'account id'],
   symbol:      ['ticker', 'symbol', 'stock', 'isin'],
@@ -134,9 +134,11 @@ const downloadTemplate = (mode: ImportMode) => {
     csv += '2024-01-01,,4200.00,Tech Solutions Ltd,Salary,08:00,Monzo Current\n';
     csv += '2024-01-20,150.00,,Amex Payment,Payment,12:00,Monzo Current\n';
   } else {
-    csv = 'ticker,date,quantity,price,currency,description,category,time\n';
-    csv += 'AAPL,2024-01-15,10,178.35,USD,Apple Inc.,Stock,14:30\n';
-    csv += 'VUSA.L,2024-01-16,5,62.50,GBP,Vanguard S&P 500,ETF,10:00\n';
+    csv = 'ticker,date,quantity,price,type,currency,description,time\n';
+    csv += 'AAPL,2024-01-15,10,178.35,buy,USD,Apple Inc.,14:30\n';
+    csv += 'VUSA.L,2024-01-16,5,62.50,buy,GBP,Vanguard S&P 500,10:00\n';
+    csv += 'AAPL,2024-02-01,0.5,0.25,dividend,USD,Apple Inc.,09:00\n';
+    csv += 'AAPL,2024-03-10,3,185.00,sell,USD,Apple Inc.,15:45\n';
   }
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -396,8 +398,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const price = cleanNum(getCellValue(row, 'price'));
           const rawCurrency = getCellValue(row, 'currency').toUpperCase() || 'GBP';
           const description = getCellValue(row, 'description') || symbol;
-          const category = getCellValue(row, 'category') || 'Stock';
           const tradeType = resolveTradeType(row);
+          const category = tradeType === 'buy' ? 'Buy' : tradeType === 'sell' ? 'Sell' : 'Dividend';
 
           // Skip rows missing required investment values (e.g. deposit rows in Trading212)
           if (!rawSymbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;

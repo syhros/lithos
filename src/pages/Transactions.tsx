@@ -5,6 +5,8 @@ import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import { AddTransactionModal } from '../components/AddTransactionModal';
 import { CSVImportModal } from '../components/CSVImportModal';
+import { TransactionDetailModal } from '../components/TransactionDetailModal';
+import { Transaction } from '../data/mockData';
 
 export const Transactions: React.FC = () => {
   const { data, deleteTransaction, deleteTransactions, currencySymbol } = useFinance();
@@ -15,6 +17,7 @@ export const Transactions: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
   const accountMap = useMemo(() => {
       const map: Record<string, string> = {};
@@ -173,10 +176,9 @@ export const Transactions: React.FC = () => {
                 return (
                   <tr
                     key={tx.id}
-                    onClick={selectMode ? () => toggleSelect(tx.id) : undefined}
+                    onClick={selectMode ? () => toggleSelect(tx.id) : () => setSelectedTx(tx)}
                     className={clsx(
-                      'group transition-colors',
-                      selectMode ? 'cursor-pointer' : '',
+                      'group transition-colors cursor-pointer',
                       isSelected ? 'bg-magma/5' : 'hover:bg-white/[0.02]'
                     )}
                   >
@@ -212,7 +214,7 @@ export const Transactions: React.FC = () => {
                     <td className="py-4 px-6 text-right">
                       {!selectMode && (
                         <button
-                          onClick={() => deleteTransaction(tx.id)}
+                          onClick={e => { e.stopPropagation(); deleteTransaction(tx.id); }}
                           className="text-iron-dust hover:text-magma opacity-0 group-hover:opacity-100 transition-all"
                           title="Delete"
                         >
@@ -237,6 +239,11 @@ export const Transactions: React.FC = () => {
 
       <AddTransactionModal isOpen={showModal} onClose={() => setShowModal(false)} />
       <CSVImportModal isOpen={showImport} onClose={() => setShowImport(false)} />
+      <TransactionDetailModal
+        transaction={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        onDelete={id => { deleteTransaction(id); setSelectedTx(null); }}
+      />
 
       {showConfirmDelete && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
