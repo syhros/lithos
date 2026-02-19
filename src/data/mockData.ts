@@ -34,14 +34,23 @@ export interface Asset {
   symbol?: string;
 }
 
+export type MinPaymentType = 'fixed' | 'percentage';
+
+export interface PromoOffer {
+  promoApr: number;
+  promoEndDate: string;
+}
+
 export interface Debt {
   id: string;
   name: string;
   type: DebtType;
   limit: number;
   apr: number;
-  minPayment: number;
+  minPaymentType: MinPaymentType;
+  minPaymentValue: number;
   startingValue: number;
+  promo?: PromoOffer;
 }
 
 export interface Bill {
@@ -253,7 +262,7 @@ export const initialData: MockData = {
     { id: '3', name: 'Vanguard ISA', type: 'investment', currency: 'GBP', institution: 'Vanguard', color: '#3b82f6', startingValue: 0.00 }, // Started at 0, filled via txs
   ],
   debts: [
-    { id: '4', name: 'Amex Platinum', type: 'credit_card', limit: 15000, apr: 28.9, minPayment: 100, startingValue: 450.00 }
+    { id: '4', name: 'Amex Platinum', type: 'credit_card', limit: 15000, apr: 28.9, minPaymentType: 'fixed', minPaymentValue: 100, startingValue: 450.00 }
   ],
   transactions: generateLedger(),
   bills: [
