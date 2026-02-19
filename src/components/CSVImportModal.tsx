@@ -205,6 +205,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [loadingStatus, setLoadingStatus] = useState('');
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const importStartedRef = useRef(false);
 
   const activeFields = mode === 'accounts' ? ACCOUNT_FIELDS : INVESTMENT_FIELDS;
 
@@ -219,7 +220,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setStep('upload'); setFileName(''); setCsvHeaders([]); setCsvRows([]);
     setMapping({}); setSelectedAccountId(''); setErrors([]);
     setImportCount(0); setImportStats({ income: 0, expense: 0, netChange: 0, investments: 0 });
-    setTickerOverrides({}); setIsDragging(false);
+    setTickerOverrides({}); setIsDragging(false); importStartedRef.current = false;
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -362,7 +363,6 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     const errs = validateMapping();
     if (errs.length) { setErrors(errs); return; }
 
-    setStep('confirm');
     setIsLoading(true);
     setLoadingStatus('');
     setErrors([]);
@@ -538,7 +538,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   };
 
   useEffect(() => {
-    if (step === 'confirm' && !isLoading) {
+    if (step === 'confirm' && !importStartedRef.current) {
+      importStartedRef.current = true;
       doImport();
     }
   }, [step]);
@@ -1095,9 +1096,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                     });
                     setTickerOverrides(initial);
                   }
+                  importStartedRef.current = false;
                   setStep('confirm');
-                } else if (step === 'confirm') {
-                  doImport();
                 }
               }}
               disabled={step === 'upload' || isLoading}
