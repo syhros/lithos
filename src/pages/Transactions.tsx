@@ -4,6 +4,7 @@ import { Search, Plus, Upload, Trash2, CheckSquare, Square, X } from 'lucide-rea
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import { AddTransactionModal } from '../components/AddTransactionModal';
+import { CSVImportModal } from '../components/CSVImportModal';
 
 export const Transactions: React.FC = () => {
   const { data, deleteTransaction, deleteTransactions, currencySymbol } = useFinance();
@@ -13,6 +14,7 @@ export const Transactions: React.FC = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const accountMap = useMemo(() => {
       const map: Record<string, string> = {};
@@ -78,7 +80,10 @@ export const Transactions: React.FC = () => {
             <CheckSquare size={14} />
             {selectMode ? 'Cancel' : 'Select'}
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-shale border border-white/10 rounded-sm text-xs font-bold uppercase tracking-wider text-white hover:bg-white/5 transition-colors">
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-shale border border-white/10 rounded-sm text-xs font-bold uppercase tracking-wider text-white hover:bg-white/5 transition-colors"
+          >
             <Upload size={14} />
             Import CSV
           </button>
@@ -231,6 +236,7 @@ export const Transactions: React.FC = () => {
       </div>
 
       <AddTransactionModal isOpen={showModal} onClose={() => setShowModal(false)} />
+      <CSVImportModal isOpen={showImport} onClose={() => setShowImport(false)} />
 
       {showConfirmDelete && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
