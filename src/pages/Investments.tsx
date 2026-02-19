@@ -181,8 +181,8 @@ export const Investments: React.FC = () => {
 
                                 {/* Background chart — full tile, fades in left-to-right via CSS mask */}
                                 <div
-                                    className="absolute inset-0 pointer-events-none"
-                                    style={{ maskImage: 'linear-gradient(to right, transparent 0%, black 55%)', WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%)' }}
+                                    className="absolute bottom-0 right-0 pointer-events-none"
+                                    style={{ width: '75%', height: '70%', opacity: 0.75, maskImage: 'linear-gradient(to right, transparent 0%, black 40%)', WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)' }}
                                 >
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={acctChart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
