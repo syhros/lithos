@@ -80,7 +80,7 @@ export const Investments: React.FC = () => {
                 <div>
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Module</span>
                     <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>
-                    <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
+                    <span className="mb-4 font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
                     <p className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
                         {userCurrencySymbol}{parseInt(portfolioValue.toString()).toLocaleString()}
                         <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
