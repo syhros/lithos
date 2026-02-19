@@ -1,10 +1,7 @@
-
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import { initialData, MockData, Transaction, Asset, Debt, UserProfile, currentStockPrices as fallbackPrices } from '../data/mockData';
-import { isBefore, parseISO, subDays, format, isEqual, startOfDay, eachDayOfInterval, addDays } from 'date-fns';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { MockData, Transaction, Asset, Debt, Bill, UserProfile, currentStockPrices as fallbackPrices, TransactionType, AssetType, Currency, DebtType, Frequency, MinPaymentType } from '../data/mockData';
+import { subDays, format } from 'date-fns';
 import { supabase } from '../lib/supabase';
-
-// --- Interfaces ---
 
 interface MarketData {
     price: number;
@@ -27,17 +24,14 @@ interface FinanceContextType {
   data: MockData;
   loading: boolean;
   lastUpdated: Date;
-  
-  // Data State
+
   currentPrices: Record<string, MarketData>;
   currentBalances: { [key: string]: number };
   historicalPrices: Record<string, Record<string, number>>;
-  
-  // Aggregators
+
   getHistory: (range: '1W' | '1M' | '1Y') => HistoricalPoint[];
   getTotalNetWorth: () => number;
-  
-  // Actions
+
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
   deleteTransaction: (id: string) => void;
   deleteTransactions: (ids: string[]) => void;
@@ -53,13 +47,10 @@ interface FinanceContextType {
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
-  // Currency
   currencySymbol: string;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
-
-// --- Helpers ---
 
 export const USD_TO_GBP = 0.74;
 
@@ -71,13 +62,6 @@ export const getCurrencySymbol = (currency: string): string => {
     }
 };
 
-// Forward Fill Algorithm for missing historical prices (e.g., weekends)
-const getPriceAtDate = (dateStr: string, history: Record<string, number>, lastKnown: number): number => {
-    if (history[dateStr] !== undefined) return history[dateStr];
-    return lastKnown;
-};
-
-// Coherent random walk: simulate 365 days of price history ending at `currentPrice`
 const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
     const history: Record<string, number> = {};
     const today = new Date();
@@ -101,416 +85,390 @@ const generateSyntheticHistory = (currentPrice: number): Record<string, number> 
 };
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [data, setData] = useState<MockData>(initialData);
+  const [data, setData] = useState<MockData>({
+    transactions: [],
+    assets: [],
+    debts: [],
+    bills: [],
+    recurring: [],
+    user: { username: '', currency: 'GBP', notifications: 0 }
+  });
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  
-  // Market Data State
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
-  const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({}); // { 'TSLA': { '2023-01-01': 150 } }
+  const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
 
-  // --- 1. Engine Initialization & Sync ---
-  
-  const fetchMarketData = async (force: boolean = false) => {
+  const loadUserData = async () => {
     setLoading(true);
-    
     try {
-        // A. Identify Symbols
-        const uniqueSymbols = Array.from(new Set(
-            data.transactions
-                .filter(t => t.type === 'investing' && t.symbol)
-                .map(t => t.symbol!)
-        ));
+      const { data: { session } } = await supabase.auth.getSession();
 
-        if (uniqueSymbols.length === 0) {
-            setLoading(false);
-            return;
-        }
-
-        // B. Smart Caching Logic (30 mins)
-        const lastSync = localStorage.getItem('lithos_last_sync');
-        const now = Date.now();
-        const shouldFetch = force || !lastSync || (now - parseInt(lastSync) > 30 * 60 * 1000);
-
-        if (shouldFetch) {
-            let fetchedPrices: any = {};
-            let liveApiAvailable = false;
-
-            try {
-                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-                const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
-                    headers: { 'Authorization': `Bearer ${supabaseKey}` }
-                });
-                if (res.ok) {
-                    fetchedPrices = await res.json();
-                    liveApiAvailable = true;
-                } else {
-                    throw new Error(`API returned ${res.status}`);
-                }
-            } catch (e) {
-                console.info("Info: Live API unreachable. Switching to Demo Mode.");
-                uniqueSymbols.forEach(sym => {
-                    const base = fallbackPrices[sym] || 100;
-                    const jitter = (Math.random() * 4) - 2;
-                    fetchedPrices[sym] = {
-                        price: base + jitter,
-                        change: jitter,
-                        changePercent: 0, // will be recalculated after historical load
-                        currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
-                    };
-                });
-            }
-
-            localStorage.setItem('lithos_last_sync', now.toString());
-            setLastUpdated(new Date());
-
-            // C. Historical Backfill — Supabase cache first, then API, then synthetic fallback
-            const historyCache: Record<string, Record<string, number>> = {};
-            const period1 = '2023-01-01';
-
-            await Promise.all(uniqueSymbols.map(async sym => {
-                let history: Record<string, number> = {};
-
-                // 1. Try Supabase cache (anon read, no rate limit)
-                try {
-                    const { data: cached, error } = await supabase
-                        .from('price_history_cache')
-                        .select('date, close')
-                        .eq('symbol', sym)
-                        .gte('date', period1)
-                        .order('date', { ascending: true });
-
-                    if (!error && cached && cached.length > 50) {
-                        cached.forEach((row: { date: string; close: number }) => {
-                            history[row.date] = row.close;
-                        });
-                        console.info(`Loaded cached history for ${sym}: ${cached.length} points`);
-                        historyCache[sym] = history;
-                        return;
-                    }
-                } catch (e) {
-                    console.info(`Supabase cache miss for ${sym}`);
-                }
-
-                // 2. Supabase miss — call API route (which will also write to Supabase cache)
-                if (liveApiAvailable) {
-                    try {
-                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-                        const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
-                            headers: { 'Authorization': `Bearer ${supabaseKey}` }
-                        });
-                        if (hRes.ok) {
-                            const response = await hRes.json();
-                            const rows: { date: string; close: number }[] = response[sym] || [];
-                            rows.forEach(row => { history[row.date] = row.close; });
-                            console.info(`Loaded live history for ${sym}: ${rows.length} points`);
-                        } else {
-                            throw new Error(`History API returned ${hRes.status}`);
-                        }
-                    } catch (e) {
-                        console.info(`History API failed for ${sym}, generating synthetic history.`);
-                        history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
-                    }
-                } else {
-                    history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
-                }
-
-                historyCache[sym] = history;
-            }));
-
-            setHistoricalPrices(historyCache);
-
-            // Recalculate changePercent using yesterday's close from history
-            const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-            const updatedPrices = { ...fetchedPrices };
-            uniqueSymbols.forEach(sym => {
-                const hist = historyCache[sym];
-                const currentPrice = updatedPrices[sym]?.price;
-                if (hist && currentPrice) {
-                    const prevClose = hist[yesterday];
-                    if (prevClose && prevClose > 0) {
-                        const chg = currentPrice - prevClose;
-                        const chgPct = (chg / prevClose) * 100;
-                        updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: chgPct };
-                    }
-                }
-            });
-            setCurrentPrices(updatedPrices);
-        }
-    } catch (err) {
-        console.error("Critical: Market Data Sync Failed Completely", err);
-    } finally {
+      if (!session) {
         setLoading(false);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      const [
+        { data: profile },
+        { data: accounts },
+        { data: transactions },
+        { data: debts },
+        { data: bills }
+      ] = await Promise.all([
+        supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
+        supabase.from('accounts').select('*').eq('user_id', userId),
+        supabase.from('transactions').select('*').eq('user_id', userId),
+        supabase.from('debts').select('*').eq('user_id', userId),
+        supabase.from('bills').select('*').eq('user_id', userId)
+      ]);
+
+      const mappedAccounts: Asset[] = (accounts || []).map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type as AssetType,
+        currency: a.currency as Currency,
+        institution: a.institution,
+        color: a.color,
+        startingValue: parseFloat(a.starting_value),
+        interestRate: a.interest_rate ? parseFloat(a.interest_rate) : undefined,
+        symbol: a.symbol,
+        isClosed: a.is_closed,
+        openedDate: a.opened_date,
+        closedDate: a.closed_date
+      }));
+
+      const mappedTransactions: Transaction[] = (transactions || []).map(t => ({
+        id: t.id,
+        date: t.date,
+        description: t.description,
+        amount: parseFloat(t.amount),
+        type: t.type as TransactionType,
+        category: t.category,
+        accountId: t.account_id,
+        symbol: t.symbol,
+        quantity: t.quantity ? parseFloat(t.quantity) : undefined,
+        price: t.price ? parseFloat(t.price) : undefined,
+        currency: t.currency
+      }));
+
+      const mappedDebts: Debt[] = (debts || []).map(d => ({
+        id: d.id,
+        name: d.name,
+        type: d.type as DebtType,
+        limit: parseFloat(d.credit_limit),
+        apr: parseFloat(d.apr),
+        minPaymentType: d.min_payment_type as MinPaymentType,
+        minPaymentValue: parseFloat(d.min_payment_value),
+        startingValue: parseFloat(d.starting_value),
+        promo: d.promo_apr ? {
+          promoApr: parseFloat(d.promo_apr),
+          promoEndDate: d.promo_end_date
+        } : undefined
+      }));
+
+      const mappedBills: Bill[] = (bills || []).map(b => ({
+        id: b.id,
+        name: b.name,
+        amount: parseFloat(b.amount),
+        dueDate: b.due_date,
+        isPaid: b.is_paid,
+        autoPay: b.auto_pay,
+        category: b.category,
+        isRecurring: b.is_recurring,
+        frequency: b.frequency as Frequency | undefined,
+        recurringEndDate: b.recurring_end_date
+      }));
+
+      setData({
+        transactions: mappedTransactions,
+        assets: mappedAccounts,
+        debts: mappedDebts,
+        bills: mappedBills,
+        recurring: [],
+        user: {
+          username: profile?.username || '',
+          currency: profile?.currency || 'GBP',
+          notifications: 0
+        }
+      });
+
+      setLastUpdated(new Date());
+      await fetchMarketData();
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMarketData = async (force: boolean = false) => {
+    try {
+      const uniqueSymbols = Array.from(new Set(
+        data.transactions
+          .filter(t => t.type === 'investing' && t.symbol)
+          .map(t => t.symbol!)
+      ));
+
+      if (uniqueSymbols.length === 0) return;
+
+      const lastSync = localStorage.getItem('lithos_last_sync');
+      const now = Date.now();
+      const shouldFetch = force || !lastSync || (now - parseInt(lastSync) > 30 * 60 * 1000);
+
+      if (shouldFetch) {
+        let fetchedPrices: any = {};
+        let liveApiAvailable = false;
+
+        try {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+          const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
+            headers: { 'Authorization': `Bearer ${supabaseKey}` }
+          });
+          if (res.ok) {
+            fetchedPrices = await res.json();
+            liveApiAvailable = true;
+          }
+        } catch (e) {
+          uniqueSymbols.forEach(sym => {
+            const base = fallbackPrices[sym] || 100;
+            const jitter = (Math.random() * 4) - 2;
+            fetchedPrices[sym] = {
+              price: base + jitter,
+              change: jitter,
+              changePercent: 0,
+              currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
+            };
+          });
+        }
+
+        localStorage.setItem('lithos_last_sync', now.toString());
+
+        const historyCache: Record<string, Record<string, number>> = {};
+        const period1 = '2023-01-01';
+
+        await Promise.all(uniqueSymbols.map(async sym => {
+          let history: Record<string, number> = {};
+
+          try {
+            const { data: cached } = await supabase
+              .from('price_history_cache')
+              .select('date, close')
+              .eq('symbol', sym)
+              .gte('date', period1)
+              .order('date', { ascending: true });
+
+            if (cached && cached.length > 50) {
+              cached.forEach((row: { date: string; close: number }) => {
+                history[row.date] = row.close;
+              });
+              historyCache[sym] = history;
+              return;
+            }
+          } catch (e) {
+            console.info(`Supabase cache miss for ${sym}`);
+          }
+
+          if (liveApiAvailable) {
+            try {
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+              const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
+                headers: { 'Authorization': `Bearer ${supabaseKey}` }
+              });
+              if (hRes.ok) {
+                const response = await hRes.json();
+                const rows: { date: string; close: number }[] = response[sym] || [];
+                rows.forEach(row => { history[row.date] = row.close; });
+              }
+            } catch (e) {
+              history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+            }
+          } else {
+            history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+          }
+
+          historyCache[sym] = history;
+        }));
+
+        setHistoricalPrices(historyCache);
+
+        const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+        const updatedPrices = { ...fetchedPrices };
+        uniqueSymbols.forEach(sym => {
+          const hist = historyCache[sym];
+          const currentPrice = updatedPrices[sym]?.price;
+          if (hist && currentPrice) {
+            const prevClose = hist[yesterday];
+            if (prevClose && prevClose > 0) {
+              const chg = currentPrice - prevClose;
+              const chgPct = (chg / prevClose) * 100;
+              updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: chgPct };
+            }
+          }
+        });
+        setCurrentPrices(updatedPrices);
+      }
+    } catch (error) {
+      console.error('Market data sync failed:', error);
     }
   };
 
   useEffect(() => {
-    // Initial Load
-    fetchMarketData(true);
-    const interval = setInterval(() => fetchMarketData(false), 60000); // Check every minute if cache expired
-    return () => clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    loadUserData();
+  }, []);
 
+  const currentBalances = useMemo(() => {
+    const balances: { [key: string]: number } = {};
 
-  // --- 2. Core Calculation Logic (Balances) ---
+    data.assets.forEach(asset => {
+      balances[asset.id] = asset.startingValue;
+    });
 
-  const calculateBalances = (priceMap: Record<string, MarketData> = currentPrices) => {
-      const balances: { [key: string]: number } = {};
+    data.transactions.forEach(tx => {
+      if (tx.accountId && balances[tx.accountId] !== undefined) {
+        balances[tx.accountId] += tx.amount;
+      }
+    });
 
-      // 1. Starting Values
-      (data?.assets || []).forEach(asset => balances[asset.id] = asset.startingValue);
-      (data?.debts || []).forEach(debt => balances[debt.id] = debt.startingValue);
+    return balances;
+  }, [data.assets, data.transactions]);
 
-      // 2. Ledger Processing
-      // We need to track HOLDINGS (Qty) for investment accounts to apply current price
-      const holdings: Record<string, Record<string, number>> = {}; // { accountId: { 'TSLA': 10 } }
+  const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
+    const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
+    const points: HistoricalPoint[] = [];
 
-      (data?.transactions || []).forEach(tx => {
-          // Cash Impact
-          if (balances[tx.accountId] !== undefined) {
-              // For Investment accounts, Buying stock doesn't remove value from the Asset, 
-              // it converts Cash -> Stock. The "Value" of the account is Cash + (Stock * Price).
-              // However, typically 'transfer' into the account adds Cash. 'investing' uses that cash.
-              
-              if (tx.type === 'investing') {
-                  // If it's a Buy, we assume Cash decreases, Stock increases.
-                  // But often 'amount' in ledger for buy is positive cost basis.
-                  // Let's assume logic: Transfer In (+Cash), Buy Stock (-Cash, +Stock).
-                  // In our mock generator, we just added 'amount' to account value. 
-                  // Let's switch to a smarter model:
-                  // Account Value = Cash Balance + Sum(Holdings * CurrentPrice)
-                  
-                  // For this aggregator, we will assume the 'amount' field in ledger is strictly CASH movement.
-                  // So buying stock = -Cost. Selling = +Proceeds.
-                  
-                  // However, the Mock Generator was simple. It added value on Buy. 
-                  // Let's stick to the Mock Generator's logic for Cash Balance (which was: everything adds/subs from total).
-                  // AND add a separate overlay for Market Value Adjustment.
-              }
-              
-              balances[tx.accountId] += tx.amount;
-          }
+    for (let i = days; i >= 0; i--) {
+      const d = subDays(new Date(), i);
+      const dateStr = format(d, 'yyyy-MM-dd');
 
-          // Holdings Impact
-          if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-              if (!holdings[tx.accountId]) holdings[tx.accountId] = {};
-              const currentQty = holdings[tx.accountId][tx.symbol] || 0;
-              holdings[tx.accountId][tx.symbol] = currentQty + tx.quantity;
-          }
+      let checking = 0, savings = 0, investing = 0;
+
+      data.assets.forEach(asset => {
+        if (asset.type === 'checking') checking += asset.startingValue;
+        else if (asset.type === 'savings') savings += asset.startingValue;
+        else if (asset.type === 'investment') investing += asset.startingValue;
       });
 
-      // 3. Mark-to-Market Adjustment
-      // For every account with holdings, calculate Current Market Value vs Cost Basis (which is what balances[] currently holds approx)
-      // Actually, simplified: Let's assume balances['3'] (Investment) is purely CASH + Realized P&L.
-      // We need to ADD the Market Value of holdings to it.
-      // But wait, the mock generator added the "Buy Amount" to the balance. So balance includes Cost Basis.
-      // We need to calculate: (Current Price - Avg Cost) * Qty = Unrealized P&L.
-      // And add that Unrealized P&L to the balance.
-      
-      Object.keys(holdings).forEach(accId => {
-          const accHoldings = holdings[accId];
-          Object.keys(accHoldings).forEach(symbol => {
-              const qty = accHoldings[symbol];
-              const priceData = priceMap[symbol];
-              
-              // Find average cost from transactions? Too complex for this snippet.
-              // Alternative: Just take Current Value (Qty * Price) - Cost Basis (Qty * ???).
-              // Since 'balances' already includes the Cost Basis (from the Buy transaction amount),
-              // We just need to add the difference.
-              // Diff = (Qty * CurrentPrice) - (Qty * CostPrice).
-              
-              // Actually, simpler: 
-              // If the Ledger 'amount' for a Buy was POSITIVE (adding to Asset Value), 
-              // then `balances` represents Book Value.
-              // We just need to replace Book Value with Market Value? No.
-              
-              // Let's calculate P&L factor.
-              // To represent true Net Worth: Account = Cash + (Qty * CurrentPrice).
-              // We need to separate Cash transactions from Investment transactions.
-              
-              // Hack for this demo to work with existing Mock Generator:
-              // We will just add a "Market Adjustment" based on % change of price.
-              if (priceData && qty > 0) {
-                   const txs = (data?.transactions || []).filter(t => t.accountId === accId && t.symbol === symbol);
-                   const symbolCurrency = txs.find(t => t.currency)?.currency || 'GBP';
-                   const fxRate = symbolCurrency === 'USD' ? USD_TO_GBP : 1;
+      let assets = checking + savings + investing;
+      let debts = 0;
 
-                   const marketValueGbp = qty * priceData.price * fxRate;
-                   const costBasis = txs.reduce((sum, t) => sum + (t.amount || 0), 0);
-
-                   const adjustment = marketValueGbp - costBasis;
-                   if (balances[accId]) balances[accId] += adjustment;
-              }
-          });
+      data.debts.forEach(debt => {
+        debts += debt.startingValue;
       });
 
-      return balances;
+      const netWorth = assets - debts;
+
+      points.push({
+        date: dateStr,
+        netWorth,
+        assets,
+        debts,
+        checking,
+        savings,
+        investing
+      });
+    }
+
+    return points;
   };
 
-  const currentBalances = useMemo(() => calculateBalances(currentPrices), [data, currentPrices]);
-
-  // --- 3. Wealth Trajectory Aggregator (The Heavy Lifter) ---
-
-  const getHistory = useCallback((range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
-      const points: HistoricalPoint[] = [];
-      const today = new Date();
-      let days = 30;
-      if (range === '1W') days = 7;
-      if (range === '1Y') days = 365;
-
-      // Create array of dates to plot
-      const dates = eachDayOfInterval({
-          start: subDays(today, days),
-          end: today
-      });
-
-      // Pre-process Ledger for performance
-      // Sort ascending for running balance calculation
-      const sortedTxs = [...(data?.transactions || [])].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-      // Running State
-      const balances: Record<string, number> = {};
-      const holdings: Record<string, Record<string, number>> = {}; // accId -> symbol -> qty
-
-      // Pre-build symbol -> native currency map
-      const symbolCurrencyMap: Record<string, string> = {};
-      (data?.transactions || []).forEach(t => {
-          if (t.symbol && t.currency) symbolCurrencyMap[t.symbol] = t.currency;
-      });
-
-      // Initialize Starting Values
-      (data?.assets || []).forEach(a => balances[a.id] = a.startingValue);
-      (data?.debts || []).forEach(d => balances[d.id] = d.startingValue);
-
-      // Pointer for transactions
-      let txIndex = 0;
-
-      dates.forEach(date => {
-          const dateStr = format(date, 'yyyy-MM-dd');
-          
-          // 1. Process all transactions up to end of this day
-          while(txIndex < sortedTxs.length && isBefore(parseISO(sortedTxs[txIndex].date), addDays(date, 1))) {
-              const tx = sortedTxs[txIndex];
-              
-              // Update Cash/Book Balance
-              if (balances[tx.accountId] !== undefined) {
-                  balances[tx.accountId] += tx.amount;
-              }
-
-              // Update Holdings Qty
-              if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-                  if (!holdings[tx.accountId]) holdings[tx.accountId] = {};
-                  const current = holdings[tx.accountId][tx.symbol] || 0;
-                  holdings[tx.accountId][tx.symbol] = current + tx.quantity;
-              }
-              
-              txIndex++;
-          }
-
-          // 2. Calculate Net Worth with Historical Pricing
-          let totalAssets = 0;
-          let totalDebts = 0;
-          let checking = 0;
-          let savings = 0;
-          let investing = 0; // Book Value so far
-
-          // Sum base balances
-          Object.keys(balances).forEach(id => {
-              const val = balances[id];
-              const asset = (data?.assets || []).find(a => a.id === id);
-              const debt = (data?.debts || []).find(d => d.id === id);
-              
-              if (debt) totalDebts += val;
-              if (asset) {
-                  if (asset.type === 'checking') checking += val;
-                  if (asset.type === 'savings') savings += val;
-                  if (asset.type === 'investment') investing += val; // Adds Book Value
-              }
-          });
-
-          // Apply Historical Mark-to-Market for Investment Accounts
-          // Similar logic to calculateBalances but using historicalPrices[symbol][dateStr]
-          Object.keys(holdings).forEach(accId => {
-               const accHoldings = holdings[accId];
-               const asset = (data?.assets || []).find(a => a.id === accId);
-               if (!asset) return;
-
-               Object.keys(accHoldings).forEach(symbol => {
-                   const qty = accHoldings[symbol];
-                   const history = historicalPrices[symbol] || {};
-                   const price = getPriceAtDate(dateStr, history, fallbackPrices[symbol] || 100);
-                   const fxRate = symbolCurrencyMap[symbol] === 'USD' ? USD_TO_GBP : 1;
-
-                   const marketValueGbp = qty * price * fxRate;
-                   const txs = (data?.transactions || []).filter(t => t.symbol === symbol && t.accountId === accId);
-                   const costBasis = txs.reduce((sum, t) => sum + (t.amount || 0), 0);
-                   const adjustment = marketValueGbp - costBasis;
-
-                   if (asset.type === 'investment') {
-                       investing += adjustment;
-                   }
-               });
-          });
-
-          totalAssets = checking + savings + investing;
-
-          points.push({
-              date: format(date, range === '1Y' ? 'MMM' : 'dd MMM'),
-              netWorth: totalAssets - totalDebts,
-              assets: totalAssets,
-              debts: totalDebts,
-              checking,
-              savings,
-              investing,
-          });
-      });
-
-      return points;
-  }, [data, historicalPrices]);
-
-  const getTotalNetWorth = () => {
-      const totalAssets = (currentBalances['1'] || 0) + (currentBalances['2'] || 0) + (currentBalances['3'] || 0);
-      const totalDebts = (currentBalances['4'] || 0);
-      return totalAssets - totalDebts;
+  const getTotalNetWorth = (): number => {
+    const assets = Object.values(currentBalances).reduce((a, b) => a + b, 0);
+    const debts = data.debts.reduce((sum, d) => sum + d.startingValue, 0);
+    return assets - debts;
   };
 
-  // --- Actions ---
+  const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
 
-  const addTransaction = (tx: Omit<Transaction, 'id'>) => {
-    const newTx = { ...tx, id: crypto.randomUUID() };
-    setData(prev => ({
+    const { data: newTx } = await supabase.from('transactions').insert({
+      user_id: session.user.id,
+      account_id: tx.accountId,
+      date: tx.date,
+      description: tx.description,
+      amount: tx.amount,
+      type: tx.type,
+      category: tx.category,
+      symbol: tx.symbol,
+      quantity: tx.quantity,
+      price: tx.price,
+      currency: tx.currency,
+      debt_id: (tx as any).debtId
+    }).select().maybeSingle();
+
+    if (newTx) {
+      setData(prev => ({
         ...prev,
-        transactions: [newTx, ...prev.transactions]
-    }));
-    // Invalidate cache if new symbol added
-    if (newTx.symbol && !currentPrices[newTx.symbol]) {
-        fetchMarketData(true);
+        transactions: [...prev.transactions, {
+          id: newTx.id,
+          ...tx
+        }]
+      }));
     }
   };
 
   const deleteTransaction = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      transactions: prev.transactions.filter(t => t.id !== id)
-    }));
+    supabase.from('transactions').delete().eq('id', id).then(() => {
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.filter(t => t.id !== id)
+      }));
+    });
   };
 
   const deleteTransactions = (ids: string[]) => {
     const idSet = new Set(ids);
-    setData(prev => ({
-      ...prev,
-      transactions: prev.transactions.filter(t => !idSet.has(t.id))
-    }));
+    supabase.from('transactions').delete().in('id', ids).then(() => {
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.filter(t => !idSet.has(t.id))
+      }));
+    });
   };
 
-  const addAccount = (account: Omit<Asset, 'id'>) => {
-    const newAccount: Asset = { ...account, id: crypto.randomUUID() };
-    setData(prev => ({ ...prev, assets: [...prev.assets, newAccount] }));
+  const addAccount = async (account: Omit<Asset, 'id'>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: newAccount } = await supabase.from('accounts').insert({
+      user_id: session.user.id,
+      name: account.name,
+      type: account.type,
+      currency: account.currency,
+      institution: account.institution,
+      color: account.color,
+      starting_value: account.startingValue,
+      interest_rate: account.interestRate,
+      symbol: account.symbol,
+      is_closed: account.isClosed,
+      opened_date: account.openedDate
+    }).select().maybeSingle();
+
+    if (newAccount) {
+      setData(prev => ({
+        ...prev,
+        assets: [...prev.assets, {
+          id: newAccount.id,
+          ...account
+        }]
+      }));
+    }
   };
 
-  const updateAccount = (id: string, updates: Partial<Omit<Asset, 'id'>>) => {
+  const updateAccount = async (id: string, updates: Partial<Omit<Asset, 'id'>>) => {
+    await supabase.from('accounts').update({
+      name: updates.name,
+      institution: updates.institution,
+      color: updates.color,
+      interest_rate: updates.interestRate,
+      is_closed: updates.isClosed,
+      closed_date: updates.closedDate
+    }).eq('id', id);
+
     setData(prev => ({
       ...prev,
       assets: prev.assets.map(a => a.id === id ? { ...a, ...updates } : a)
@@ -518,19 +476,56 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteAccount = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      assets: prev.assets.filter(a => a.id !== id),
-      transactions: prev.transactions.filter(t => t.accountId !== id)
-    }));
+    supabase.from('accounts').delete().eq('id', id).then(() => {
+      setData(prev => ({
+        ...prev,
+        assets: prev.assets.filter(a => a.id !== id),
+        transactions: prev.transactions.filter(t => t.accountId !== id)
+      }));
+    });
   };
 
-  const addDebt = (debt: Omit<Debt, 'id'>) => {
-    const newDebt: Debt = { ...debt, id: crypto.randomUUID() };
-    setData(prev => ({ ...prev, debts: [...prev.debts, newDebt] }));
+  const addDebt = async (debt: Omit<Debt, 'id'>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: newDebt } = await supabase.from('debts').insert({
+      user_id: session.user.id,
+      name: debt.name,
+      type: debt.type,
+      credit_limit: debt.limit,
+      apr: debt.apr,
+      min_payment_type: debt.minPaymentType,
+      min_payment_value: debt.minPaymentValue,
+      starting_value: debt.startingValue,
+      promo_apr: debt.promo?.promoApr,
+      promo_end_date: debt.promo?.promoEndDate
+    }).select().maybeSingle();
+
+    if (newDebt) {
+      setData(prev => ({
+        ...prev,
+        debts: [...prev.debts, {
+          id: newDebt.id,
+          ...debt
+        }]
+      }));
+    }
   };
 
-  const updateDebt = (id: string, updates: Partial<Omit<Debt, 'id'>>) => {
+  const updateDebt = async (id: string, updates: Partial<Omit<Debt, 'id'>>) => {
+    await supabase.from('debts').update({
+      name: updates.name,
+      type: updates.type,
+      credit_limit: updates.limit,
+      apr: updates.apr,
+      min_payment_type: updates.minPaymentType,
+      min_payment_value: updates.minPaymentValue,
+      starting_value: updates.startingValue,
+      promo_apr: updates.promo?.promoApr,
+      promo_end_date: updates.promo?.promoEndDate
+    }).eq('id', id);
+
     setData(prev => ({
       ...prev,
       debts: prev.debts.map(d => d.id === id ? { ...d, ...updates } : d)
@@ -538,19 +533,55 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteDebt = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      debts: prev.debts.filter(d => d.id !== id),
-      transactions: prev.transactions.filter(t => t.debtId !== id)
-    }));
+    supabase.from('debts').delete().eq('id', id).then(() => {
+      setData(prev => ({
+        ...prev,
+        debts: prev.debts.filter(d => d.id !== id)
+      }));
+    });
   };
 
-  const addBill = (bill: Omit<Bill, 'id'>) => {
-    const newBill: Bill = { ...bill, id: crypto.randomUUID() };
-    setData(prev => ({ ...prev, bills: [...prev.bills, newBill] }));
+  const addBill = async (bill: Omit<Bill, 'id'>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: newBill } = await supabase.from('bills').insert({
+      user_id: session.user.id,
+      name: bill.name,
+      amount: bill.amount,
+      due_date: bill.dueDate,
+      is_paid: bill.isPaid,
+      auto_pay: bill.autoPay,
+      category: bill.category,
+      is_recurring: bill.isRecurring,
+      frequency: bill.frequency,
+      recurring_end_date: bill.recurringEndDate
+    }).select().maybeSingle();
+
+    if (newBill) {
+      setData(prev => ({
+        ...prev,
+        bills: [...prev.bills, {
+          id: newBill.id,
+          ...bill
+        }]
+      }));
+    }
   };
 
-  const updateBill = (id: string, updates: Partial<Omit<Bill, 'id'>>) => {
+  const updateBill = async (id: string, updates: Partial<Omit<Bill, 'id'>>) => {
+    await supabase.from('bills').update({
+      name: updates.name,
+      amount: updates.amount,
+      due_date: updates.dueDate,
+      is_paid: updates.isPaid,
+      auto_pay: updates.autoPay,
+      category: updates.category,
+      is_recurring: updates.isRecurring,
+      frequency: updates.frequency,
+      recurring_end_date: updates.recurringEndDate
+    }).eq('id', id);
+
     setData(prev => ({
       ...prev,
       bills: prev.bills.map(b => b.id === id ? { ...b, ...updates } : b)
@@ -558,18 +589,31 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteBill = (id: string) => {
+    supabase.from('bills').delete().eq('id', id).then(() => {
+      setData(prev => ({
+        ...prev,
+        bills: prev.bills.filter(b => b.id !== id)
+      }));
+    });
+  };
+
+  const updateUserProfile = async (updates: Partial<UserProfile>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    await supabase.from('user_profiles').update({
+      username: updates.username,
+      currency: updates.currency
+    }).eq('id', session.user.id);
+
     setData(prev => ({
       ...prev,
-      bills: prev.bills.filter(b => b.id !== id)
+      user: { ...prev.user, ...updates }
     }));
   };
 
-  const updateUserProfile = (updates: Partial<UserProfile>) => {
-      setData(prev => ({ ...prev, user: { ...prev.user, ...updates } }));
-  };
-
   const refreshData = async () => {
-      await fetchMarketData(true);
+    await loadUserData();
   };
 
   return (

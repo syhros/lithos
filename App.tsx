@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { FinanceProvider } from './src/context/FinanceContext';
 import { Sidebar } from './src/components/Sidebar';
@@ -10,6 +10,9 @@ import { Investments } from './src/pages/Investments';
 import { Bills } from './src/pages/Bills';
 import { Trends } from './src/pages/Trends';
 import { Settings } from './src/pages/Settings';
+import { Login } from './src/pages/Login';
+import { Signup } from './src/pages/Signup';
+import { supabase } from './src/lib/supabase';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
@@ -38,26 +41,75 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
   </div>
 );
 
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
+    };
+
+    checkAuth();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsAuthenticated(!!session);
+    });
+
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []);
+
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center">
+        <div className="text-white text-center">
+          <div className="w-8 h-8 border-4 border-magma/30 border-t-magma rounded-full animate-spin mx-auto mb-4" />
+          <p className="font-mono text-iron-dust">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const App: React.FC = () => {
   return (
     <FinanceProvider>
       <Router>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/transactions" element={<Transactions />} />
-            <Route path="/accounts" element={<Accounts />} />
-            <Route path="/investments" element={<Investments />} />
-            <Route path="/debts" element={<Debts />} />
-            <Route path="/goals" element={<PlaceholderPage title="Goals" />} />
-            <Route path="/bills" element={<Bills />} />
-            <Route path="/recurring" element={<PlaceholderPage title="Recurring" />} />
-            <Route path="/trends" element={<Trends />} />
-            <Route path="/categorize" element={<PlaceholderPage title="Categorize" />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Layout>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/transactions" element={<Transactions />} />
+                    <Route path="/accounts" element={<Accounts />} />
+                    <Route path="/investments" element={<Investments />} />
+                    <Route path="/debts" element={<Debts />} />
+                    <Route path="/goals" element={<PlaceholderPage title="Goals" />} />
+                    <Route path="/bills" element={<Bills />} />
+                    <Route path="/recurring" element={<PlaceholderPage title="Recurring" />} />
+                    <Route path="/trends" element={<Trends />} />
+                    <Route path="/categorize" element={<PlaceholderPage title="Categorize" />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
       </Router>
     </FinanceProvider>
   );

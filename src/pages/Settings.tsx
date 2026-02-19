@@ -1,14 +1,22 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFinance } from '../context/FinanceContext';
-import { Download, Upload, Trash2, AlertCircle, Check } from 'lucide-react';
+import { Download, Upload, Trash2, AlertCircle, Check, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
+import { supabase } from '../lib/supabase';
 
 export const Settings: React.FC = () => {
+  const navigate = useNavigate();
   const { data } = useFinance();
   const [deleteType, setDeleteType] = useState<string>('none');
   const [monthsToDelete, setMonthsToDelete] = useState<number>(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login');
+  };
 
   const stats = useMemo(() => {
     const txCount = data.transactions.length;
@@ -116,9 +124,18 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="p-12 max-w-4xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
-      <div>
-        <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
-        <h1 className="text-4xl font-bold text-white tracking-tight mb-1">Settings</h1>
+      <div className="flex justify-between items-start mb-8">
+        <div>
+          <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
+          <h1 className="text-4xl font-bold text-white tracking-tight mb-1">Settings</h1>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-5 py-2.5 bg-red-900/10 border border-red-900/30 text-red-400 text-xs font-bold uppercase rounded-sm hover:bg-red-900/20 transition-colors"
+        >
+          <LogOut size={14} />
+          Logout
+        </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 my-12">
