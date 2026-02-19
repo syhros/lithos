@@ -25,8 +25,25 @@ export const Investments: React.FC = () => {
         data.transactions.forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
                 const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0 };
-                current.quantity += tx.quantity;
-                current.totalCost += tx.amount;
+                const isDividend = tx.category === 'Dividend';
+                const isSell = tx.category === 'Sell';
+
+                if (isSell) {
+                  // For sells, reduce both quantity and cost proportionally
+                  if (current.quantity > 0) {
+                    const costPerShare = current.totalCost / current.quantity;
+                    current.totalCost -= tx.quantity * costPerShare;
+                  }
+                  current.quantity += tx.quantity; // quantity is negative for sells
+                } else if (isDividend) {
+                  // For dividends, add shares at zero cost
+                  current.quantity += tx.quantity;
+                } else {
+                  // For buys, add both quantity and cost
+                  current.quantity += tx.quantity;
+                  current.totalCost += tx.amount;
+                }
+
                 map.set(tx.symbol, current);
             }
         });
