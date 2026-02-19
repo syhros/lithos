@@ -202,6 +202,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
   const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('');
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -362,7 +363,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     if (errs.length) { setErrors(errs); return; }
 
     setIsLoading(true);
-    setErrors(['Fetching historical prices...']);
+    setLoadingStatus('');
+    setErrors([]);
 
     // Fetch historical prices for all investment tickers before import
     let fetchedHistoricalPrices = { ...historicalPrices };
@@ -375,23 +377,41 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
         if (symbol) uniqueSymbolsInCsv.add(symbol);
       });
 
-      // Fetch missing historical data
-      const symbolsToFetch = Array.from(uniqueSymbolsInCsv).filter(sym => !historicalPrices[sym]);
+      const allSymbols = Array.from(uniqueSymbolsInCsv);
+      const cachedSymbols = allSymbols.filter(sym => historicalPrices[sym]);
+      const symbolsToFetch = allSymbols.filter(sym => !historicalPrices[sym]);
 
+      // Check cache first
+      if (cachedSymbols.length > 0) {
+        setLoadingStatus(`Checking local cache for ${cachedSymbols.length} ticker${cachedSymbols.length === 1 ? '' : 's'}...`);
+        await new Promise(r => setTimeout(r, 300));
+        fetchedHistoricalPrices = { ...historicalPrices, ...fetchedHistoricalPrices };
+      }
+
+      // Fetch missing data
       if (symbolsToFetch.length > 0) {
+        setLoadingStatus(`Fetching historical prices for ${symbolsToFetch.length} ticker${symbolsToFetch.length === 1 ? '' : 's'}...`);
         try {
           const historyRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-history?symbols=${symbolsToFetch.join(',')}`);
           if (historyRes.ok) {
             const historyData = await historyRes.json();
+            setLoadingStatus(`Received historical data for ${Object.keys(historyData).length} ticker${Object.keys(historyData).length === 1 ? '' : 's'}`);
             fetchedHistoricalPrices = { ...historicalPrices, ...historyData };
+            await new Promise(r => setTimeout(r, 300));
           }
         } catch (e) {
           console.error('Failed to fetch historical prices:', e);
+          setLoadingStatus('Failed to fetch some prices, using available data...');
+          await new Promise(r => setTimeout(r, 500));
         }
+      } else {
+        setLoadingStatus('All historical prices available locally');
+        await new Promise(r => setTimeout(r, 300));
       }
     }
 
-    setIsLoading(false);
+    setLoadingStatus('Processing trades...');
+    await new Promise(r => setTimeout(r, 200));
 
     let count = 0;
     const newErrors: string[] = [];
@@ -509,6 +529,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setImportCount(count);
     setImportStats({ income: totalIncome, expense: totalExpense, netChange: totalIncome - totalExpense, investments: totalInvestments });
     setErrors(newErrors);
+    setIsLoading(false);
+    setLoadingStatus('');
     if (newErrors.length === 0) {
       setStep('done');
     }
@@ -816,16 +838,29 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           {/* ── STEP 3: Confirm ──────────────────────────────────────────── */}
           {step === 'confirm' && (
             <div className="p-8 space-y-6">
-              <div>
-                <p className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-1">Ready to import</p>
-                <p className="text-xs text-iron-dust">
-                  <span className="text-white font-mono">{csvRows.length} transactions</span> from{' '}
-                  <span className="text-white font-mono">{fileName}</span>
-                </p>
-              </div>
+              {isLoading ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <p className="text-xs text-iron-dust font-mono">{loadingStatus || 'Processing...'}</p>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-1">Ready to import</p>
+                  <p className="text-xs text-iron-dust">
+                    <span className="text-white font-mono">{csvRows.length} transactions</span> from{' '}
+                    <span className="text-white font-mono">{fileName}</span>
+                  </p>
+                </div>
+              )}
 
               {/* Summary cards */}
-              {mode === 'accounts' ? (
+              {!isLoading && mode === 'accounts' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-black/20 border border-white/5 rounded-sm p-5">
                     <div className="flex items-center gap-2 mb-3">
@@ -870,7 +905,9 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                     </p>
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {!isLoading && mode === 'investments' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-black/20 border border-white/5 rounded-sm p-5">
@@ -945,11 +982,13 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 </>
               )}
 
+              {!isLoading && (
               <div className="bg-amber-400/5 border border-amber-400/20 rounded-sm p-4">
                 <p className="text-xs text-amber-400 font-mono">
                   This action will add {csvRows.length} transactions and cannot be undone in bulk.
                 </p>
               </div>
+              )}
             </div>
           )}
 
