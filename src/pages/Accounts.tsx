@@ -85,9 +85,21 @@ export const Accounts: React.FC = () => {
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-                {liquidAssets.map(asset => <AccountTile key={asset.id} asset={asset} />)}
-            </div>
+            {liquidAssets.length === 0 ? (
+                <div className="col-span-full py-20 text-center border border-dashed border-white/10 rounded-sm bg-white/[0.02] mb-12">
+                    <p className="text-iron-dust font-mono text-sm mb-4">No accounts yet</p>
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="inline-block px-4 py-2 bg-magma/20 border border-magma/30 text-magma text-xs font-bold uppercase rounded-sm hover:bg-magma/30 transition-colors"
+                    >
+                        Create Your First Account
+                    </button>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+                    {liquidAssets.map(asset => <AccountTile key={asset.id} asset={asset} />)}
+                </div>
+            )}
 
             {liquidAssets.length > 0 && (
                 <div className="mb-12">

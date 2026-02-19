@@ -60,7 +60,7 @@ const Sparkline: React.FC<{ data: any[], dataKey: string, color: string, classNa
 
 const GridBox: React.FC<{
     label: string;
-    value: number;
+    value: number | undefined;
     color: string;
     history: any[];
     dataKey: string;
@@ -70,6 +70,7 @@ const GridBox: React.FC<{
 }> = ({ label, value, color, history, dataKey, currencySymbol, plValue, plPercent }) => {
     const isProfit = plValue !== undefined ? plValue >= 0 : true;
     const plColor = isProfit ? '#00f2ad' : '#ff4d00';
+    const displayValue = value ?? 0;
 
     return (
         <div className="group relative bg-[#161618] border border-white/5 p-6 rounded-sm h-[220px] flex flex-col justify-between overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:bg-[#1a1c1e]">
@@ -79,7 +80,7 @@ const GridBox: React.FC<{
             <div className="relative z-10">
                 <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[3px] block mb-2 group-hover:text-white transition-colors">{label}</span>
                 <div className="text-4xl font-bold text-white tracking-tight">
-                    {currencySymbol}{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    {currencySymbol}{displayValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
             </div>
 
@@ -187,21 +188,38 @@ export const Dashboard: React.FC = () => {
   // Derived Historical Data (Syncs everything)
   const historyData = useMemo(() => getHistory(timeRange), [timeRange, data.transactions, getHistory]);
 
-  // Calculate P/L for accounts (checking + savings)
-  const accountsPL = useMemo(() => {
-    const checkingAccount = data.assets.find(a => a.id === '1');
-    const savingsAccount = data.assets.find(a => a.id === '2');
+  const checkingAccounts = useMemo(() => data.assets.filter(a => a.type === 'checking' && !a.isClosed), [data.assets]);
+  const savingsAccounts = useMemo(() => data.assets.filter(a => a.type === 'savings' && !a.isClosed), [data.assets]);
+  const investmentAccounts = useMemo(() => data.assets.filter(a => a.type === 'investment' && !a.isClosed), [data.assets]);
 
-    const checkingStarting = checkingAccount?.startingValue || 0;
-    const savingsStarting = savingsAccount?.startingValue || 0;
+  const totalCheckingBalance = useMemo(() =>
+    checkingAccounts.reduce((sum, a) => sum + (currentBalances[a.id] || 0), 0),
+    [checkingAccounts, currentBalances]
+  );
+  const totalSavingsBalance = useMemo(() =>
+    savingsAccounts.reduce((sum, a) => sum + (currentBalances[a.id] || 0), 0),
+    [savingsAccounts, currentBalances]
+  );
+  const totalInvestmentBalance = useMemo(() =>
+    investmentAccounts.reduce((sum, a) => sum + (currentBalances[a.id] || 0), 0),
+    [investmentAccounts, currentBalances]
+  );
+  const totalLiabilitiesBalance = useMemo(() =>
+    data.debts.reduce((sum, d) => sum + d.startingValue, 0),
+    [data.debts]
+  );
+
+  const accountsPL = useMemo(() => {
+    const checkingStarting = checkingAccounts.reduce((sum, a) => sum + a.startingValue, 0);
+    const savingsStarting = savingsAccounts.reduce((sum, a) => sum + a.startingValue, 0);
     const totalStarting = checkingStarting + savingsStarting;
 
-    const currentAccounts = (currentBalances['1'] || 0) + (currentBalances['2'] || 0);
+    const currentAccounts = totalCheckingBalance + totalSavingsBalance;
     const plValue = currentAccounts - totalStarting;
     const plPercent = totalStarting > 0 ? (plValue / totalStarting) * 100 : 0;
 
     return { plValue, plPercent };
-  }, [data.assets, currentBalances]);
+  }, [checkingAccounts, savingsAccounts, totalCheckingBalance, totalSavingsBalance]);
 
   // Expenses for Spending Trend (Simulated from transaction ledger for last 6 months)
   const spendingTrend = useMemo(() => {
@@ -233,9 +251,37 @@ export const Dashboard: React.FC = () => {
       return months; 
   }, [data.transactions]);
 
+  if (loading && data.assets.length === 0 && data.transactions.length === 0) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-[#0a0a0c]">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-magma/30 border-t-magma rounded-full animate-spin mx-auto mb-6" />
+          <p className="font-mono text-iron-dust uppercase text-sm tracking-wider">Loading your finances...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.assets.length === 0) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-[#0a0a0c]">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-sm flex items-center justify-center mx-auto mb-6">
+            <span className="text-2xl">📊</span>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2">Welcome to Lithos Finance</h2>
+          <p className="text-iron-dust text-sm mb-6">Get started by creating your first account to track your finances.</p>
+          <Link to="/accounts" className="inline-block px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors">
+            Create Account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] h-full overflow-hidden bg-[#0a0a0c]">
-        
+
         {/* CENTER MAIN CONTENT */}
         <div className="flex flex-col h-full overflow-y-auto p-12 custom-scrollbar">
             
@@ -366,7 +412,7 @@ export const Dashboard: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 slide-up" style={{ animationDelay: '0.2s' }}>
                 <GridBox
                     label="Accounts"
-                    value={(currentBalances['1'] || 0) + (currentBalances['2'] || 0)}
+                    value={totalCheckingBalance + totalSavingsBalance}
                     color="#00f2ad"
                     history={historyData}
                     dataKey="checking"
@@ -376,7 +422,7 @@ export const Dashboard: React.FC = () => {
                 />
                 <GridBox
                     label="Savings"
-                    value={currentBalances['2']}
+                    value={totalSavingsBalance}
                     color="#d4af37"
                     history={historyData}
                     dataKey="savings"
@@ -384,7 +430,7 @@ export const Dashboard: React.FC = () => {
                 />
                 <GridBox
                     label="Stocks"
-                    value={currentBalances['3']}
+                    value={totalInvestmentBalance}
                     color="#3b82f6"
                     history={historyData}
                     dataKey="investing"
@@ -392,7 +438,7 @@ export const Dashboard: React.FC = () => {
                 />
                 <GridBox
                     label="Liabilities"
-                    value={currentBalances['4']}
+                    value={totalLiabilitiesBalance}
                     color="#ff4d00"
                     history={historyData}
                     dataKey="debts"

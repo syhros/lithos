@@ -64,6 +64,33 @@ export const Signup: React.FC = () => {
         return;
       }
 
+      await supabase
+        .from('accounts')
+        .insert([
+          {
+            user_id: authData.user.id,
+            name: 'Checking Account',
+            type: 'checking',
+            currency: 'GBP',
+            institution: 'Your Bank',
+            color: '#00f2ad',
+            starting_value: 0,
+            is_closed: false,
+            opened_date: new Date().toISOString().split('T')[0]
+          },
+          {
+            user_id: authData.user.id,
+            name: 'Savings Account',
+            type: 'savings',
+            currency: 'GBP',
+            institution: 'Your Bank',
+            color: '#d4af37',
+            starting_value: 0,
+            is_closed: false,
+            opened_date: new Date().toISOString().split('T')[0]
+          }
+        ]);
+
       navigate('/');
     } catch (err) {
       setError('An unexpected error occurred');
