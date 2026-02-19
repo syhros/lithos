@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { AreaChart, Area, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, YAxis, XAxis, CartesianGrid } from 'recharts';
 import { format, differenceInMinutes, subMonths } from 'date-fns';
@@ -7,6 +7,7 @@ import { ArrowUpRight, ArrowDownRight, Calendar, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { SkeletonLoader } from '../components/SkeletonLoader';
+import { NumberRoller } from '../components/NumberRoller';
 
 // --- Components ---
 
@@ -140,20 +141,57 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
 
 export const Dashboard: React.FC = () => {
   const { data, getTotalNetWorth, currentBalances, getHistory, lastUpdated, refreshData, loading, currencySymbol } = useFinance();
-  
+
   // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
-  
+
   // Chart Visibility State
   const [visibleSeries, setVisibleSeries] = useState({ netWorth: true, assets: false, debts: false });
 
+  // Number roller state
+  const [previousNetWorth, setPreviousNetWorth] = useState<string>('0');
+  const [shouldShowRoller, setShouldShowRoller] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // Calculations
   const currentNetWorth = getTotalNetWorth();
+  const currentNetWorthStr = Math.floor(currentNetWorth).toString();
   const [nwInt, nwDec] = currentNetWorth.toFixed(2).split('.');
-  
+
   // Header Metrics Logic
   const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
   const isStale = minsSinceUpdate > 5; // Consider stale if > 5 mins old
+
+  // Load previous net worth from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('lithos_previous_net_worth');
+    if (stored) {
+      setPreviousNetWorth(stored);
+    }
+  }, []);
+
+  // When loading completes, show roller animation and save the new value
+  useEffect(() => {
+    if (!loading && previousNetWorth !== '0' && previousNetWorth !== currentNetWorthStr) {
+      setShouldShowRoller(true);
+      localStorage.setItem('lithos_previous_net_worth', currentNetWorthStr);
+      // Reset roller flag after animation completes
+      const timer = setTimeout(() => setShouldShowRoller(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, currentNetWorthStr, previousNetWorth]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setPreviousNetWorth(currentNetWorthStr);
+    setShouldShowRoller(true);
+    await refreshData();
+    // Reset refreshing state after animation would complete
+    const timer = setTimeout(() => {
+      setIsRefreshing(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  };
 
   // Derived Historical Data (Syncs everything)
   const historyData = useMemo(() => getHistory(timeRange), [timeRange, data.transactions, getHistory]);
@@ -214,35 +252,51 @@ export const Dashboard: React.FC = () => {
             <div className="mb-4 mt-4 slide-up">
                 {/* Header Row: Label + Metadata on same line */}
                 <div className="flex justify-between items-center mb-1">
-                    <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
-                    
+                    {!loading && !shouldShowRoller && (
+                        <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
+                    )}
+
                     {/* Actions Group */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 ml-auto">
                         <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
-                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
-                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
-                               {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
+                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading || isRefreshing ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
+                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading || isRefreshing ? "text-yellow-400" : "text-white")}>
+                               {loading || isRefreshing ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
                            </span>
                         </div>
                         <span className="font-mono text-[10px] text-iron-dust">
                             Updated {format(lastUpdated, 'HH:mm')}
                         </span>
-                        <button 
-                            onClick={() => refreshData()}
-                            disabled={loading}
-                            className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
+                        <button
+                            onClick={handleRefresh}
+                            disabled={loading || isRefreshing}
+                            className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", (loading || isRefreshing) && "animate-spin cursor-not-allowed opacity-50")}
                         >
                             <RefreshCw size={12} />
                         </button>
                     </div>
                 </div>
 
-                <div className="relative">
-                    {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-10"></div>}
-                    <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                        {currencySymbol}{parseInt(nwInt).toLocaleString()}
-                        <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
-                    </h1>
+                <div className="relative min-h-[200px]">
+                    {loading && (
+                        <div className={clsx("absolute inset-0 skeleton-loader rounded-sm z-10", !loading && "skeleton-loader-fade-out")}></div>
+                    )}
+                    {shouldShowRoller && previousNetWorth !== '0' ? (
+                        <NumberRoller
+                            fromDigits={previousNetWorth}
+                            toDigits={currentNetWorthStr}
+                            duration={1500}
+                            currencySymbol={currencySymbol}
+                        />
+                    ) : (
+                        <div>
+                            <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Total Net Worth</span>
+                            <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
+                                {currencySymbol}{parseInt(nwInt).toLocaleString()}
+                                <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
+                            </h1>
+                        </div>
+                    )}
                 </div>
             </div>
 
