@@ -1089,7 +1089,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                     });
                     setTickerOverrides(initial);
                   }
-                  setStep('confirm');
+                  doImport();
                 } else if (step === 'confirm') {
                   doImport();
                 }
