@@ -2,7 +2,6 @@
 import React, { useMemo, useState } from 'react';
 import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
-import { differenceInMinutes } from 'date-fns';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes } from 'date-fns';
