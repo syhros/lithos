@@ -2,6 +2,7 @@
 import { subMonths, subDays, format, addDays } from 'date-fns';
 
 export type TransactionType = 'income' | 'expense' | 'investing' | 'debt_payment' | 'transfer';
+export type InvestmentCategory = 'Buy' | 'Sell' | 'Dividend';
 export type AssetType = 'checking' | 'savings' | 'investment';
 export type DebtType = 'credit_card' | 'loan';
 export type Frequency = 'weekly' | 'monthly' | 'yearly';

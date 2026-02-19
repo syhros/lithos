@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { X, Upload, FileText, Download, AlertTriangle, CheckCircle, ChevronDown, TrendingUp, TrendingDown, Layers, Activity } from 'lucide-react';
 import { subDays, parseISO, format } from 'date-fns';
 import { useFinance } from '../context/FinanceContext';
-import { TransactionType, Currency } from '../data/mockData';
+import { TransactionType, Currency, InvestmentCategory } from '../data/mockData';
 import { clsx } from 'clsx';
 
 type ImportMode = 'accounts' | 'investments';
@@ -34,9 +34,9 @@ const ACCOUNT_FIELDS: FieldDef[] = [
 const INVESTMENT_FIELDS: FieldDef[] = [
   { key: 'symbol',      label: 'Ticker',      required: true,  description: 'e.g. AAPL, TSLA — rows without a ticker are skipped' },
   { key: 'date',        label: 'Date',         required: true,  description: '2024-01-15 — or a datetime column (Trading212 "Time")' },
-  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'Number of units — rows without qty are skipped' },
-  { key: 'price',       label: 'Price / Unit', required: true,  description: 'Price in native currency — rows without price are skipped' },
-  { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, dividend — defaults to buy if blank' },
+  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'For buy/sell: number of shares. For dividends: dividend per share. Rows without qty are skipped' },
+  { key: 'price',       label: 'Price / Unit', required: true,  description: 'For buy/sell: price per share. For dividends: multiply by qty for total dividend. Rows without price are skipped' },
+  { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, or dividend — required to identify dividends (defaults to buy)' },
   { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
   { key: 'time',        label: 'Time',         required: false, description: 'HH:MM — map to same column as Date to extract time from datetime' },
@@ -398,7 +398,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const rawCurrency = getCellValue(row, 'currency').toUpperCase() || 'GBP';
           const description = getCellValue(row, 'description') || symbol;
           const tradeType = resolveTradeType(row);
-          const category = tradeType === 'buy' ? 'Buy' : tradeType === 'sell' ? 'Sell' : 'Dividend';
+          const category: InvestmentCategory = tradeType === 'sell' ? 'Sell' : tradeType === 'dividend' ? 'Dividend' : 'Buy';
 
           // Skip rows missing required investment values (e.g. deposit rows in Trading212)
           if (!rawSymbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
@@ -655,9 +655,16 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                   </p>
                 )}
                 {mode === 'investments' && (
-                  <p className="text-[10px] text-iron-dust mt-2.5">
-                    Rows missing a ticker, quantity, or price are automatically skipped. Map <span className="text-white font-mono">Date</span> and <span className="text-white font-mono">Time</span> to the same column to extract both from a datetime value (e.g. Trading212 "Time").
-                  </p>
+                  <div className="space-y-2.5 mt-2.5">
+                    <p className="text-[10px] text-iron-dust">
+                      Rows missing a ticker, quantity, or price are automatically skipped. Map <span className="text-white font-mono">Date</span> and <span className="text-white font-mono">Time</span> to the same column to extract both from a datetime value (e.g. Trading212 "Time").
+                    </p>
+                    {!mapping['tradeType'] && (
+                      <div className="text-[10px] text-amber-600 bg-amber-900/20 border border-amber-700/30 rounded-sm p-2.5">
+                        ⚠ Type column not mapped — all rows will be imported as BUY. Map the Type column to identify sell and dividend rows.
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
