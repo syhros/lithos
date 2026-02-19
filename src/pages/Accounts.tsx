@@ -3,8 +3,10 @@ import { useFinance } from '../context/FinanceContext';
 import { Plus, Wallet, ChevronDown, ChevronRight } from 'lucide-react';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { AccountDetailModal } from '../components/AccountDetailModal';
+import { SkeletonLoader } from '../components/SkeletonLoader';
 import { Asset } from '../data/mockData';
 import { format, parseISO } from 'date-fns';
+import { clsx } from 'clsx';
 
 export const Accounts: React.FC = () => {
     const { data, currentBalances, currencySymbol, loading } = useFinance();
@@ -23,6 +25,7 @@ export const Accounts: React.FC = () => {
 
         return (
             <div key={asset.id} onClick={() => setSelectedAccount(asset)} className="group bg-[#161618] border border-white/5 p-8 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer">
+                {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-10"></div>}
                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
 
                 <div className="flex justify-between items-start mb-6">

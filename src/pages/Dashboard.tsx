@@ -6,6 +6,7 @@ import { format, differenceInMinutes, subMonths } from 'date-fns';
 import { ArrowUpRight, ArrowDownRight, Calendar, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
+import { SkeletonLoader } from '../components/SkeletonLoader';
 
 // --- Components ---
 
@@ -32,9 +33,10 @@ const GridBox: React.FC<{
     history: any[];
     dataKey: string;
     currencySymbol: string;
+    isLoading?: boolean;
     plValue?: number;
     plPercent?: number;
-}> = ({ label, value, color, history, dataKey, currencySymbol, plValue, plPercent }) => {
+}> = ({ label, value, color, history, dataKey, currencySymbol, isLoading = false, plValue, plPercent }) => {
     const isProfit = plValue !== undefined ? plValue >= 0 : true;
     const plColor = isProfit ? '#00f2ad' : '#ff4d00';
 
@@ -42,6 +44,8 @@ const GridBox: React.FC<{
         <div className="group relative bg-[#161618] border border-white/5 p-6 rounded-sm h-[220px] flex flex-col justify-between overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:bg-[#1a1c1e]">
             {/* Dynamic Accent Line: slides up/fills on hover */}
             <div className="absolute left-0 bottom-0 w-[4px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: color }} />
+
+            {isLoading && <div className="absolute inset-0 skeleton-loader rounded-sm z-20"></div>}
 
             <div className="relative z-10">
                 <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[3px] block mb-2 group-hover:text-white transition-colors">{label}</span>
@@ -233,10 +237,13 @@ export const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                    {currencySymbol}{parseInt(nwInt).toLocaleString()}
-                    <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
-                </h1>
+                <div className="relative">
+                    {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-10"></div>}
+                    <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
+                        {currencySymbol}{parseInt(nwInt).toLocaleString()}
+                        <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
+                    </h1>
+                </div>
             </div>
 
             {/* 2. Wealth Trajectory Chart */}
@@ -245,6 +252,7 @@ export const Dashboard: React.FC = () => {
                  
                  {/* Chart Container */}
                 <div className="h-[400px] w-full bg-[#161618] border border-white/5 rounded-sm relative flex flex-col p-6">
+                     {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-20"></div>}
                      
                      {/* Controls Header (Flex) */}
                      <div className="flex justify-between items-start mb-2 z-10">
@@ -338,6 +346,7 @@ export const Dashboard: React.FC = () => {
                     history={historyData}
                     dataKey="checking"
                     currencySymbol={currencySymbol}
+                    isLoading={loading}
                     plValue={accountsPL.plValue}
                     plPercent={accountsPL.plPercent}
                 />
@@ -348,6 +357,7 @@ export const Dashboard: React.FC = () => {
                     history={historyData}
                     dataKey="savings"
                     currencySymbol={currencySymbol}
+                    isLoading={loading}
                 />
                 <GridBox
                     label="Stocks"
@@ -356,6 +366,7 @@ export const Dashboard: React.FC = () => {
                     history={historyData}
                     dataKey="investing"
                     currencySymbol={currencySymbol}
+                    isLoading={loading}
                 />
                 <GridBox
                     label="Liabilities"
@@ -364,6 +375,7 @@ export const Dashboard: React.FC = () => {
                     history={historyData}
                     dataKey="debts"
                     currencySymbol={currencySymbol}
+                    isLoading={loading}
                 />
             </div>
         </div>

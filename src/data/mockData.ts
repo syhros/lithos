@@ -65,6 +65,9 @@ export interface Bill {
   isPaid: boolean;
   autoPay: boolean;
   category: string;
+  type: 'one-time' | 'recurring';
+  frequency?: Frequency;
+  endDate?: string;
 }
 
 export interface Recurring {
