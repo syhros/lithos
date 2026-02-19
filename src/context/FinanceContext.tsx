@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { initialData, MockData, Transaction, UserProfile, currentStockPrices as fallbackPrices } from '../data/mockData';
 import { isBefore, parseISO, subDays, format, isEqual, startOfDay, eachDayOfInterval, addDays } from 'date-fns';
+import { supabase } from '../lib/supabase';
 
 // --- Interfaces ---
 
@@ -140,19 +141,42 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             localStorage.setItem('lithos_last_sync', now.toString());
             setLastUpdated(new Date());
 
-            // C. Historical Backfill — attempt real API, fall back to coherent random walk
+            // C. Historical Backfill — Supabase cache first, then API, then synthetic fallback
             const historyCache: Record<string, Record<string, number>> = {};
+            const period1 = '2023-01-01';
 
             await Promise.all(uniqueSymbols.map(async sym => {
                 let history: Record<string, number> = {};
 
+                // 1. Try Supabase cache (anon read, no rate limit)
+                try {
+                    const { data: cached, error } = await supabase
+                        .from('price_history_cache')
+                        .select('date, close')
+                        .eq('symbol', sym)
+                        .gte('date', period1)
+                        .order('date', { ascending: true });
+
+                    if (!error && cached && cached.length > 50) {
+                        cached.forEach((row: { date: string; close: number }) => {
+                            history[row.date] = row.close;
+                        });
+                        console.info(`Loaded cached history for ${sym}: ${cached.length} points`);
+                        historyCache[sym] = history;
+                        return;
+                    }
+                } catch (e) {
+                    console.info(`Supabase cache miss for ${sym}`);
+                }
+
+                // 2. Supabase miss — call API route (which will also write to Supabase cache)
                 if (liveApiAvailable) {
                     try {
-                        const hRes = await fetch(`/api/history?symbol=${sym}`);
+                        const hRes = await fetch(`/api/history?symbol=${sym}&from=${period1}`);
                         if (hRes.ok) {
                             const rows: { date: string; close: number }[] = await hRes.json();
                             rows.forEach(row => { history[row.date] = row.close; });
-                            console.info(`Loaded real history for ${sym}: ${rows.length} points`);
+                            console.info(`Loaded live history for ${sym}: ${rows.length} points`);
                         } else {
                             throw new Error(`History API returned ${hRes.status}`);
                         }
