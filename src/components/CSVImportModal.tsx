@@ -196,6 +196,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [errors, setErrors] = useState<string[]>([]);
   const [importCount, setImportCount] = useState(0);
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
+  const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -212,7 +213,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setStep('upload'); setFileName(''); setCsvHeaders([]); setCsvRows([]);
     setMapping({}); setSelectedAccountId(''); setErrors([]);
     setImportCount(0); setImportStats({ income: 0, expense: 0, netChange: 0, investments: 0 });
-    setIsDragging(false);
+    setTickerOverrides({}); setIsDragging(false);
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -322,6 +323,19 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     return { income, expense, netChange: income - expense, investments, valid, skipped };
   }, [csvRows, mapping, mode, step]);
 
+  // Unique tickers from valid investment rows (used on confirm step)
+  const uniqueTickers = useMemo(() => {
+    if (mode !== 'investments' || !mapping['symbol']) return [];
+    const seen = new Set<string>();
+    csvRows.forEach(row => {
+      const symbol = getCellValue(row, 'symbol').trim().toUpperCase();
+      const qty = cleanNum(getCellValue(row, 'quantity'));
+      const price = cleanNum(getCellValue(row, 'price'));
+      if (symbol && !isNaN(qty) && qty !== 0 && !isNaN(price) && price !== 0) seen.add(symbol);
+    });
+    return Array.from(seen).sort();
+  }, [csvRows, mapping, mode]);
+
   const doImport = () => {
     const errs = validateMapping();
     if (errs.length) { setErrors(errs); return; }
@@ -356,7 +370,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           if (amount > 0) totalIncome += amount; else totalExpense += Math.abs(amount);
           count++;
         } else {
-          const symbol = getCellValue(row, 'symbol').trim().toUpperCase();
+          const rawSymbol = getCellValue(row, 'symbol').trim().toUpperCase();
+          const symbol = (tickerOverrides[rawSymbol] || rawSymbol).toUpperCase();
           const rawDate = getCellValue(row, 'date');
           const qty = cleanNum(getCellValue(row, 'quantity'));
           const price = cleanNum(getCellValue(row, 'price'));
@@ -365,7 +380,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const category = getCellValue(row, 'category') || 'Stock';
 
           // Skip rows missing required investment values (e.g. deposit rows in Trading212)
-          if (!symbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
+          if (!rawSymbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
 
           // Trading212 "Time" column contains datetime — split when same column mapped for date+time
           const sameCol = mapping['date'] && mapping['time'] && mapping['date'] === mapping['time'];
@@ -744,24 +759,69 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-black/20 border border-white/5 rounded-sm p-5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Layers size={14} className="text-iron-dust" />
-                      <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">Transactions</span>
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-black/20 border border-white/5 rounded-sm p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Layers size={14} className="text-iron-dust" />
+                        <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">Trade Rows</span>
+                      </div>
+                      <p className="text-3xl font-bold text-white">{previewStats?.valid ?? 0}</p>
+                      {previewStats?.skipped ? (
+                        <p className="text-[10px] text-amber-400 font-mono mt-1">{previewStats.skipped} rows skipped</p>
+                      ) : null}
                     </div>
-                    <p className="text-3xl font-bold text-white">{csvRows.length}</p>
+                    <div className="bg-black/20 border border-blue-400/20 rounded-sm p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <TrendingUp size={14} className="text-blue-400" />
+                        <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">Total Invested</span>
+                      </div>
+                      <p className="text-3xl font-bold text-blue-400">
+                        {previewStats ? fmtCurrency(previewStats.investments) : '—'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="bg-black/20 border border-blue-400/20 rounded-sm p-5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <TrendingUp size={14} className="text-blue-400" />
-                      <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">Total Invested</span>
+
+                  {/* Ticker review */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Review Tickers</p>
+                      <p className="text-[10px] text-iron-dust font-mono">{uniqueTickers.length} unique ticker{uniqueTickers.length !== 1 ? 's' : ''}</p>
                     </div>
-                    <p className="text-3xl font-bold text-blue-400">
-                      {previewStats ? fmtCurrency(previewStats.investments) : '—'}
+                    <p className="text-[10px] text-iron-dust mb-3">
+                      Edit any ticker symbol below before importing — e.g. <span className="font-mono text-white">VFEM</span> should be <span className="font-mono text-white">VFEM.L</span>. Rows with unchanged tickers are imported as-is.
                     </p>
+                    <div className="border border-white/5 rounded-sm overflow-hidden">
+                      <div className="grid grid-cols-[1fr_24px_1fr] bg-[#131517] border-b border-white/5 px-4 py-2 text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">
+                        <span>CSV Ticker</span>
+                        <span />
+                        <span>Import As</span>
+                      </div>
+                      <div className="divide-y divide-white/[0.04] max-h-52 overflow-y-auto custom-scrollbar">
+                        {uniqueTickers.map(ticker => {
+                          const override = tickerOverrides[ticker] ?? ticker;
+                          const changed = override !== ticker;
+                          return (
+                            <div key={ticker} className="grid grid-cols-[1fr_24px_1fr] items-center px-4 py-2.5 hover:bg-white/[0.02]">
+                              <span className="font-mono text-xs text-iron-dust">{ticker}</span>
+                              <span className="text-iron-dust/40 text-center font-mono text-xs">→</span>
+                              <input
+                                type="text"
+                                value={override}
+                                onChange={e => setTickerOverrides(prev => ({ ...prev, [ticker]: e.target.value.toUpperCase() }))}
+                                className={clsx(
+                                  'bg-black/30 border rounded-sm px-2 py-1 text-xs font-mono outline-none transition-colors w-full',
+                                  changed ? 'border-amber-400/50 text-amber-400 focus:border-amber-400' : 'border-white/10 text-white focus:border-white/30'
+                                )}
+                                spellCheck={false}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               <div className="bg-amber-400/5 border border-amber-400/20 rounded-sm p-4">
@@ -854,7 +914,21 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 if (step === 'map') {
                   const errs = validateMapping();
                   if (errs.length) { setErrors(errs); return; }
-                  setErrors([]); setStep('confirm');
+                  setErrors([]);
+                  if (mode === 'investments') {
+                    const seen = new Set<string>();
+                    const initial: Record<string, string> = {};
+                    csvRows.forEach(row => {
+                      const s = getCellValue(row, 'symbol').trim().toUpperCase();
+                      const qty = cleanNum(getCellValue(row, 'quantity'));
+                      const price = cleanNum(getCellValue(row, 'price'));
+                      if (s && !isNaN(qty) && qty !== 0 && !isNaN(price) && price !== 0 && !seen.has(s)) {
+                        seen.add(s); initial[s] = tickerOverrides[s] ?? s;
+                      }
+                    });
+                    setTickerOverrides(initial);
+                  }
+                  setStep('confirm');
                 } else if (step === 'confirm') {
                   doImport();
                 }
@@ -862,7 +936,11 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               disabled={step === 'upload'}
               className="px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {step === 'map' ? `Review Import` : `Import ${csvRows.length} Rows`}
+              {step === 'map'
+                ? 'Review Import'
+                : mode === 'investments'
+                  ? `Import ${previewStats?.valid ?? 0} Trades`
+                  : `Import ${csvRows.length} Rows`}
             </button>
           </div>
         )}
