@@ -30,6 +30,7 @@ interface FinanceContextType {
   // Data State
   currentPrices: Record<string, MarketData>;
   currentBalances: { [key: string]: number };
+  historicalPrices: Record<string, Record<string, number>>;
   
   // Aggregators
   getHistory: (range: '1W' | '1M' | '1Y') => HistoricalPoint[];
@@ -418,6 +419,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       lastUpdated,
       currentPrices,
       currentBalances,
+      historicalPrices,
       getHistory,
       getTotalNetWorth,
       addTransaction,

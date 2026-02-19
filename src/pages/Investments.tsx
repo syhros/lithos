@@ -4,10 +4,12 @@ import { useFinance } from '../context/FinanceContext';
 import { LineChart, Wallet, TrendingUp, TrendingDown, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AddAccountModal } from '../components/AddAccountModal';
+import { HoldingDetailModal } from '../components/HoldingDetailModal';
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices } = useFinance();
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
+    const [selectedHolding, setSelectedHolding] = useState<any>(null);
     
     // Filter for Investment Accounts
     const investmentAssets = data.assets.filter(a => a.type === 'investment');
@@ -126,7 +128,11 @@ export const Investments: React.FC = () => {
                     {holdings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
                         return (
-                            <div key={stock.symbol} className="bg-[#161618] border border-white/5 p-6 rounded-sm relative hover:bg-white/[0.02] transition-colors group">
+                            <div 
+                                key={stock.symbol} 
+                                onClick={() => setSelectedHolding(stock)}
+                                className="bg-[#161618] border border-white/5 p-6 rounded-sm relative hover:bg-white/[0.02] transition-colors group cursor-pointer"
+                            >
                                 {/* Header: Symbol + Name */}
                                 <div className="flex justify-between items-start mb-6">
                                     <div className="flex items-center gap-3">
@@ -195,6 +201,12 @@ export const Investments: React.FC = () => {
             <AddAccountModal 
                 isOpen={isAddAccountModalOpen} 
                 onClose={() => setIsAddAccountModalOpen(false)} 
+            />
+            
+            <HoldingDetailModal
+                isOpen={!!selectedHolding}
+                onClose={() => setSelectedHolding(null)}
+                holding={selectedHolding}
             />
         </div>
     );
