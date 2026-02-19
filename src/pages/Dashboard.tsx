@@ -181,7 +181,7 @@ export const Dashboard: React.FC = () => {
   // Calculations
   const currentNetWorth = getTotalNetWorth();
   const [nwInt, nwDec] = currentNetWorth.toFixed(2).split('.');
-  
+
   // Header Metrics Logic
   const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
   const isStale = minsSinceUpdate > 5; // Consider stale if > 5 mins old
@@ -201,9 +201,50 @@ export const Dashboard: React.FC = () => {
     savingsAccounts.reduce((sum, a) => sum + (currentBalances[a.id] || 0), 0),
     [savingsAccounts, currentBalances]
   );
+
+  const holdings = useMemo(() => {
+    const map = new Map<string, any>();
+    const USD_TO_GBP = 1.27;
+    const userCurrency = data.user.currency || 'GBP';
+
+    data.transactions
+      .filter(t => t.type === 'investing' && t.symbol && t.quantity)
+      .forEach(t => {
+        if (!map.has(t.symbol)) {
+          map.set(t.symbol, {
+            symbol: t.symbol,
+            quantity: 0,
+            totalCost: 0,
+            currency: t.currency || 'GBP'
+          });
+        }
+        const h = map.get(t.symbol)!;
+        h.quantity += t.quantity || 0;
+        h.totalCost += (t.amount || 0);
+        if (t.currency) h.currency = t.currency;
+      });
+
+    return Array.from(map.values()).map(h => {
+      const marketData = currentPrices[h.symbol];
+      const nativeCurrency = marketData?.currency || h.currency || 'GBP';
+      const stockIsUsd = nativeCurrency === 'USD';
+      const userIsUsd = userCurrency === 'USD';
+
+      let fxRate = 1;
+      if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
+      if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+
+      const nativePrice = marketData ? marketData.price : 0;
+      const displayPrice = nativePrice * fxRate;
+      const currentValue = h.quantity * displayPrice;
+
+      return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
+    });
+  }, [data.transactions, currentPrices, data.user.currency]);
+
   const totalInvestmentBalance = useMemo(() =>
-    investmentAccounts.reduce((sum, a) => sum + (currentBalances[a.id] || 0), 0),
-    [investmentAccounts, currentBalances]
+    holdings.reduce((sum, h) => sum + h.currentValue, 0),
+    [holdings]
   );
   const totalLiabilitiesBalance = useMemo(() =>
     data.debts.reduce((sum, d) => sum + d.startingValue, 0),
