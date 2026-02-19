@@ -1,8 +1,9 @@
 import React from 'react';
-import { X, CreditCard, Landmark, Tag } from 'lucide-react';
+import { X, CreditCard, Landmark, Tag, Trash2 } from 'lucide-react';
 import { Debt } from '../data/mockData';
 import { differenceInMonths, parseISO, format } from 'date-fns';
 import { clsx } from 'clsx';
+import { useFinance } from '../context/FinanceContext';
 
 interface DebtDetailModalProps {
   debt: Debt;
@@ -10,6 +11,7 @@ interface DebtDetailModalProps {
   currencySymbol: string;
   onClose: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
 }
 
 const calcMinPayment = (debt: Debt, balance: number): number => {
@@ -35,7 +37,8 @@ const calcPayoffMonths = (balance: number, monthlyPayment: number, apr: number):
   return Math.ceil(n);
 };
 
-export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance, currencySymbol, onClose, onEdit }) => {
+export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance, currencySymbol, onClose, onEdit, onDelete }) => {
+  const { deleteDebt } = useFinance();
   const isPromoActive = debt.promo
     ? new Date() < parseISO(debt.promo.promoEndDate)
     : false;
@@ -218,13 +221,28 @@ export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance,
           </div>
         </div>
 
-        <div className="p-5 border-t border-white/5 bg-[#131517] flex justify-between flex-shrink-0">
-          <button
-            onClick={onEdit}
-            className="px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors"
-          >
-            Edit
-          </button>
+        <div className="p-5 border-t border-white/5 bg-[#131517] flex justify-between gap-3 flex-shrink-0">
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to delete this debt?')) {
+                  deleteDebt(debt.id);
+                  if (onDelete) onDelete();
+                  onClose();
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-red-900/10 border border-red-900/30 text-red-400 text-xs font-bold uppercase rounded-sm hover:bg-red-900/20 transition-colors"
+            >
+              <Trash2 size={13} />
+              Delete
+            </button>
+            <button
+              onClick={onEdit}
+              className="px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors"
+            >
+              Edit
+            </button>
+          </div>
           <button
             onClick={onClose}
             className="px-6 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"

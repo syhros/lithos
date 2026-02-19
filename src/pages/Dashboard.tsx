@@ -6,6 +6,39 @@ import { format, differenceInMinutes, subMonths } from 'date-fns';
 import { ArrowUpRight, ArrowDownRight, Calendar, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
+import { Bill } from '../data/mockData';
+
+// --- Helpers ---
+
+const getNextBillDueDate = (bill: Bill): Date => {
+  if (!bill.isRecurring) {
+    return new Date(bill.dueDate);
+  }
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  if (bill.frequency === 'monthly') {
+    const dayOfMonth = parseInt(bill.dueDate, 10);
+    const nextDate = new Date(currentYear, currentMonth, dayOfMonth);
+    if (nextDate <= now) {
+      nextDate.setMonth(nextDate.getMonth() + 1);
+    }
+    return nextDate;
+  } else if (bill.frequency === 'weekly') {
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const targetDay = dayNames.indexOf(bill.dueDate.toLowerCase());
+    const currentDay = now.getDay();
+    let daysUntil = targetDay - currentDay;
+    if (daysUntil <= 0) daysUntil += 7;
+    const nextDate = new Date(now);
+    nextDate.setDate(nextDate.getDate() + daysUntil);
+    return nextDate;
+  } else {
+    return new Date(bill.dueDate);
+  }
+};
 
 // --- Components ---
 
@@ -82,16 +115,16 @@ const ActivityItem: React.FC<{
     );
 };
 
-const BillItem: React.FC<{ name: string; date: string; amount: number; currencySymbol: string }> = ({ name, date, amount, currencySymbol }) => (
+const BillItem: React.FC<{ name: string; date: Date; amount: number; currencySymbol: string }> = ({ name, date, amount, currencySymbol }) => (
     <div className="flex justify-between items-center py-3 border-b border-white/5 last:border-0">
         <div className="flex items-center gap-3">
             <Calendar size={14} className="text-iron-dust" />
             <div>
                 <h4 className="text-xs font-bold text-white">{name}</h4>
-                <p className="font-mono text-[9px] text-iron-dust">Due {format(new Date(date), 'MMM dd')}</p>
+                <p className="font-mono text-[9px] text-iron-dust">Due {format(date, 'MMM dd')}</p>
             </div>
         </div>
-        <div className="font-mono text-xs text-white">{currencySymbol}{amount}</div>
+        <div className="font-mono text-xs text-white">{currencySymbol}{amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
     </div>
 );
 
@@ -401,9 +434,15 @@ export const Dashboard: React.FC = () => {
                     </Link>
                 </div>
                 <div className="space-y-1">
-                    {data.bills.slice(0, 5).map(bill => (
-                        <BillItem key={bill.id} name={bill.name} date={bill.dueDate} amount={bill.amount} currencySymbol={currencySymbol} />
-                    ))}
+                    {useMemo(() => {
+                      return data.bills
+                        .map(bill => ({ bill, dueDate: getNextBillDueDate(bill) }))
+                        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+                        .slice(0, 6)
+                        .map(({ bill }) => (
+                          <BillItem key={bill.id} name={bill.name} date={getNextBillDueDate(bill)} amount={bill.amount} currencySymbol={currencySymbol} />
+                        ));
+                    }, [data.bills, currencySymbol])}
                 </div>
             </div>
 

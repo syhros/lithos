@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check } from 'lucide-react';
+import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Trash2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
@@ -15,7 +15,7 @@ interface AccountDetailModalProps {
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
 export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account }) => {
-  const { data, currentBalances, updateAccount, getHistory, currencySymbol } = useFinance();
+  const { data, currentBalances, updateAccount, deleteAccount, getHistory, currencySymbol } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
@@ -119,6 +119,20 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
                 {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
+            {!editMode && (
+              <button
+                onClick={() => {
+                  if (confirm('Are you sure you want to delete this account?')) {
+                    deleteAccount(account.id);
+                    onClose();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors border bg-red-900/10 border-red-900/30 text-red-400 hover:bg-red-900/20"
+              >
+                <Trash2 size={13} />
+                Delete
+              </button>
+            )}
             <button
               onClick={editMode ? saveEdit : openEdit}
               className={clsx(

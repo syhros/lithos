@@ -92,7 +92,7 @@ export const Accounts: React.FC = () => {
             {liquidAssets.length > 0 && (
                 <div className="mb-12">
                     <h3 className="text-sm font-mono uppercase tracking-[2px] text-iron-dust mb-4">Account Summary</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
                         <div className="bg-black/30 rounded-sm p-4 border border-white/5">
                             <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Assets</span>
                             <span className="text-lg font-bold text-white font-mono">
@@ -103,7 +103,7 @@ export const Accounts: React.FC = () => {
                             </span>
                         </div>
                         <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Checking Balance</span>
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Checking</span>
                             <span className="text-lg font-bold text-white font-mono">
                                 {currencySymbol}{Object.entries(currentBalances)
                                     .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'checking' && !a.isClosed))
@@ -112,7 +112,7 @@ export const Accounts: React.FC = () => {
                             </span>
                         </div>
                         <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Savings Balance</span>
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Savings</span>
                             <span className="text-lg font-bold text-white font-mono">
                                 {currencySymbol}{Object.entries(currentBalances)
                                     .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'savings' && !a.isClosed))
@@ -121,9 +121,43 @@ export const Accounts: React.FC = () => {
                             </span>
                         </div>
                         <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Account Count</span>
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Monthly Saving</span>
+                            <span className={clsx('text-lg font-bold font-mono', ((data?.transactions || [])
+                                .filter(t => t.type === 'transfer' && t.category === 'Savings')
+                                .slice(-30)
+                                .reduce((sum, t) => sum + t.amount, 0)) > 0 ? 'text-emerald-vein' : 'text-white')}>
+                                {currencySymbol}{((data?.transactions || [])
+                                    .filter(t => t.type === 'transfer' && t.category === 'Savings')
+                                    .slice(-30)
+                                    .reduce((sum, t) => sum + t.amount, 0))
+                                    .toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Est. Monthly Interest</span>
+                            <span className={clsx('text-lg font-bold font-mono', liquidAssets.some(a => a.interestRate && a.interestRate > 0) ? 'text-emerald-vein' : 'text-white')}>
+                                {currencySymbol}{liquidAssets.filter(a => a.type === 'savings')
+                                    .reduce((sum, a) => {
+                                        const balance = currentBalances[a.id] || 0;
+                                        const monthlyInterest = a.interestRate ? (balance * (a.interestRate / 100)) / 12 : 0;
+                                        return sum + monthlyInterest;
+                                    }, 0)
+                                    .toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Checking / Savings</span>
                             <span className="text-lg font-bold text-white font-mono">
-                                {liquidAssets.length}
+                                {(() => {
+                                    const checking = Object.entries(currentBalances)
+                                        .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'checking' && !a.isClosed))
+                                        .reduce((sum, [, v]) => sum + v, 0);
+                                    const savings = Object.entries(currentBalances)
+                                        .filter(([id]) => (data?.assets || []).some(a => a.id === id && a.type === 'savings' && !a.isClosed))
+                                        .reduce((sum, [, v]) => sum + v, 0);
+                                    const ratio = savings > 0 ? (checking / savings) * 100 : 0;
+                                    return ratio.toFixed(1) + '%';
+                                })()}
                             </span>
                         </div>
                     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, Trash2 } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { Bill } from '../data/mockData';
 import { clsx } from 'clsx';
@@ -17,7 +17,7 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
   onClose,
   billToEdit,
 }) => {
-  const { data, addBill, updateBill } = useFinance();
+  const { data, addBill, updateBill, deleteBill } = useFinance();
   const isEditing = !!billToEdit;
 
   const [name, setName] = useState('');
@@ -291,20 +291,37 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
           </div>
         </div>
 
-        <div className="p-6 border-t border-white/5 bg-[#131517] flex justify-end gap-3 flex-shrink-0">
-          <button
-            onClick={() => { resetForm(); onClose(); }}
-            className="px-6 py-3 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!name || !amount || !dueDate || !(categoryInput || category)}
-            className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Save
-          </button>
+        <div className="p-6 border-t border-white/5 bg-[#131517] flex justify-between gap-3 flex-shrink-0">
+          {isEditing && billToEdit && (
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to delete this bill?')) {
+                  deleteBill(billToEdit.id);
+                  resetForm();
+                  onClose();
+                }
+              }}
+              className="flex items-center gap-2 px-5 py-3 bg-red-900/10 border border-red-900/30 text-red-400 text-xs font-bold uppercase rounded-sm hover:bg-red-900/20 transition-colors"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+          )}
+          <div className="flex gap-3 ml-auto">
+            <button
+              onClick={() => { resetForm(); onClose(); }}
+              className="px-6 py-3 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!name || !amount || !dueDate || !(categoryInput || category)}
+              className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -43,10 +43,13 @@ interface FinanceContextType {
   deleteTransactions: (ids: string[]) => void;
   addAccount: (account: Omit<Asset, 'id'>) => void;
   updateAccount: (id: string, updates: Partial<Omit<Asset, 'id'>>) => void;
+  deleteAccount: (id: string) => void;
   addDebt: (debt: Omit<Debt, 'id'>) => void;
   updateDebt: (id: string, updates: Partial<Omit<Debt, 'id'>>) => void;
+  deleteDebt: (id: string) => void;
   addBill: (bill: Omit<Bill, 'id'>) => void;
   updateBill: (id: string, updates: Partial<Omit<Bill, 'id'>>) => void;
+  deleteBill: (id: string) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
@@ -514,6 +517,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
+  const deleteAccount = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      assets: prev.assets.filter(a => a.id !== id),
+      transactions: prev.transactions.filter(t => t.accountId !== id)
+    }));
+  };
+
   const addDebt = (debt: Omit<Debt, 'id'>) => {
     const newDebt: Debt = { ...debt, id: crypto.randomUUID() };
     setData(prev => ({ ...prev, debts: [...prev.debts, newDebt] }));
@@ -526,6 +537,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
+  const deleteDebt = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      debts: prev.debts.filter(d => d.id !== id),
+      transactions: prev.transactions.filter(t => t.debtId !== id)
+    }));
+  };
+
   const addBill = (bill: Omit<Bill, 'id'>) => {
     const newBill: Bill = { ...bill, id: crypto.randomUUID() };
     setData(prev => ({ ...prev, bills: [...prev.bills, newBill] }));
@@ -535,6 +554,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setData(prev => ({
       ...prev,
       bills: prev.bills.map(b => b.id === id ? { ...b, ...updates } : b)
+    }));
+  };
+
+  const deleteBill = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      bills: prev.bills.filter(b => b.id !== id)
     }));
   };
 
@@ -561,10 +587,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteTransactions,
       addAccount,
       updateAccount,
+      deleteAccount,
       addDebt,
       updateDebt,
+      deleteDebt,
       addBill,
       updateBill,
+      deleteBill,
       updateUserProfile,
       refreshData,
       currencySymbol: getCurrencySymbol(data.user.currency)
