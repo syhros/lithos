@@ -179,24 +179,18 @@ export const Investments: React.FC = () => {
                             >
                                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
 
-                                {/* Background chart — full tile */}
-                                <div className="absolute inset-0 pointer-events-none">
+                                {/* Background chart — full tile, fades in left-to-right via CSS mask */}
+                                <div
+                                    className="absolute inset-0 pointer-events-none"
+                                    style={{ maskImage: 'linear-gradient(to right, transparent 0%, black 55%)', WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%)' }}
+                                >
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={acctChart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                                             <defs>
                                                 <linearGradient id={`acctGrad-${asset.id}`} x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor={acctColor} stopOpacity={0.18} />
+                                                    <stop offset="5%" stopColor={acctColor} stopOpacity={0.22} />
                                                     <stop offset="95%" stopColor={acctColor} stopOpacity={0} />
                                                 </linearGradient>
-                                                {/* Left-to-right fade mask: transparent on left, opaque by mid */}
-                                                <linearGradient id={`acctMask-${asset.id}`} x1="0" y1="0" x2="1" y2="0">
-                                                    <stop offset="0%" stopColor="black" stopOpacity={0} />
-                                                    <stop offset="50%" stopColor="black" stopOpacity={1} />
-                                                    <stop offset="100%" stopColor="black" stopOpacity={1} />
-                                                </linearGradient>
-                                                <mask id={`acctChartMask-${asset.id}`}>
-                                                    <rect x="0" y="0" width="100%" height="100%" fill={`url(#acctMask-${asset.id})`} />
-                                                </mask>
                                             </defs>
                                             <YAxis domain={[acctMin, 'auto']} hide={true} />
                                             <Area
@@ -207,7 +201,6 @@ export const Investments: React.FC = () => {
                                                 fill={`url(#acctGrad-${asset.id})`}
                                                 dot={false}
                                                 isAnimationActive={false}
-                                                mask={`url(#acctChartMask-${asset.id})`}
                                             />
                                         </AreaChart>
                                     </ResponsiveContainer>
