@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Plus, Wallet, ChevronDown, ChevronRight } from 'lucide-react';
+import clsx from 'clsx';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { AccountDetailModal } from '../components/AccountDetailModal';
 import { Asset } from '../data/mockData';
