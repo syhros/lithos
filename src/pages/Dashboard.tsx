@@ -170,7 +170,7 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
 // --- Main Dashboard ---
 
 export const Dashboard: React.FC = () => {
-  const { data, getTotalNetWorth, currentBalances, getHistory, lastUpdated, refreshData, loading, currencySymbol } = useFinance();
+  const { data, getTotalNetWorth, currentBalances, currentPrices, getHistory, lastUpdated, refreshData, loading, currencySymbol } = useFinance();
   
   // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
