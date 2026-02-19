@@ -201,6 +201,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [importCount, setImportCount] = useState(0);
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
   const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
+  const [isLoading, setIsLoading] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -356,9 +357,41 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     return Array.from(seen).sort();
   }, [csvRows, mapping, mode]);
 
-  const doImport = () => {
+  const doImport = async () => {
     const errs = validateMapping();
     if (errs.length) { setErrors(errs); return; }
+
+    setIsLoading(true);
+    setErrors(['Fetching historical prices...']);
+
+    // Fetch historical prices for all investment tickers before import
+    let fetchedHistoricalPrices = { ...historicalPrices };
+
+    if (mode === 'investments') {
+      const uniqueSymbolsInCsv = new Set<string>();
+      csvRows.forEach(row => {
+        const rawSymbol = getCellValue(row, 'symbol').trim().toUpperCase();
+        const symbol = (tickerOverrides[rawSymbol] || rawSymbol).toUpperCase();
+        if (symbol) uniqueSymbolsInCsv.add(symbol);
+      });
+
+      // Fetch missing historical data
+      const symbolsToFetch = Array.from(uniqueSymbolsInCsv).filter(sym => !historicalPrices[sym]);
+
+      if (symbolsToFetch.length > 0) {
+        try {
+          const historyRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/price-history?symbols=${symbolsToFetch.join(',')}`);
+          if (historyRes.ok) {
+            const historyData = await historyRes.json();
+            fetchedHistoricalPrices = { ...historicalPrices, ...historyData };
+          }
+        } catch (e) {
+          console.error('Failed to fetch historical prices:', e);
+        }
+      }
+    }
+
+    setIsLoading(false);
 
     let count = 0;
     const newErrors: string[] = [];
@@ -420,7 +453,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
 
             // Always reinvest dividends: look up historical price on that day to calculate fractional shares
             const dateStr = txDate.split('T')[0];
-            const histForSymbol = historicalPrices[symbol] || {};
+            const histForSymbol = fetchedHistoricalPrices[symbol] || {};
             // Walk back up to 7 days to find a trading day price
             let historicalPrice: number | null = null;
             for (let d = 0; d < 7; d++) {
@@ -476,7 +509,9 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setImportCount(count);
     setImportStats({ income: totalIncome, expense: totalExpense, netChange: totalIncome - totalExpense, investments: totalInvestments });
     setErrors(newErrors);
-    setStep('done');
+    if (newErrors.length === 0) {
+      setStep('done');
+    }
   };
 
   if (!isOpen) return null;
@@ -1019,7 +1054,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                   doImport();
                 }
               }}
-              disabled={step === 'upload'}
+              disabled={step === 'upload' || isLoading}
               className="px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {step === 'map'
