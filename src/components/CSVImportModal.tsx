@@ -537,12 +537,6 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     }
   };
 
-  useEffect(() => {
-    if (step === 'confirm' && !importStartedRef.current) {
-      importStartedRef.current = true;
-      doImport();
-    }
-  }, [step]);
 
   if (!isOpen) return null;
 
@@ -1098,6 +1092,9 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                   }
                   importStartedRef.current = false;
                   setStep('confirm');
+                } else if (step === 'confirm' && !importStartedRef.current) {
+                  importStartedRef.current = true;
+                  doImport();
                 }
               }}
               disabled={step === 'upload' || isLoading}
