@@ -53,6 +53,29 @@ const getPriceAtDate = (dateStr: string, history: Record<string, number>, lastKn
     return lastKnown;
 };
 
+// Coherent random walk: simulate 365 days of price history ending at `currentPrice`
+const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
+    const history: Record<string, number> = {};
+    const today = new Date();
+    const volatility = 0.015;
+    const prices: number[] = [currentPrice];
+
+    for (let i = 1; i < 365; i++) {
+        const prev = prices[i - 1];
+        const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
+        prices.push(move);
+    }
+
+    prices.reverse();
+
+    for (let i = 0; i < 365; i++) {
+        const d = subDays(today, i);
+        history[format(d, 'yyyy-MM-dd')] = prices[i];
+    }
+
+    return history;
+};
+
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [data, setData] = useState<MockData>(initialData);
   const [loading, setLoading] = useState(true);
@@ -86,34 +109,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const shouldFetch = force || !lastSync || (now - parseInt(lastSync) > 30 * 60 * 1000);
 
         if (shouldFetch) {
-            // Attempt to fetch from Vercel API
-            // Note: In a browser-only environment without the Vercel backend running, this will fail.
-            // We expect this to fail in CodeSandbox/StackBlitz unless a server is configured.
             let fetchedPrices: any = {};
-            
+            let liveApiAvailable = false;
+
             try {
-                // Check if we are in a dev environment that likely doesn't support the API
-                // This is a heuristic; in a real app, you'd check process.env or similar.
-                // For now, we attempt the fetch.
                 const res = await fetch(`/api/live?symbols=${uniqueSymbols.join(',')}`);
                 if (res.ok) {
                     fetchedPrices = await res.json();
+                    liveApiAvailable = true;
                 } else {
-                    throw new Error(`API returned ${res.status}: Route unreachable`);
+                    throw new Error(`API returned ${res.status}`);
                 }
             } catch (e) {
-                // FALLBACK: Simulate API response
-                // We use console.info here to indicate this is an expected fallback in demo mode.
-                console.info("Info: API unreachable. Switching to Demo Mode with simulated live data.");
-                
+                console.info("Info: Live API unreachable. Switching to Demo Mode.");
                 uniqueSymbols.forEach(sym => {
                     const base = fallbackPrices[sym] || 100;
                     const jitter = (Math.random() * 4) - 2;
                     fetchedPrices[sym] = {
                         price: base + jitter,
                         change: jitter,
-                        changePercent: (jitter/base) * 100,
-                        currency: 'USD'
+                        changePercent: (jitter / base) * 100,
+                        currency: 'GBP'
                     };
                 });
             }
@@ -122,27 +138,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             localStorage.setItem('lithos_last_sync', now.toString());
             setLastUpdated(new Date());
 
-            // C. Historical Backfill (Lazy Load)
-            // In a real app, we would loop uniqueSymbols and hit /api/history for each if missing from cache
-            // For this demo, we will generate synthetic history based on current price
+            // C. Historical Backfill — attempt real API, fall back to coherent random walk
             const historyCache: Record<string, Record<string, number>> = {};
-            
-            uniqueSymbols.forEach(sym => {
-                const current = fetchedPrices[sym]?.price || 100;
-                const history: Record<string, number> = {};
-                const today = new Date();
-                
-                // Generate 365 days of history
-                for(let i=0; i<365; i++) {
-                    const d = subDays(today, i);
-                    const dStr = format(d, 'yyyy-MM-dd');
-                    // Random walk backwards
-                    const volatility = 0.02; // 2% daily move
-                    const prevPrice = current * (1 + (Math.random() * volatility - (volatility/2)));
-                    history[dStr] = prevPrice;
+
+            await Promise.all(uniqueSymbols.map(async sym => {
+                let history: Record<string, number> = {};
+
+                if (liveApiAvailable) {
+                    try {
+                        const hRes = await fetch(`/api/history?symbol=${sym}`);
+                        if (hRes.ok) {
+                            const rows: { date: string; close: number }[] = await hRes.json();
+                            rows.forEach(row => { history[row.date] = row.close; });
+                            console.info(`Loaded real history for ${sym}: ${rows.length} points`);
+                        } else {
+                            throw new Error(`History API returned ${hRes.status}`);
+                        }
+                    } catch (e) {
+                        console.info(`History API failed for ${sym}, generating synthetic history.`);
+                        history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+                    }
+                } else {
+                    history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
                 }
+
                 historyCache[sym] = history;
-            });
+            }));
+
             setHistoricalPrices(historyCache);
         }
     } catch (err) {
