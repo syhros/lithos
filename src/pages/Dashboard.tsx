@@ -251,6 +251,16 @@ export const Dashboard: React.FC = () => {
       return months;
   }, [data.transactions]);
 
+  const upcomingBills = useMemo(() => {
+    return data.bills
+      .map(bill => ({ bill, dueDate: getNextBillDueDate(bill) }))
+      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+      .slice(0, 6)
+      .map(({ bill }) => (
+        <BillItem key={bill.id} name={bill.name} date={getNextBillDueDate(bill)} amount={bill.amount} currencySymbol={currencySymbol} />
+      ));
+  }, [data.bills, currencySymbol]);
+
   const isLoading = loading && data.assets.length === 0 && data.transactions.length === 0;
   const isEmpty = data.assets.length === 0;
 
@@ -483,15 +493,7 @@ export const Dashboard: React.FC = () => {
                     </Link>
                 </div>
                 <div className="space-y-1">
-                    {useMemo(() => {
-                      return data.bills
-                        .map(bill => ({ bill, dueDate: getNextBillDueDate(bill) }))
-                        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
-                        .slice(0, 6)
-                        .map(({ bill }) => (
-                          <BillItem key={bill.id} name={bill.name} date={getNextBillDueDate(bill)} amount={bill.amount} currencySymbol={currencySymbol} />
-                        ));
-                    }, [data.bills, currencySymbol])}
+                    {upcomingBills}
                 </div>
             </div>
 
