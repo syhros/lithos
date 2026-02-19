@@ -126,23 +126,9 @@ export const Investments: React.FC = () => {
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
-            {/* Header with background portfolio chart */}
-            <div className="relative mb-4 mt-4 min-h-[220px]">
-                <div className="absolute inset-0 opacity-15 pointer-events-none">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={portfolioChartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                            <defs>
-                                <linearGradient id="portfolioBg" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={portfolioUp ? '#00f2ad' : '#ff4d00'} stopOpacity={0.6} />
-                                    <stop offset="100%" stopColor={portfolioUp ? '#00f2ad' : '#ff4d00'} stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <Area type="monotone" dataKey="value" stroke={portfolioUp ? '#00f2ad' : '#ff4d00'} strokeWidth={2} fill="url(#portfolioBg)" dot={false} isAnimationActive={false} />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-
-                <div className="relative z-10 flex items-start justify-between">
+            {/* Header */}
+            <div className="mb-4 mt-4">
+                <div className="flex items-start justify-between">
                     <div>
                         <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Module</span>
                         <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>
@@ -163,6 +149,7 @@ export const Investments: React.FC = () => {
             </div>
 
             {/* Section 1: Accounts — 2 wide with 1M chart */}
+
             <div className="mb-12">
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-sm font-bold text-white uppercase tracking-[2px] flex items-center gap-2">
@@ -207,7 +194,7 @@ export const Investments: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="w-40 flex-shrink-0 flex flex-col justify-end">
+                                <div className="w-1/2 flex-shrink-0 flex flex-col justify-end">
                                     <ResponsiveContainer width="100%" height={110}>
                                         <AreaChart data={acctChart} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                                             <defs>

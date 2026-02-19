@@ -42,7 +42,9 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => void;
   deleteTransactions: (ids: string[]) => void;
   addAccount: (account: Omit<Asset, 'id'>) => void;
+  updateAccount: (id: string, updates: Partial<Omit<Asset, 'id'>>) => void;
   addDebt: (debt: Omit<Debt, 'id'>) => void;
+  updateDebt: (id: string, updates: Partial<Omit<Debt, 'id'>>) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
@@ -149,13 +151,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                     fetchedPrices[sym] = {
                         price: base + jitter,
                         change: jitter,
-                        changePercent: (jitter / base) * 100,
-                        currency: 'GBP'
+                        changePercent: 0, // will be recalculated after historical load
+                        currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
                     };
                 });
             }
 
-            setCurrentPrices(fetchedPrices);
             localStorage.setItem('lithos_last_sync', now.toString());
             setLastUpdated(new Date());
 
@@ -214,6 +215,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }));
 
             setHistoricalPrices(historyCache);
+
+            // Recalculate changePercent using yesterday's close from history
+            const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+            const updatedPrices = { ...fetchedPrices };
+            uniqueSymbols.forEach(sym => {
+                const hist = historyCache[sym];
+                const currentPrice = updatedPrices[sym]?.price;
+                if (hist && currentPrice) {
+                    const prevClose = hist[yesterday];
+                    if (prevClose && prevClose > 0) {
+                        const chg = currentPrice - prevClose;
+                        const chgPct = (chg / prevClose) * 100;
+                        updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: chgPct };
+                    }
+                }
+            });
+            setCurrentPrices(updatedPrices);
         }
     } catch (err) {
         console.error("Critical: Market Data Sync Failed Completely", err);
@@ -486,9 +504,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setData(prev => ({ ...prev, assets: [...prev.assets, newAccount] }));
   };
 
+  const updateAccount = (id: string, updates: Partial<Omit<Asset, 'id'>>) => {
+    setData(prev => ({
+      ...prev,
+      assets: prev.assets.map(a => a.id === id ? { ...a, ...updates } : a)
+    }));
+  };
+
   const addDebt = (debt: Omit<Debt, 'id'>) => {
     const newDebt: Debt = { ...debt, id: crypto.randomUUID() };
     setData(prev => ({ ...prev, debts: [...prev.debts, newDebt] }));
+  };
+
+  const updateDebt = (id: string, updates: Partial<Omit<Debt, 'id'>>) => {
+    setData(prev => ({
+      ...prev,
+      debts: prev.debts.map(d => d.id === id ? { ...d, ...updates } : d)
+    }));
   };
 
   const updateUserProfile = (updates: Partial<UserProfile>) => {
@@ -513,7 +545,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteTransaction,
       deleteTransactions,
       addAccount,
+      updateAccount,
       addDebt,
+      updateDebt,
       updateUserProfile,
       refreshData,
       currencySymbol: getCurrencySymbol(data.user.currency)

@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
-import { X, TrendingUp, TrendingDown } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, TrendingUp, TrendingDown, Pencil, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } from 'date-fns';
 import { clsx } from 'clsx';
 import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
-import { Asset } from '../data/mockData';
+import { Asset, Currency } from '../data/mockData';
 
 interface InvestmentAccountModalProps {
   isOpen: boolean;
@@ -12,8 +12,39 @@ interface InvestmentAccountModalProps {
   account: Asset | null;
 }
 
+const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
+
 export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ isOpen, onClose, account }) => {
-  const { data, currentBalances, currentPrices, historicalPrices, currencySymbol } = useFinance();
+  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol } = useFinance();
+
+  const [editMode, setEditMode] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editInstitution, setEditInstitution] = useState('');
+  const [editCurrency, setEditCurrency] = useState<Currency>('GBP');
+  const [editStartingValue, setEditStartingValue] = useState('');
+  const [editColor, setEditColor] = useState('');
+
+  const openEdit = () => {
+    if (!account) return;
+    setEditName(account.name);
+    setEditInstitution(account.institution || '');
+    setEditCurrency(account.currency);
+    setEditStartingValue(account.startingValue.toString());
+    setEditColor(account.color || COLORS[0]);
+    setEditMode(true);
+  };
+
+  const saveEdit = () => {
+    if (!account) return;
+    updateAccount(account.id, {
+      name: editName,
+      institution: editInstitution,
+      currency: editCurrency,
+      startingValue: parseFloat(editStartingValue) || account.startingValue,
+      color: editColor,
+    });
+    setEditMode(false);
+  };
 
   const balance = account ? currentBalances[account.id] || 0 : 0;
 
@@ -138,13 +169,78 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                 {isProfit ? '+' : ''}{currencySymbol}{totalProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </span>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors">
+            <button
+              onClick={editMode ? saveEdit : openEdit}
+              className={clsx(
+                'flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors border',
+                editMode
+                  ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
+                  : 'bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20'
+              )}
+            >
+              {editMode ? <Check size={13} /> : <Pencil size={13} />}
+              {editMode ? 'Save' : 'Edit'}
+            </button>
+            <button onClick={() => { setEditMode(false); onClose(); }} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors">
               <X size={20} />
             </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-8">
+
+          {editMode && (
+            <div className="bg-[#161618] border border-white/5 rounded-sm p-6 space-y-5">
+              <h3 className="text-xs font-bold text-white uppercase tracking-[2px]">Edit Account</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Account Name</label>
+                  <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Institution</label>
+                  <input type="text" value={editInstitution} onChange={e => setEditInstitution(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Currency</label>
+                  <select value={editCurrency} onChange={e => setEditCurrency(e.target.value as Currency)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option value="GBP">GBP (£)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Starting Balance</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
+                    <input type="number" value={editStartingValue} onChange={e => setEditStartingValue(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-3">Accent Color</label>
+                <div className="flex gap-3">
+                  {COLORS.map(c => (
+                    <button key={c} onClick={() => setEditColor(c)}
+                      className={clsx('w-7 h-7 rounded-full transition-all', editColor === c ? 'ring-2 ring-white ring-offset-2 ring-offset-[#161618] scale-110' : 'opacity-60 hover:opacity-100')}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setEditMode(false)}
+                  className="px-5 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors">Cancel</button>
+                <button onClick={saveEdit}
+                  className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors">Save Changes</button>
+              </div>
+            </div>
+          )}
 
           <div className="h-[200px] bg-[#161618] border border-white/5 rounded-sm p-4">
             <div className="flex items-center justify-between mb-3">
