@@ -7,6 +7,8 @@ import { Transactions } from './src/pages/Transactions';
 import { Accounts } from './src/pages/Accounts';
 import { Debts } from './src/pages/Debts';
 import { Investments } from './src/pages/Investments';
+import { Bills } from './src/pages/Bills';
+import { Trends } from './src/pages/Trends';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
@@ -47,9 +49,9 @@ const App: React.FC = () => {
             <Route path="/investments" element={<Investments />} />
             <Route path="/debts" element={<Debts />} />
             <Route path="/goals" element={<PlaceholderPage title="Goals" />} />
-            <Route path="/bills" element={<PlaceholderPage title="Bills" />} />
+            <Route path="/bills" element={<Bills />} />
             <Route path="/recurring" element={<PlaceholderPage title="Recurring" />} />
-            <Route path="/trends" element={<PlaceholderPage title="Trends" />} />
+            <Route path="/trends" element={<Trends />} />
             <Route path="/categorize" element={<PlaceholderPage title="Categorize" />} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
             <Route path="*" element={<Navigate to="/" replace />} />

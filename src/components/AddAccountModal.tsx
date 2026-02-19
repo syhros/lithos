@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
-import { AssetType, Currency, DebtType, MinPaymentType } from '../data/mockData';
+import { AssetType, Currency, DebtType, MinPaymentType, Debt } from '../data/mockData';
 import { clsx } from 'clsx';
 
 type ModalMode = 'asset' | 'debt';
@@ -11,6 +11,7 @@ interface AddAccountModalProps {
   onClose: () => void;
   defaultType?: AssetType;
   mode?: ModalMode;
+  debtToEdit?: Debt;
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
@@ -20,8 +21,11 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   onClose,
   defaultType = 'checking',
   mode = 'asset',
+  debtToEdit,
 }) => {
-  const { addAccount, addDebt, currencySymbol } = useFinance();
+  const { addAccount, addDebt, currencySymbol, updateDebt } = useFinance();
+
+  const isEditing = !!debtToEdit;
 
   const [assetType, setAssetType] = useState<AssetType>(defaultType);
   const [name, setName] = useState('');
@@ -40,6 +44,24 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   const [hasPromo, setHasPromo] = useState(false);
   const [promoApr, setPromoApr] = useState('0');
   const [promoEndDate, setPromoEndDate] = useState('');
+
+  useEffect(() => {
+    if (isEditing && debtToEdit) {
+      setName(debtToEdit.name);
+      setDebtType(debtToEdit.type);
+      setDebtLimit(debtToEdit.limit.toString());
+      setDebtApr(debtToEdit.apr.toString());
+      setDebtMinPaymentType(debtToEdit.minPaymentType);
+      setDebtMinPaymentValue(debtToEdit.minPaymentValue.toString());
+      setHasPromo(!!debtToEdit.promo);
+      if (debtToEdit.promo) {
+        setPromoApr(debtToEdit.promo.promoApr.toString());
+        setPromoEndDate(debtToEdit.promo.promoEndDate);
+      }
+    } else if (!isOpen) {
+      resetForm();
+    }
+  }, [isEditing, debtToEdit, isOpen]);
 
   if (!isOpen) return null;
 
@@ -66,7 +88,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
 
     if (mode === 'debt') {
       if (!debtLimit || !debtApr) return;
-      addDebt({
+      const debtData = {
         name,
         type: debtType,
         limit: parseFloat(debtLimit),
@@ -77,7 +99,13 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
         promo: hasPromo && promoEndDate
           ? { promoApr: parseFloat(promoApr) || 0, promoEndDate }
           : undefined,
-      });
+      };
+
+      if (isEditing && debtToEdit) {
+        updateDebt(debtToEdit.id, debtData);
+      } else {
+        addDebt(debtData);
+      }
     } else {
       addAccount({
         name,
@@ -99,7 +127,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
       <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-md rounded-sm shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#131517] flex-shrink-0">
           <h3 className="text-sm font-bold uppercase tracking-[2px] text-white">
-            {mode === 'debt' ? 'Add Debt Account' : 'Add Account'}
+            {isEditing ? `Edit ${mode === 'debt' ? 'Debt' : 'Account'}` : (mode === 'debt' ? 'Add Debt Account' : 'Add Account')}
           </h3>
           <button onClick={onClose} className="text-iron-dust hover:text-white">
             <X size={18} />

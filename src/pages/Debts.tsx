@@ -23,6 +23,7 @@ export const Debts: React.FC = () => {
     const debts = data.debts;
     const [showAddDebt, setShowAddDebt] = useState(false);
     const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
+    const [editingDebt, setEditingDebt] = useState<Debt | null>(null);
 
     const totalAssets = Object.entries(currentBalances)
         .filter(([id]) => data.assets.some(a => a.id === id))
@@ -231,9 +232,13 @@ export const Debts: React.FC = () => {
             </div>
 
             <AddAccountModal
-                isOpen={showAddDebt}
-                onClose={() => setShowAddDebt(false)}
+                isOpen={showAddDebt || editingDebt !== null}
+                onClose={() => {
+                    setShowAddDebt(false);
+                    setEditingDebt(null);
+                }}
                 mode="debt"
+                debtToEdit={editingDebt || undefined}
             />
 
             {selectedDebt && (
@@ -242,6 +247,10 @@ export const Debts: React.FC = () => {
                     balance={currentBalances[selectedDebt.id] || 0}
                     currencySymbol={currencySymbol}
                     onClose={() => setSelectedDebt(null)}
+                    onEdit={() => {
+                        setEditingDebt(selectedDebt);
+                        setSelectedDebt(null);
+                    }}
                 />
             )}
         </div>

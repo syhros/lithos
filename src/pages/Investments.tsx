@@ -1,21 +1,25 @@
 
 import React, { useMemo, useState } from 'react';
 import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
-import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus } from 'lucide-react';
+import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
+import { differenceInMinutes } from 'date-fns';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } from 'date-fns';
+import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes } from 'date-fns';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
 
 export const Investments: React.FC = () => {
-    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol } = useFinance();
+    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading } = useFinance();
     const userCurrency = data.user.currency;
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
+
+    const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
+    const isStale = minsSinceUpdate > 5;
 
     const investmentAssets = data.assets.filter(a => a.type === 'investment');
 
@@ -151,13 +155,27 @@ export const Investments: React.FC = () => {
                             <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
                         </p>
                     </div>
-                    <button
-                        onClick={() => setIsAddAccountModalOpen(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
-                    >
-                        <Plus size={14} />
-                        Add Account
-                    </button>
+                    <div className="flex flex-col gap-3">
+                        <button
+                            onClick={() => setIsAddAccountModalOpen(true)}
+                            className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
+                        >
+                            <Plus size={14} />
+                            Add Account
+                        </button>
+                        <div className="flex items-center gap-2 px-3 py-2">
+                            <button
+                                onClick={() => refreshData()}
+                                disabled={loading}
+                                className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
+                            >
+                                <RefreshCw size={14} />
+                            </button>
+                            <div className="text-[10px] font-mono text-iron-dust">
+                                Updated {format(lastUpdated, 'HH:mm')}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -326,7 +344,7 @@ export const Investments: React.FC = () => {
                                     <div className="text-right">
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">P/L</span>
                                         <span className={clsx('font-mono text-[10px]', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                                            {isProfit ? '+' : ''}{currencySymbol}{Math.abs(stock.profitValue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            {isProfit ? '+' : ''}{currencySymbol}{(Math.floor(Math.abs(stock.profitValue) * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 </div>

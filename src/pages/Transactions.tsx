@@ -8,10 +8,13 @@ import { CSVImportModal } from '../components/CSVImportModal';
 import { TransactionDetailModal } from '../components/TransactionDetailModal';
 import { Transaction } from '../data/mockData';
 
+type SortOption = 'newest' | 'oldest' | 'amount-high' | 'amount-low';
+
 export const Transactions: React.FC = () => {
   const { data, deleteTransaction, deleteTransactions, currencySymbol } = useFinance();
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [showModal, setShowModal] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -25,12 +28,31 @@ export const Transactions: React.FC = () => {
       return map;
   }, [data.assets, data.debts]);
 
-  const filteredTransactions = data.transactions.filter(tx => {
-    const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) ||
-                          tx.category.toLowerCase().includes(search.toLowerCase());
-    const matchesType = filterType === 'all' || tx.type === filterType;
-    return matchesSearch && matchesType;
-  });
+  const filteredTransactions = useMemo(() => {
+    const filtered = data.transactions.filter(tx => {
+      const matchesSearch = tx.description.toLowerCase().includes(search.toLowerCase()) ||
+                            tx.category.toLowerCase().includes(search.toLowerCase());
+      const matchesType = filterType === 'all' || tx.type === filterType;
+      return matchesSearch && matchesType;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        case 'oldest':
+          return new Date(a.date).getTime() - new Date(b.date).getTime();
+        case 'amount-high':
+          return Math.abs(b.amount) - Math.abs(a.amount);
+        case 'amount-low':
+          return Math.abs(a.amount) - Math.abs(b.amount);
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [data.transactions, search, filterType, sortBy]);
 
   const allSelected = filteredTransactions.length > 0 && filteredTransactions.every(tx => selectedIds.has(tx.id));
 
@@ -64,7 +86,7 @@ export const Transactions: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar">
+    <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
         <div>
           <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
@@ -127,6 +149,19 @@ export const Transactions: React.FC = () => {
                 {type.replace('_', ' ')}
               </button>
             ))}
+          </div>
+
+          <div className="ml-auto">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-colors appearance-none cursor-pointer"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="amount-high">Amount High</option>
+              <option value="amount-low">Amount Low</option>
+            </select>
           </div>
 
           {selectMode && (

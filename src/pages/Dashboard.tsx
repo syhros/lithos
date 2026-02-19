@@ -32,7 +32,12 @@ const GridBox: React.FC<{
     history: any[];
     dataKey: string;
     currencySymbol: string;
-}> = ({ label, value, color, history, dataKey, currencySymbol }) => {
+    plValue?: number;
+    plPercent?: number;
+}> = ({ label, value, color, history, dataKey, currencySymbol, plValue, plPercent }) => {
+    const isProfit = plValue !== undefined ? plValue >= 0 : true;
+    const plColor = isProfit ? '#00f2ad' : '#ff4d00';
+
     return (
         <div className="group relative bg-[#161618] border border-white/5 p-6 rounded-sm h-[220px] flex flex-col justify-between overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:bg-[#1a1c1e]">
             {/* Dynamic Accent Line: slides up/fills on hover */}
@@ -43,8 +48,13 @@ const GridBox: React.FC<{
                 <div className="text-4xl font-bold text-white tracking-tight">
                     {currencySymbol}{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
+                {plValue !== undefined && plPercent !== undefined && (
+                    <div className={clsx('text-xs font-mono mt-1 flex items-center gap-1', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                        {isProfit ? '+' : ''}{currencySymbol}{(Math.floor(Math.abs(plValue) * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({plPercent.toFixed(1)}%)
+                    </div>
+                )}
             </div>
-            
+
             <div className="absolute bottom-0 left-0 right-0 h-24 w-full px-4 pb-2">
                  <Sparkline data={history} dataKey={dataKey} color={color} className="w-full h-full" />
             </div>
@@ -148,7 +158,23 @@ export const Dashboard: React.FC = () => {
 
   // Derived Historical Data (Syncs everything)
   const historyData = useMemo(() => getHistory(timeRange), [timeRange, data.transactions, getHistory]);
-  
+
+  // Calculate P/L for accounts (checking + savings)
+  const accountsPL = useMemo(() => {
+    const checkingAccount = data.assets.find(a => a.id === '1');
+    const savingsAccount = data.assets.find(a => a.id === '2');
+
+    const checkingStarting = checkingAccount?.startingValue || 0;
+    const savingsStarting = savingsAccount?.startingValue || 0;
+    const totalStarting = checkingStarting + savingsStarting;
+
+    const currentAccounts = (currentBalances['1'] || 0) + (currentBalances['2'] || 0);
+    const plValue = currentAccounts - totalStarting;
+    const plPercent = totalStarting > 0 ? (plValue / totalStarting) * 100 : 0;
+
+    return { plValue, plPercent };
+  }, [data.assets, currentBalances]);
+
   // Expenses for Spending Trend (Simulated from transaction ledger for last 6 months)
   const spendingTrend = useMemo(() => {
       // Group expenses by month from ledger
@@ -312,11 +338,13 @@ export const Dashboard: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 slide-up" style={{ animationDelay: '0.2s' }}>
                 <GridBox
                     label="Accounts"
-                    value={currentBalances['1']}
+                    value={(currentBalances['1'] || 0) + (currentBalances['2'] || 0)}
                     color="#00f2ad"
                     history={historyData}
                     dataKey="checking"
                     currencySymbol={currencySymbol}
+                    plValue={accountsPL.plValue}
+                    plPercent={accountsPL.plPercent}
                 />
                 <GridBox
                     label="Savings"

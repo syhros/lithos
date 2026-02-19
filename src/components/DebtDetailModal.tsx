@@ -9,6 +9,7 @@ interface DebtDetailModalProps {
   balance: number;
   currencySymbol: string;
   onClose: () => void;
+  onEdit: () => void;
 }
 
 const calcMinPayment = (debt: Debt, balance: number): number => {
@@ -34,7 +35,7 @@ const calcPayoffMonths = (balance: number, monthlyPayment: number, apr: number):
   return Math.ceil(n);
 };
 
-export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance, currencySymbol, onClose }) => {
+export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance, currencySymbol, onClose, onEdit }) => {
   const isPromoActive = debt.promo
     ? new Date() < parseISO(debt.promo.promoEndDate)
     : false;
@@ -217,7 +218,13 @@ export const DebtDetailModal: React.FC<DebtDetailModalProps> = ({ debt, balance,
           </div>
         </div>
 
-        <div className="p-5 border-t border-white/5 bg-[#131517] flex justify-end flex-shrink-0">
+        <div className="p-5 border-t border-white/5 bg-[#131517] flex justify-between flex-shrink-0">
+          <button
+            onClick={onEdit}
+            className="px-6 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors"
+          >
+            Edit
+          </button>
           <button
             onClick={onClose}
             className="px-6 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
