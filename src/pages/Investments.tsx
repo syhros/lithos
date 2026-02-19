@@ -39,9 +39,9 @@ export const Investments: React.FC = () => {
                   // For dividends, add shares at zero cost
                   current.quantity += tx.quantity;
                 } else {
-                  // For buys, add both quantity and cost
+                  // For buys, add both quantity and cost (use absolute value)
                   current.quantity += tx.quantity;
-                  current.totalCost += tx.amount;
+                  current.totalCost += Math.abs(tx.amount);
                 }
 
                 map.set(tx.symbol, current);
