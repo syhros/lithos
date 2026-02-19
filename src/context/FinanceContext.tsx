@@ -47,6 +47,8 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 // --- Helpers ---
 
+export const USD_TO_GBP = 0.74;
+
 // Forward Fill Algorithm for missing historical prices (e.g., weekends)
 const getPriceAtDate = (dateStr: string, history: Record<string, number>, lastKnown: number): number => {
     if (history[dateStr] !== undefined) return history[dateStr];
@@ -261,18 +263,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               // Hack for this demo to work with existing Mock Generator:
               // We will just add a "Market Adjustment" based on % change of price.
               if (priceData && qty > 0) {
-                   const marketValue = qty * priceData.price;
-                   // We don't easily know the Cost Basis sum here without re-looping.
-                   // Let's assume the mock data prices in `transactions` were the cost basis.
-                   // We'll calculate the 'Value Delta' effectively.
-                   // But to be robust, let's just say:
-                   // The Context computes `currentBalances` for the UI.
-                   
-                   // Find total cost basis of this holding from ledger
                    const txs = data.transactions.filter(t => t.accountId === accId && t.symbol === symbol);
+                   const symbolCurrency = txs.find(t => t.currency)?.currency || 'GBP';
+                   const fxRate = symbolCurrency === 'USD' ? USD_TO_GBP : 1;
+
+                   const marketValueGbp = qty * priceData.price * fxRate;
                    const costBasis = txs.reduce((sum, t) => sum + (t.amount || 0), 0);
-                   
-                   const adjustment = marketValue - costBasis;
+
+                   const adjustment = marketValueGbp - costBasis;
                    if (balances[accId]) balances[accId] += adjustment;
               }
           });
@@ -305,7 +303,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // Running State
       const balances: Record<string, number> = {};
       const holdings: Record<string, Record<string, number>> = {}; // accId -> symbol -> qty
-      
+
+      // Pre-build symbol -> native currency map
+      const symbolCurrencyMap: Record<string, string> = {};
+      data.transactions.forEach(t => {
+          if (t.symbol && t.currency) symbolCurrencyMap[t.symbol] = t.currency;
+      });
+
       // Initialize Starting Values
       data.assets.forEach(a => balances[a.id] = a.startingValue);
       data.debts.forEach(d => balances[d.id] = d.startingValue);
@@ -366,17 +370,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                Object.keys(accHoldings).forEach(symbol => {
                    const qty = accHoldings[symbol];
                    const history = historicalPrices[symbol] || {};
-                   
-                   // Forward Fill Price
-                   // In a real app we'd track lastKnownPrice inside the loop for O(1)
-                   // Here we just look it up or default
                    const price = getPriceAtDate(dateStr, history, fallbackPrices[symbol] || 100);
-                   
-                   // VISUAL FIX:
-                   // Just add a volatility factor based on price history to the book value.
-                   const volatility = (price / (fallbackPrices[symbol] || 100)) - 1; // e.g., 0.05
-                   const adjustment = (qty * (fallbackPrices[symbol] || 100)) * volatility;
-                   
+                   const fxRate = symbolCurrencyMap[symbol] === 'USD' ? USD_TO_GBP : 1;
+
+                   const marketValueGbp = qty * price * fxRate;
+                   const txs = data.transactions.filter(t => t.symbol === symbol && t.accountId === accId);
+                   const costBasis = txs.reduce((sum, t) => sum + (t.amount || 0), 0);
+                   const adjustment = marketValueGbp - costBasis;
+
                    if (asset.type === 'investment') {
                        investing += adjustment;
                    }

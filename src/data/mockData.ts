@@ -14,11 +14,12 @@ export interface Transaction {
   amount: number;
   type: TransactionType;
   category: string;
-  accountId: string; 
+  accountId: string;
   // Investment specifics
   symbol?: string;
   quantity?: number;
   price?: number;
+  currency?: Currency; // native currency of the asset (e.g. USD for TSLA)
 }
 
 export interface Asset {
@@ -167,38 +168,40 @@ const generateLedger = (): Transaction[] => {
             accountId: CHECKING_ID
         });
 
-        // VUSA.L Purchase (Vanguard S&P 500)
+        // VUSA.L Purchase (Vanguard S&P 500 - GBP listed on LSE)
         const vusaPrice = 58 + (Math.random() * 8);
         const vusaQty = 600 / vusaPrice;
-        
-        transactions.push({ 
-            id: `buy-vusa-${i}`, 
-            date: dateStr(11), 
-            description: 'Buy VUSA.L', 
-            amount: 600, 
-            type: 'investing', 
-            category: 'Buy', 
+
+        transactions.push({
+            id: `buy-vusa-${i}`,
+            date: dateStr(11),
+            description: 'Buy VUSA.L',
+            amount: 600,
+            type: 'investing',
+            category: 'Buy',
             accountId: STOCK_ID,
             symbol: 'VUSA.L',
             quantity: vusaQty,
-            price: vusaPrice
+            price: vusaPrice,
+            currency: 'GBP'
         });
 
-        // TSLA Purchase (Volatile)
+        // TSLA Purchase (USD-denominated)
         if (i % 2 === 0) {
              const tslaPrice = 180 + (Math.random() * 80);
              const tslaQty = 400 / tslaPrice;
-             transactions.push({ 
-                id: `buy-tsla-${i}`, 
-                date: dateStr(14), 
-                description: 'Buy TSLA', 
-                amount: 400, 
-                type: 'investing', 
-                category: 'Buy', 
+             transactions.push({
+                id: `buy-tsla-${i}`,
+                date: dateStr(14),
+                description: 'Buy TSLA',
+                amount: 400,
+                type: 'investing',
+                category: 'Buy',
                 accountId: STOCK_ID,
                 symbol: 'TSLA',
                 quantity: tslaQty,
-                price: tslaPrice
+                price: tslaPrice,
+                currency: 'USD'
             });
         }
 

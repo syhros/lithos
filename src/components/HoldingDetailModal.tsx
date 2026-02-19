@@ -3,7 +3,7 @@ import { X, Calendar, DollarSign } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, eachDayOfInterval, isBefore, parseISO, addDays, subWeeks, subMonths } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance } from '../context/FinanceContext';
+import { useFinance, USD_TO_GBP } from '../context/FinanceContext';
 
 type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 type ChartMode = 'VALUE' | 'STOCK';
@@ -46,17 +46,28 @@ const getDateFormat = (range: TimeRange): string => {
   }
 };
 
-const CustomTooltip = ({ active, payload, label, mode }: any) => {
+const CustomTooltip = ({ active, payload, label, mode, nativeCurrency }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
+    const isUsd = nativeCurrency === 'USD';
     return (
-      <div className="bg-[#1a1c1e] border border-white/10 p-3 rounded-sm shadow-xl min-w-[140px]">
+      <div className="bg-[#1a1c1e] border border-white/10 p-3 rounded-sm shadow-xl min-w-[160px]">
         <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest mb-2">{label}</p>
         <p className="text-xs font-bold text-white font-mono">
-          {mode === 'VALUE' ? `£${value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `£${value?.toFixed(2)}`}
+          {mode === 'VALUE'
+            ? `£${value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+            : isUsd
+              ? `$${value?.toFixed(2)}`
+              : `£${value?.toFixed(2)}`
+          }
         </p>
+        {mode === 'STOCK' && isUsd && (
+          <p className="text-[9px] font-mono text-iron-dust mt-0.5">
+            ≈ £{(value * USD_TO_GBP)?.toFixed(2)} GBP
+          </p>
+        )}
         <p className="text-[9px] font-mono text-iron-dust mt-0.5 uppercase">
-          {mode === 'VALUE' ? 'Portfolio Value' : 'Stock Price'}
+          {mode === 'VALUE' ? 'Portfolio Value (GBP)' : `Stock Price (${nativeCurrency || 'GBP'})`}
         </p>
       </div>
     );
@@ -75,6 +86,15 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
       .filter(t => t.type === 'investing' && t.symbol === holding.symbol)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [data.transactions, holding]);
+
+  const nativeCurrency = useMemo(() => {
+    const tx = transactions.find(t => t.currency);
+    return tx?.currency || 'GBP';
+  }, [transactions]);
+
+  const isUsd = nativeCurrency === 'USD';
+  const fxRate = isUsd ? USD_TO_GBP : 1;
+  const nativeSymbol = isUsd ? '$' : '£';
 
   const allChartData = useMemo(() => {
     if (!holding) return [];
@@ -99,17 +119,17 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
       }
 
       const price = history[dateStr] || currentPrices[holding.symbol]?.price || 100;
-      const marketValue = currentQty * price;
+      const marketValueGbp = currentQty * price * fxRate;
 
       return {
         date,
         dateStr,
-        value: marketValue,
-        price,
+        value: marketValueGbp,
+        price, // always native currency (USD or GBP)
         qty: currentQty,
       };
     });
-  }, [holding, historicalPrices, transactions, currentPrices]);
+  }, [holding, historicalPrices, transactions, currentPrices, fxRate]);
 
   const chartData = useMemo(() => {
     if (!holding || allChartData.length === 0) return [];
@@ -150,6 +170,10 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                 {holding.symbol.substring(0, 2)}
               </div>
               <h2 className="text-2xl font-bold text-white tracking-tight">{holding.symbol}</h2>
+              <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-1 rounded-sm border"
+                style={{ borderColor: isUsd ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', color: isUsd ? '#3b82f6' : '#d4af37' }}>
+                {nativeCurrency}
+              </span>
             </div>
             <p className="text-xs font-mono text-iron-dust uppercase tracking-wider">Investment Performance</p>
           </div>
@@ -239,10 +263,10 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                       tickFormatter={(val) =>
                         chartMode === 'VALUE'
                           ? `£${(val / 1000).toFixed(0)}k`
-                          : `£${val.toFixed(0)}`
+                          : `${nativeSymbol}${val.toFixed(0)}`
                       }
                     />
-                    <Tooltip content={<CustomTooltip mode={chartMode} />} />
+                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} />} />
                     <Area
                       key={chartMode}
                       type="monotone"
@@ -265,12 +289,19 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
               <span className="text-lg font-mono text-white">{holding.quantity.toFixed(4)}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price</span>
-              <span className="text-lg font-mono text-white">£{holding.avgPrice.toFixed(2)}</span>
+              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price ({nativeCurrency})</span>
+              <span className="text-lg font-mono text-white">{nativeSymbol}{holding.avgPrice.toFixed(2)}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Current Price</span>
-              <span className="text-lg font-mono text-white">£{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
+              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Current Price ({nativeCurrency})</span>
+              <div>
+                <span className="text-lg font-mono text-white">{nativeSymbol}{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
+                {isUsd && (
+                  <span className="text-[10px] font-mono text-iron-dust block">
+                    ≈ £{((currentPrices[holding.symbol]?.price || 0) * USD_TO_GBP).toFixed(2)}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
               <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Return %</span>
@@ -300,7 +331,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-bold text-white">
-                      {tx.quantity ? `${tx.quantity.toFixed(2)} shares` : ''} @ £{tx.price?.toFixed(2)}
+                      {tx.quantity ? `${tx.quantity.toFixed(2)} shares` : ''} @ {tx.currency === 'USD' ? '$' : '£'}{tx.price?.toFixed(2)}
                     </p>
                     <p className="text-[10px] font-mono text-iron-dust">
                       Total: £{Math.abs(tx.amount).toLocaleString()}

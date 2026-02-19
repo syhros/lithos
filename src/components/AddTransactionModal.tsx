@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Calculator, ArrowRight } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
-import { TransactionType } from '../data/mockData';
+import { TransactionType, Currency } from '../data/mockData';
+
+const USD_TO_GBP = 0.74;
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -28,10 +30,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
   // Investing Specifics
   const [ticker, setTicker] = useState('');
-  const [assetName, setAssetName] = useState(''); 
-  const [shares, setShares] = useState('');     
-  const [pricePerShare, setPricePerShare] = useState(''); 
+  const [assetName, setAssetName] = useState('');
+  const [shares, setShares] = useState('');
+  const [pricePerShare, setPricePerShare] = useState('');
   const [assetType, setAssetType] = useState('Stock');
+  const [investCurrency, setInvestCurrency] = useState<Currency>('GBP');
 
   // -- Derived Data for Autocomplete --
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
@@ -57,16 +60,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     }
   }, [ticker, type, tickerMap]);
 
-  // Auto-calculate amount for investing
+  // Auto-calculate amount for investing (always stored in GBP)
   useEffect(() => {
     if (type === 'investing') {
         const s = parseFloat(shares) || 0;
         const p = parseFloat(pricePerShare) || 0;
         if (s > 0 && p > 0) {
-            setAmount((s * p).toFixed(2));
+            const nativeTotal = s * p;
+            const gbpTotal = investCurrency === 'USD' ? nativeTotal * USD_TO_GBP : nativeTotal;
+            setAmount(gbpTotal.toFixed(2));
         }
     }
-  }, [shares, pricePerShare, type]);
+  }, [shares, pricePerShare, type, investCurrency]);
 
   // Default Category for Debt Payment
   useEffect(() => {
@@ -148,21 +153,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         });
 
     } else if (type === 'investing') {
-        // Standard Investing Entry
+        const nativePrice = parseFloat(pricePerShare);
         addTransaction({
             date: fullDate,
             description: assetName,
-            amount: amountNum, // Usually positive (Account Value Increase) or Negative?
-            // Wait, buying stock usually means Cash -> Stock.
-            // If we select "Investing Account", we assume the cash is already there or settled.
-            // In the mock data generator: Buy SPY -> amount: 500 (Positive, adds value to portfolio).
-            // So we keep it positive for the Asset Account.
+            amount: amountNum, // stored in GBP
             type: 'investing',
             category: assetType,
             accountId: accountId,
             symbol: ticker.toUpperCase(),
             quantity: parseFloat(shares),
-            price: parseFloat(pricePerShare)
+            price: nativePrice,        // native currency price
+            currency: investCurrency,  // native currency of the asset
         });
 
     } else {
@@ -195,6 +197,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setShares('');
       setPricePerShare('');
       setAssetType('Stock');
+      setInvestCurrency('GBP');
       setType('expense');
       setDate(new Date().toISOString().split('T')[0]);
       setTime(new Date().toTimeString().slice(0, 5));
@@ -290,34 +293,50 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
 
                 <div className="grid grid-cols-12 gap-4">
-                    <div className="col-span-6 md:col-span-4">
+                    <div className="col-span-6 md:col-span-3">
                         <label className="block text-xs font-mono text-iron-dust mb-2">Shares</label>
-                        <input 
-                            type="number" 
+                        <input
+                            type="number"
                             placeholder="0.00"
                             step="any"
                             value={shares}
                             onChange={e => setShares(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" 
+                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
                         />
                     </div>
-                    <div className="col-span-6 md:col-span-4">
-                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
+                    <div className="col-span-6 md:col-span-3">
+                        <label className="block text-xs font-mono text-iron-dust mb-2">Currency</label>
+                        <select
+                            value={investCurrency}
+                            onChange={e => setInvestCurrency(e.target.value as Currency)}
+                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
+                        >
+                            <option value="GBP">GBP (£)</option>
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                        </select>
+                    </div>
+                    <div className="col-span-12 md:col-span-3">
+                         <label className="block text-xs font-mono text-iron-dust mb-2">
+                             Price / Share ({investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : '£'})
+                         </label>
                          <div className="relative">
-                            <span className="absolute left-3 top-3 text-iron-dust text-xs">£</span>
-                            <input 
-                                type="number" 
+                            <span className="absolute left-3 top-3 text-iron-dust text-xs">
+                                {investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : '£'}
+                            </span>
+                            <input
+                                type="number"
                                 placeholder="0.00"
                                 step="any"
                                 value={pricePerShare}
                                 onChange={e => setPricePerShare(e.target.value)}
-                                className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" 
+                                className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
                             />
                          </div>
                     </div>
-                    <div className="col-span-12 md:col-span-4">
+                    <div className="col-span-12 md:col-span-3">
                         <label className="block text-xs font-mono text-iron-dust mb-2">Asset Type</label>
-                        <select 
+                        <select
                             value={assetType}
                             onChange={e => setAssetType(e.target.value)}
                             className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
@@ -494,10 +513,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
              </>
           )}
 
-          {/* ESTIMATED TOTAL (Visible for Investing only, usually) */}
+          {/* ESTIMATED TOTAL (Visible for Investing only) */}
           {isInvesting && (
              <div className="bg-white/5 p-4 rounded-sm border border-white/10 flex justify-between items-center">
-                <span className="text-xs font-mono text-iron-dust uppercase tracking-wider">Estimated Cost</span>
+                <div>
+                    <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost</span>
+                    {investCurrency === 'USD' && shares && pricePerShare && (
+                        <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
+                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = £{USD_TO_GBP}
+                        </span>
+                    )}
+                </div>
                 <div className="flex items-center gap-2">
                      <Calculator size={14} className="text-magma" />
                      <span className="text-xl font-bold text-white font-mono">£{amount || '0.00'}</span>
