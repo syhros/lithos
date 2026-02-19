@@ -162,13 +162,26 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-                        <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5 w-fit">
-                            <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
-                            <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
-                                {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
-                            </span>
+                        {/* Actions Group */}
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
+                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
+                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
+                               {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
+                           </span>
                         </div>
+                        <span className="font-mono text-[10px] text-iron-dust">
+                            Updated {format(lastUpdated, 'HH:mm')}
+                        </span>
+                        <button 
+                            onClick={() => refreshData()}
+                            disabled={loading}
+                            className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
+                        >
+                            <RefreshCw size={12} />
+                        </button>
                     </div>
+                </div>
                 </div>
             </div>
 
