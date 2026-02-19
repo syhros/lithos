@@ -167,15 +167,54 @@ export const Investments: React.FC = () => {
                         const acctColor = '#3b82f6';
                         const acctMin = acctChart.length > 0 ? Math.min(...acctChart.map(d => d.value)) * 0.97 : 'auto';
 
+                        const whole = Math.floor(balance).toLocaleString();
+                        const pence = balance.toFixed(2).split('.')[1];
+
                         return (
                             <div
                                 key={asset.id}
                                 onClick={() => setSelectedAccount(asset)}
-                                className="group bg-[#161618] border border-white/5 p-8 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer flex gap-6 items-stretch"
+                                className="group bg-[#161618] border border-white/5 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer"
+                                style={{ minHeight: 160 }}
                             >
                                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
 
-                                <div className="flex-1">
+                                {/* Background chart — full tile */}
+                                <div className="absolute inset-0 pointer-events-none">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={acctChart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id={`acctGrad-${asset.id}`} x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor={acctColor} stopOpacity={0.18} />
+                                                    <stop offset="95%" stopColor={acctColor} stopOpacity={0} />
+                                                </linearGradient>
+                                                {/* Left-to-right fade mask: transparent on left, opaque by mid */}
+                                                <linearGradient id={`acctMask-${asset.id}`} x1="0" y1="0" x2="1" y2="0">
+                                                    <stop offset="0%" stopColor="black" stopOpacity={0} />
+                                                    <stop offset="50%" stopColor="black" stopOpacity={1} />
+                                                    <stop offset="100%" stopColor="black" stopOpacity={1} />
+                                                </linearGradient>
+                                                <mask id={`acctChartMask-${asset.id}`}>
+                                                    <rect x="0" y="0" width="100%" height="100%" fill={`url(#acctMask-${asset.id})`} />
+                                                </mask>
+                                            </defs>
+                                            <YAxis domain={[acctMin, 'auto']} hide={true} />
+                                            <Area
+                                                type="monotone"
+                                                dataKey="value"
+                                                stroke={acctColor}
+                                                strokeWidth={1.5}
+                                                fill={`url(#acctGrad-${asset.id})`}
+                                                dot={false}
+                                                isAnimationActive={false}
+                                                mask={`url(#acctChartMask-${asset.id})`}
+                                            />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                {/* Content */}
+                                <div className="relative z-10 p-8">
                                     <div className="flex justify-between items-start mb-6">
                                         <div className="p-3 bg-white/5 rounded-sm text-white">
                                             <LineChartIcon size={20} />
@@ -187,27 +226,11 @@ export const Investments: React.FC = () => {
                                     <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
                                     <p className="text-xs text-iron-dust font-mono mb-4">{asset.currency} · ISA</p>
                                     <div className="text-3xl font-bold text-white tracking-tight">
-                                        {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
                                         {acctUp ? '+' : ''}{acctFirst > 0 ? (((acctLast - acctFirst) / acctFirst) * 100).toFixed(2) : '0.00'}% (1M)
                                     </div>
-                                </div>
-
-                                <div className="w-1/2 flex-shrink-0 flex flex-col justify-end">
-                                    <ResponsiveContainer width="100%" height={110}>
-                                        <AreaChart data={acctChart} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                                            <defs>
-                                                <linearGradient id={`acctGrad-${asset.id}`} x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor={acctColor} stopOpacity={0.2} />
-                                                    <stop offset="95%" stopColor={acctColor} stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <YAxis domain={[acctMin, 'auto']} hide={true} />
-                                            <Area type="monotone" dataKey="value" stroke={acctColor} strokeWidth={1.5} fill={`url(#acctGrad-${asset.id})`} dot={false} isAnimationActive={false} />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
-                                    <span className="block text-[8px] font-mono text-iron-dust text-center mt-1 uppercase tracking-wider">1M Chart</span>
                                 </div>
                             </div>
                         );
@@ -261,7 +284,7 @@ export const Investments: React.FC = () => {
 
                                 <div className="mb-2">
                                     <div className="text-2xl font-bold text-white tracking-tight">
-                                        {currencySymbol}{stock.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        {currencySymbol}{Math.floor(stock.currentValue).toLocaleString()}<span className="text-base font-light opacity-40">.{stock.currentValue.toFixed(2).split('.')[1]}</span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">
                                         <p className="text-[9px] font-mono text-iron-dust uppercase tracking-widest">Market Value</p>
