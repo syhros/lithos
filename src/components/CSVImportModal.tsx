@@ -401,8 +401,24 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           });
           if (historyRes.ok) {
             const historyData = await historyRes.json();
-            setLoadingStatus(`Received historical data for ${Object.keys(historyData).length} ticker${Object.keys(historyData).length === 1 ? '' : 's'}`);
-            fetchedHistoricalPrices = { ...historicalPrices, ...historyData };
+            // Convert from [{ date, close }] format to { date: close } format
+            const convertedData: Record<string, Record<string, number>> = {};
+            for (const [symbol, rows] of Object.entries(historyData)) {
+              const dateMap: Record<string, number> = {};
+              if (Array.isArray(rows)) {
+                rows.forEach((row: any) => {
+                  if (row.date && row.close !== undefined && row.close !== null) {
+                    dateMap[row.date] = row.close;
+                  }
+                });
+              }
+              convertedData[symbol] = dateMap;
+            }
+            const successCount = Object.values(convertedData).filter((obj: any) => Object.keys(obj).length > 0).length;
+            const failureCount = Object.values(convertedData).filter((obj: any) => Object.keys(obj).length === 0).length;
+            console.log(`Historical data fetch: ${successCount} succeeded, ${failureCount} failed`);
+            setLoadingStatus(`Received historical data for ${successCount} ticker${successCount === 1 ? '' : 's'}`);
+            fetchedHistoricalPrices = { ...historicalPrices, ...convertedData };
             await new Promise(r => setTimeout(r, 300));
           }
         } catch (e) {
@@ -487,26 +503,35 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
             }
             // For dividends, we need the actual stock price, not the dividend per share
-            // If no historical price, fall back to a reasonable estimate (can't use the dividend per share)
-            if (!historicalPrice) {
-              newErrors.push(`Row ${i + 2}: No historical price available for ${symbol} on ${dateStr} to reinvest dividend.`);
-              return;
+            // If no historical price available, just record as cash dividend
+            if (historicalPrice) {
+              const fxSharePrice = validCurrency === 'USD' ? historicalPrice * USD_TO_GBP : historicalPrice;
+              const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
+              totalInvestments += dividendGbp;
+              addTransaction({
+                date: txDate,
+                description: `Dividend reinvested — ${description}`,
+                amount: dividendGbp,
+                type: 'investing',
+                category: 'Dividend',
+                accountId: selectedAccountId,
+                symbol,
+                quantity: sharesEarned,
+                price: historicalPrice,
+                currency: validCurrency,
+              });
+            } else {
+              // No price data available, just record as cash dividend
+              totalInvestments += dividendGbp;
+              addTransaction({
+                date: txDate,
+                description: `Dividend (received as cash) — ${description}`,
+                amount: dividendGbp,
+                type: 'investing',
+                category: 'Dividend',
+                accountId: selectedAccountId,
+              });
             }
-            const fxSharePrice = validCurrency === 'USD' ? historicalPrice * USD_TO_GBP : historicalPrice;
-            const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
-            totalInvestments += dividendGbp;
-            addTransaction({
-              date: txDate,
-              description: `Dividend reinvested — ${description}`,
-              amount: dividendGbp,
-              type: 'investing',
-              category: 'Dividend',
-              accountId: selectedAccountId,
-              symbol,
-              quantity: sharesEarned,
-              price: historicalPrice,
-              currency: validCurrency,
-            });
           } else {
             // buy or sell
             const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
