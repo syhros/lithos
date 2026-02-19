@@ -511,9 +511,9 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               addTransaction({
                 date: txDate,
                 description: `Dividend reinvested — ${description}`,
-                amount: dividendGbp,
+                amount: -dividendGbp,
                 type: 'investing',
-                category: 'Dividend',
+                category: 'Buy',
                 accountId: selectedAccountId,
                 symbol,
                 quantity: sharesEarned,
