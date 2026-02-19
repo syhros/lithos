@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { X, Upload, FileText, Download, AlertTriangle, CheckCircle, ChevronDown, TrendingUp, TrendingDown, Layers, Activity } from 'lucide-react';
+import { subDays, parseISO, format } from 'date-fns';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency } from '../data/mockData';
 import { clsx } from 'clsx';
@@ -35,6 +36,7 @@ const INVESTMENT_FIELDS: FieldDef[] = [
   { key: 'date',        label: 'Date',         required: true,  description: '2024-01-15 — or a datetime column (Trading212 "Time")' },
   { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'Number of units — rows without qty are skipped' },
   { key: 'price',       label: 'Price / Unit', required: true,  description: 'Price in native currency — rows without price are skipped' },
+  { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, dividend — defaults to buy if blank' },
   { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
   { key: 'category',    label: 'Asset Type',   required: false, description: 'Stock, ETF, Crypto...' },
@@ -183,7 +185,7 @@ const MappingSelect: React.FC<{
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose }) => {
-  const { data, addTransaction, currencySymbol } = useFinance();
+  const { data, addTransaction, currencySymbol, historicalPrices } = useFinance();
 
   const [mode, setMode] = useState<ImportMode>('accounts');
   const [step, setStep] = useState<Step>('upload');
@@ -197,6 +199,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   const [importCount, setImportCount] = useState(0);
   const [importStats, setImportStats] = useState({ income: 0, expense: 0, netChange: 0, investments: 0 });
   const [tickerOverrides, setTickerOverrides] = useState<Record<string, string>>({});
+  const [dividendReinvest, setDividendReinvest] = useState(true);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -213,7 +216,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     setStep('upload'); setFileName(''); setCsvHeaders([]); setCsvRows([]);
     setMapping({}); setSelectedAccountId(''); setErrors([]);
     setImportCount(0); setImportStats({ income: 0, expense: 0, netChange: 0, investments: 0 });
-    setTickerOverrides({}); setIsDragging(false);
+    setTickerOverrides({}); setDividendReinvest(true); setIsDragging(false);
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -323,6 +326,22 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     return { income, expense, netChange: income - expense, investments, valid, skipped };
   }, [csvRows, mapping, mode, step]);
 
+  // Helpers for trade type classification
+  const resolveTradeType = (row: string[]): 'buy' | 'sell' | 'dividend' => {
+    const raw = getCellValue(row, 'tradeType').toLowerCase().trim();
+    if (raw === 'sell') return 'sell';
+    if (raw === 'dividend' || raw === 'dividends') return 'dividend';
+    return 'buy';
+  };
+
+  const hasDividendRows = useMemo(() => {
+    if (mode !== 'investments' || !mapping['tradeType']) return false;
+    return csvRows.some(row => {
+      const raw = getCellValue(row, 'tradeType').toLowerCase().trim();
+      return raw === 'dividend' || raw === 'dividends';
+    });
+  }, [csvRows, mapping, mode]);
+
   // Unique tickers from valid investment rows (used on confirm step)
   const uniqueTickers = useMemo(() => {
     if (mode !== 'investments' || !mapping['symbol']) return [];
@@ -378,6 +397,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const rawCurrency = getCellValue(row, 'currency').toUpperCase() || 'GBP';
           const description = getCellValue(row, 'description') || symbol;
           const category = getCellValue(row, 'category') || 'Stock';
+          const tradeType = resolveTradeType(row);
 
           // Skip rows missing required investment values (e.g. deposit rows in Trading212)
           if (!rawSymbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
@@ -387,17 +407,75 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const { datePart, timePart } = splitDateTime(rawDate);
           const rawTimeCol = getCellValue(row, 'time');
           const resolvedTime = sameCol ? timePart : (rawTimeCol.trim() || timePart);
+          const txDate = parseDate(rawDate, resolvedTime);
 
           const validCurrency: Currency = (['GBP', 'USD', 'EUR'] as const).includes(rawCurrency as Currency)
             ? rawCurrency as Currency : 'GBP';
-          const gbpAmount = validCurrency === 'USD' ? qty * price * USD_TO_GBP : qty * price;
-          totalInvestments += gbpAmount;
 
-          addTransaction({
-            date: parseDate(rawDate, resolvedTime), description, amount: gbpAmount,
-            type: 'investing', category, accountId: selectedAccountId,
-            symbol, quantity: qty, price, currency: validCurrency,
-          });
+          if (tradeType === 'dividend') {
+            // Dividend value = qty * price (in native currency)
+            const dividendNative = qty * price;
+            const dividendGbp = validCurrency === 'USD' ? dividendNative * USD_TO_GBP : dividendNative;
+
+            if (dividendReinvest) {
+              // Reinvest: look up historical price on that day to calculate fractional shares received
+              const dateStr = txDate.split('T')[0];
+              const histForSymbol = historicalPrices[symbol] || {};
+              // Walk back up to 7 days to find a trading day price
+              let historicalPrice: number | null = null;
+              for (let d = 0; d < 7; d++) {
+                const checkDate = format(subDays(parseISO(dateStr), d), 'yyyy-MM-dd');
+                if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
+              }
+              // Fall back to the price column if no historical data
+              const sharePrice = historicalPrice ?? price;
+              const fxSharePrice = validCurrency === 'USD' ? sharePrice * USD_TO_GBP : sharePrice;
+              const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
+              totalInvestments += dividendGbp;
+              addTransaction({
+                date: txDate,
+                description: `Dividend reinvested — ${description}`,
+                amount: dividendGbp,
+                type: 'investing',
+                category: 'Dividend',
+                accountId: selectedAccountId,
+                symbol,
+                quantity: sharesEarned,
+                price: sharePrice,
+                currency: validCurrency,
+              });
+            } else {
+              // Not reinvested: record as cash income to the investing account
+              totalInvestments += dividendGbp;
+              addTransaction({
+                date: txDate,
+                description: `Dividend — ${description}`,
+                amount: dividendGbp,
+                type: 'income',
+                category: 'Dividend',
+                accountId: selectedAccountId,
+              });
+            }
+          } else {
+            // buy or sell
+            const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
+            const gbpAmount = validCurrency === 'USD' ? Math.abs(qty) * price * USD_TO_GBP : Math.abs(qty) * price;
+            const signedAmount = tradeType === 'sell' ? gbpAmount : -gbpAmount;
+            totalInvestments += gbpAmount;
+
+            addTransaction({
+              date: txDate,
+              description: tradeType === 'sell' ? `Sell — ${description}` : description,
+              amount: signedAmount,
+              type: 'investing',
+              category,
+              accountId: selectedAccountId,
+              symbol,
+              quantity: signedQty,
+              price,
+              currency: validCurrency,
+            });
+          }
           count++;
         }
       } catch { newErrors.push(`Row ${i + 2}: Unexpected error.`); }
@@ -821,6 +899,54 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                       </div>
                     </div>
                   </div>
+
+                  {/* Dividend reinvestment toggle — only shown if dividend rows detected */}
+                  {hasDividendRows && (
+                    <div className="bg-black/20 border border-white/5 rounded-sm p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-white font-mono font-bold mb-0.5">Dividend Reinvestment</p>
+                          <p className="text-[10px] text-iron-dust">
+                            {dividendReinvest
+                              ? 'Dividends will be converted to fractional shares using the historical price on the dividend date.'
+                              : 'Dividends will be recorded as cash income credited to the investing account.'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setDividendReinvest(v => !v)}
+                          className={clsx(
+                            'relative flex-shrink-0 ml-4 w-10 h-5 rounded-full transition-colors duration-200',
+                            dividendReinvest ? 'bg-emerald-vein' : 'bg-white/10'
+                          )}
+                        >
+                          <span className={clsx(
+                            'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                            dividendReinvest ? 'translate-x-5' : 'translate-x-0.5'
+                          )} />
+                        </button>
+                      </div>
+                      <div className="mt-3 flex gap-3">
+                        <button
+                          onClick={() => setDividendReinvest(true)}
+                          className={clsx(
+                            'px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded-sm border transition-all',
+                            dividendReinvest ? 'bg-emerald-vein/10 border-emerald-vein/40 text-emerald-vein' : 'border-white/10 text-iron-dust hover:text-white'
+                          )}
+                        >
+                          Auto Reinvest
+                        </button>
+                        <button
+                          onClick={() => setDividendReinvest(false)}
+                          className={clsx(
+                            'px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded-sm border transition-all',
+                            !dividendReinvest ? 'bg-blue-400/10 border-blue-400/40 text-blue-400' : 'border-white/10 text-iron-dust hover:text-white'
+                          )}
+                        >
+                          Cash Only
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
