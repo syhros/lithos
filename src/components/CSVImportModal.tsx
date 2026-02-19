@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { X, Upload, FileText, Download, AlertTriangle, CheckCircle, ChevronDown, TrendingUp, TrendingDown, Layers, Activity } from 'lucide-react';
 import { subDays, parseISO, format } from 'date-fns';
 import { useFinance } from '../context/FinanceContext';
@@ -536,6 +536,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
       setStep('done');
     }
   };
+
+  useEffect(() => {
+    if (step === 'confirm' && !isLoading) {
+      doImport();
+    }
+  }, [step]);
 
   if (!isOpen) return null;
 
@@ -1089,7 +1095,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                     });
                     setTickerOverrides(initial);
                   }
-                  doImport();
+                  setStep('confirm');
                 } else if (step === 'confirm') {
                   doImport();
                 }
