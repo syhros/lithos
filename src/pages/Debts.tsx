@@ -19,14 +19,14 @@ const calcMonthlyInterest = (balance: number, apr: number): number => {
 };
 
 export const Debts: React.FC = () => {
-    const { data, currentBalances, currencySymbol } = useFinance();
-    const debts = data.debts;
+    const { data, currentBalances, currencySymbol, loading } = useFinance();
+    const debts = data?.debts || [];
     const [showAddDebt, setShowAddDebt] = useState(false);
     const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
     const [editingDebt, setEditingDebt] = useState<Debt | null>(null);
 
     const totalAssets = Object.entries(currentBalances)
-        .filter(([id]) => data.assets.some(a => a.id === id))
+        .filter(([id]) => (data?.assets || []).some(a => a.id === id))
         .reduce((sum, [, v]) => sum + v, 0);
 
     const totalDebt = debts.reduce((sum, d) => sum + (currentBalances[d.id] || 0), 0);

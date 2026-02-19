@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { initialData, MockData, Transaction, Asset, Debt, UserProfile, currentStockPrices as fallbackPrices } from '../data/mockData';
 import { isBefore, parseISO, subDays, format, isEqual, startOfDay, eachDayOfInterval, addDays } from 'date-fns';
 import { supabase } from '../lib/supabase';
@@ -255,14 +255,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const balances: { [key: string]: number } = {};
 
       // 1. Starting Values
-      data.assets.forEach(asset => balances[asset.id] = asset.startingValue);
-      data.debts.forEach(debt => balances[debt.id] = debt.startingValue);
+      (data?.assets || []).forEach(asset => balances[asset.id] = asset.startingValue);
+      (data?.debts || []).forEach(debt => balances[debt.id] = debt.startingValue);
 
       // 2. Ledger Processing
       // We need to track HOLDINGS (Qty) for investment accounts to apply current price
       const holdings: Record<string, Record<string, number>> = {}; // { accountId: { 'TSLA': 10 } }
 
-      data.transactions.forEach(tx => {
+      (data?.transactions || []).forEach(tx => {
           // Cash Impact
           if (balances[tx.accountId] !== undefined) {
               // For Investment accounts, Buying stock doesn't remove value from the Asset, 
@@ -328,7 +328,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               // Hack for this demo to work with existing Mock Generator:
               // We will just add a "Market Adjustment" based on % change of price.
               if (priceData && qty > 0) {
-                   const txs = data.transactions.filter(t => t.accountId === accId && t.symbol === symbol);
+                   const txs = (data?.transactions || []).filter(t => t.accountId === accId && t.symbol === symbol);
                    const symbolCurrency = txs.find(t => t.currency)?.currency || 'GBP';
                    const fxRate = symbolCurrency === 'USD' ? USD_TO_GBP : 1;
 
@@ -347,8 +347,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const currentBalances = useMemo(() => calculateBalances(currentPrices), [data, currentPrices]);
 
   // --- 3. Wealth Trajectory Aggregator (The Heavy Lifter) ---
-  
-  const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
+
+  const getHistory = useCallback((range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
       const points: HistoricalPoint[] = [];
       const today = new Date();
       let days = 30;
@@ -363,7 +363,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // Pre-process Ledger for performance
       // Sort ascending for running balance calculation
-      const sortedTxs = [...data.transactions].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const sortedTxs = [...(data?.transactions || [])].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       // Running State
       const balances: Record<string, number> = {};
@@ -371,13 +371,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // Pre-build symbol -> native currency map
       const symbolCurrencyMap: Record<string, string> = {};
-      data.transactions.forEach(t => {
+      (data?.transactions || []).forEach(t => {
           if (t.symbol && t.currency) symbolCurrencyMap[t.symbol] = t.currency;
       });
 
       // Initialize Starting Values
-      data.assets.forEach(a => balances[a.id] = a.startingValue);
-      data.debts.forEach(d => balances[d.id] = d.startingValue);
+      (data?.assets || []).forEach(a => balances[a.id] = a.startingValue);
+      (data?.debts || []).forEach(d => balances[d.id] = d.startingValue);
 
       // Pointer for transactions
       let txIndex = 0;
@@ -414,8 +414,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           // Sum base balances
           Object.keys(balances).forEach(id => {
               const val = balances[id];
-              const asset = data.assets.find(a => a.id === id);
-              const debt = data.debts.find(d => d.id === id);
+              const asset = (data?.assets || []).find(a => a.id === id);
+              const debt = (data?.debts || []).find(d => d.id === id);
               
               if (debt) totalDebts += val;
               if (asset) {
@@ -429,7 +429,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           // Similar logic to calculateBalances but using historicalPrices[symbol][dateStr]
           Object.keys(holdings).forEach(accId => {
                const accHoldings = holdings[accId];
-               const asset = data.assets.find(a => a.id === accId);
+               const asset = (data?.assets || []).find(a => a.id === accId);
                if (!asset) return;
 
                Object.keys(accHoldings).forEach(symbol => {
@@ -439,7 +439,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                    const fxRate = symbolCurrencyMap[symbol] === 'USD' ? USD_TO_GBP : 1;
 
                    const marketValueGbp = qty * price * fxRate;
-                   const txs = data.transactions.filter(t => t.symbol === symbol && t.accountId === accId);
+                   const txs = (data?.transactions || []).filter(t => t.symbol === symbol && t.accountId === accId);
                    const costBasis = txs.reduce((sum, t) => sum + (t.amount || 0), 0);
                    const adjustment = marketValueGbp - costBasis;
 
@@ -463,7 +463,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
 
       return points;
-  };
+  }, [data, historicalPrices]);
 
   const getTotalNetWorth = () => {
       const totalAssets = (currentBalances['1'] || 0) + (currentBalances['2'] || 0) + (currentBalances['3'] || 0);

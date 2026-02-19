@@ -6,12 +6,12 @@ import { AccountDetailModal } from '../components/AccountDetailModal';
 import { Asset } from '../data/mockData';
 
 export const Accounts: React.FC = () => {
-    const { data, currentBalances, currencySymbol } = useFinance();
+    const { data, currentBalances, currencySymbol, loading } = useFinance();
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
 
     // Filter for Checking and Savings
-    const liquidAssets = data.assets.filter(a => a.type === 'checking' || a.type === 'savings');
+    const liquidAssets = data?.assets?.filter(a => a.type === 'checking' || a.type === 'savings') || [];
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar">

@@ -12,7 +12,7 @@ import { Asset } from '../data/mockData';
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading } = useFinance();
-    const userCurrency = data.user.currency;
+    const userCurrency = data?.user?.currency || 'GBP';
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
@@ -20,12 +20,12 @@ export const Investments: React.FC = () => {
     const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
     const isStale = minsSinceUpdate > 5;
 
-    const investmentAssets = data.assets.filter(a => a.type === 'investment');
+    const investmentAssets = data?.assets?.filter(a => a.type === 'investment') || [];
 
     const holdings = useMemo(() => {
         const map = new Map<string, { symbol: string; quantity: number; totalCost: number }>();
 
-        data.transactions.forEach(tx => {
+        (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
                 const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0 };
                 const isSell = tx.category === 'Sell';
@@ -86,7 +86,7 @@ export const Investments: React.FC = () => {
             const start = subMonths(today, 1);
             const dates = eachDayOfInterval({ start, end: today });
 
-            const sortedTxs = data.transactions
+            const sortedTxs = (data?.transactions || [])
                 .filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === asset.id)
                 .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
