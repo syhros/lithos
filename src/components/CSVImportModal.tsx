@@ -306,7 +306,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
 
   // Build preview stats from all rows
   const previewStats = useMemo(() => {
-    if (!csvRows.length || step !== 'map') return null;
+    if (!csvRows.length) return null;
     let income = 0, expense = 0, investments = 0, valid = 0, skipped = 0;
     csvRows.forEach(row => {
       if (mode === 'accounts') {
@@ -325,13 +325,13 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
       }
     });
     return { income, expense, netChange: income - expense, investments, valid, skipped };
-  }, [csvRows, mapping, mode, step]);
+  }, [csvRows, mapping, mode]);
 
   // Helpers for trade type classification
   const resolveTradeType = (row: string[]): 'buy' | 'sell' | 'dividend' => {
     const raw = getCellValue(row, 'tradeType').toLowerCase().trim();
-    if (raw === 'sell') return 'sell';
-    if (raw === 'dividend' || raw === 'dividends') return 'dividend';
+    if (raw.includes('sell')) return 'sell';
+    if (raw.includes('dividend')) return 'dividend';
     return 'buy';
   };
 
@@ -339,7 +339,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     if (mode !== 'investments') return false;
     return csvRows.some(row => {
       const raw = getCellValue(row, 'tradeType').toLowerCase().trim();
-      return raw === 'dividend' || raw === 'dividends';
+      return raw.includes('dividend');
     });
   }, [csvRows, mapping, mode]);
 
