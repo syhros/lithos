@@ -48,32 +48,3 @@ body {
 
 .slide-up { animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(16px); }
 @keyframes slideUp { to { opacity: 1; transform: translateY(0); } }
-
-/* Skeleton Loading Animation */
-.skeleton-loader {
-  background: linear-gradient(90deg, #1a1c1e 0%, #2a2c2e 50%, #1a1c1e 100%);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
-  border-radius: 0.125rem;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  50% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.skeleton-fade-out {
-  animation: fadeOut 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes fadeOut {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}

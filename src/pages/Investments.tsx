@@ -8,7 +8,6 @@ import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, diff
 import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
-import { SkeletonLoader } from '../components/SkeletonLoader';
 import { Asset } from '../data/mockData';
 
 export const Investments: React.FC = () => {
@@ -163,10 +162,13 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-                        <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
-                                <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
-                                <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
+                        <div className="flex items-center gap-3 px-4 py-3 bg-[#161618] border border-white/5 rounded-sm">
+                            <div className="flex items-center gap-2">
+                                <span className={clsx(
+                                    'w-2 h-2 rounded-full animate-pulse',
+                                    loading ? 'bg-yellow-400' : isStale ? 'bg-red-500' : 'bg-emerald-vein'
+                                )} />
+                                <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[2px]">
                                     {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
                                 </span>
                             </div>
@@ -216,7 +218,6 @@ export const Investments: React.FC = () => {
                                 className="group bg-[#161618] border border-white/5 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer"
                                 style={{ minHeight: 160 }}
                             >
-                                {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-20"></div>}
                                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
 
                                 {/* Background chart — full tile, fades in left-to-right via CSS mask */}
@@ -297,7 +298,6 @@ export const Investments: React.FC = () => {
                                 onClick={() => setSelectedHolding(stock)}
                                 className="bg-[#161618] border border-white/5 p-5 rounded-sm relative hover:bg-white/[0.02] transition-colors group cursor-pointer flex flex-col"
                             >
-                                {loading && <div className="absolute inset-0 skeleton-loader rounded-sm z-10"></div>}
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-2">
                                         <div className="w-9 h-9 bg-white/5 rounded-full flex items-center justify-center text-white font-bold tracking-wider text-xs border border-white/5">
