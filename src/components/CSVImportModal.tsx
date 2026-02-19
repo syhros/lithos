@@ -20,26 +20,25 @@ interface FieldDef {
 }
 
 const ACCOUNT_FIELDS: FieldDef[] = [
-  { key: 'type',        label: 'Type',     required: true,  description: 'income, expense, transfer...' },
   { key: 'date',        label: 'Date',     required: true,  description: '2024-01-15 or 15/01/2024' },
-  { key: 'amount',      label: 'Amount',   required: false, description: 'Single amount column' },
-  { key: 'debit',       label: 'Debit',    required: false, description: 'Debit / expense column' },
-  { key: 'credit',      label: 'Credit',   required: false, description: 'Credit / income column' },
+  { key: 'amount',      label: 'Amount',   required: true,  description: 'Debit (expense) — or debit when Credit is also mapped' },
+  { key: 'credit',      label: 'Credit',   required: false, description: 'Optional: income column. If mapped, Amount becomes debit-only' },
   { key: 'description', label: 'Merchant', required: false, description: 'Payee / merchant name' },
   { key: 'category',    label: 'Category', required: false, description: 'e.g. Groceries' },
+  { key: 'type',        label: 'Type',     required: false, description: 'Override auto-type: income, expense...' },
   { key: 'time',        label: 'Time',     required: false, description: 'HH:MM (optional)' },
   { key: 'accountId',   label: 'Account',  required: false, description: 'Account name per row' },
 ];
 
 const INVESTMENT_FIELDS: FieldDef[] = [
-  { key: 'symbol',      label: 'Ticker',      required: true,  description: 'e.g. AAPL, TSLA' },
-  { key: 'date',        label: 'Date',         required: true,  description: '2024-01-15' },
-  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'Number of units' },
-  { key: 'price',       label: 'Price / Unit', required: true,  description: 'Price in native currency' },
+  { key: 'symbol',      label: 'Ticker',      required: true,  description: 'e.g. AAPL, TSLA — rows without a ticker are skipped' },
+  { key: 'date',        label: 'Date',         required: true,  description: '2024-01-15 — or a datetime column (Trading212 "Time")' },
+  { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'Number of units — rows without qty are skipped' },
+  { key: 'price',       label: 'Price / Unit', required: true,  description: 'Price in native currency — rows without price are skipped' },
   { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
   { key: 'category',    label: 'Asset Type',   required: false, description: 'Stock, ETF, Crypto...' },
-  { key: 'time',        label: 'Time',         required: false, description: 'HH:MM (optional)' },
+  { key: 'time',        label: 'Time',         required: false, description: 'HH:MM — map to same column as Date to extract time from datetime' },
 ];
 
 const USD_TO_GBP = 0.74;
@@ -67,32 +66,49 @@ const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
   return { headers: parseRow(lines[0]), rows: lines.slice(1).filter(l => l.trim()).map(parseRow) };
 };
 
-const parseDate = (raw: string, time?: string): string => {
-  if (!raw) return new Date().toISOString();
+// Splits a raw date/datetime string into { datePart: 'YYYY-MM-DD', timePart: 'HH:MM:SS' }
+const splitDateTime = (raw: string): { datePart: string; timePart: string } => {
   const c = raw.trim();
-  let date: Date;
-  if (/^\d{4}-\d{2}-\d{2}/.test(c)) date = new Date(c.slice(0, 10));
-  else if (/^\d{2}\/\d{2}\/\d{4}/.test(c)) { const [d, m, y] = c.split('/'); date = new Date(`${y}-${m}-${d}`); }
-  else { const p = c.split('/'); date = new Date(`${p[2]}-${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}`); }
-  if (isNaN(date.getTime())) date = new Date(c);
-  if (isNaN(date.getTime())) date = new Date();
-  return new Date(`${date.toISOString().split('T')[0]}T${time?.trim() || '12:00'}:00`).toISOString();
+  // ISO datetime: 2024-01-15T14:30:00 or 2024-01-15 14:30:00
+  const isoDatetime = c.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/);
+  if (isoDatetime) return { datePart: isoDatetime[1], timePart: isoDatetime[2].length === 5 ? `${isoDatetime[2]}:00` : isoDatetime[2] };
+  // Date only: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return { datePart: c, timePart: '12:00:00' };
+  // DD/MM/YYYY
+  const dmyMatch = c.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (dmyMatch) return { datePart: `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`, timePart: '12:00:00' };
+  // MM/DD/YYYY
+  const mdyMatch = c.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mdyMatch) return { datePart: `${mdyMatch[3]}-${mdyMatch[1].padStart(2,'0')}-${mdyMatch[2].padStart(2,'0')}`, timePart: '12:00:00' };
+  // Fallback: try native Date parse
+  const d = new Date(c);
+  if (!isNaN(d.getTime())) {
+    const dp = d.toISOString().split('T');
+    return { datePart: dp[0], timePart: dp[1].slice(0, 8) };
+  }
+  const today = new Date().toISOString().split('T')[0];
+  return { datePart: today, timePart: '12:00:00' };
+};
+
+const parseDate = (raw: string, time?: string): string => {
+  const { datePart, timePart } = splitDateTime(raw);
+  const resolvedTime = time?.trim() ? (time.trim().length === 5 ? `${time.trim()}:00` : time.trim()) : timePart;
+  return new Date(`${datePart}T${resolvedTime}`).toISOString();
 };
 
 const cleanNum = (s: string) => parseFloat(s.replace(/[£$€,\s]/g, ''));
 
 const AUTO_MAPPING: Record<string, string[]> = {
-  date:        ['date', 'transaction date', 'trans date', 'posted date', 'value date'],
-  amount:      ['amount', 'value', 'transaction amount'],
-  debit:       ['debit', 'debit amount', 'withdrawals', 'withdrawal', 'out'],
+  date:        ['date', 'transaction date', 'trans date', 'posted date', 'value date', 'time'],
+  amount:      ['amount', 'value', 'transaction amount', 'debit', 'debit amount', 'withdrawals'],
   credit:      ['credit', 'credit amount', 'deposits', 'deposit', 'in'],
-  description: ['description', 'merchant', 'payee', 'reference', 'narrative', 'details', 'memo'],
-  category:    ['category'],
+  description: ['description', 'merchant', 'payee', 'reference', 'narrative', 'details', 'memo', 'name'],
+  category:    ['category', 'action', 'action type'],
   type:        ['type', 'transaction type', 'trans type'],
   time:        ['time', 'transaction time'],
   accountId:   ['account', 'account name', 'account id'],
   symbol:      ['ticker', 'symbol', 'stock', 'isin'],
-  quantity:    ['quantity', 'qty', 'shares', 'units'],
+  quantity:    ['quantity', 'qty', 'shares', 'units', 'no. of shares'],
   price:       ['price', 'price per share', 'unit price', 'nav'],
   currency:    ['currency', 'ccy'],
 };
@@ -111,10 +127,10 @@ const autoDetect = (headers: string[]): Record<string, string> => {
 const downloadTemplate = (mode: ImportMode) => {
   let csv = '';
   if (mode === 'accounts') {
-    csv = 'type,date,debit amount,credit amount,description,category,time,account\n';
-    csv += 'expense,2024-01-15,45.50,,Waitrose,Groceries,09:30,Monzo Current\n';
-    csv += 'income,2024-01-01,,4200.00,Tech Solutions Ltd,Salary,08:00,Monzo Current\n';
-    csv += 'debt_payment,2024-01-20,150.00,,Amex Payment,Payment,12:00,Monzo Current\n';
+    csv = 'date,amount,credit,description,category,time,account\n';
+    csv += '2024-01-15,45.50,,Waitrose,Groceries,09:30,Monzo Current\n';
+    csv += '2024-01-01,,4200.00,Tech Solutions Ltd,Salary,08:00,Monzo Current\n';
+    csv += '2024-01-20,150.00,,Amex Payment,Payment,12:00,Monzo Current\n';
   } else {
     csv = 'ticker,date,quantity,price,currency,description,category,time\n';
     csv += 'AAPL,2024-01-15,10,178.35,USD,Apple Inc.,Stock,14:30\n';
@@ -231,39 +247,35 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     return idx >= 0 ? (row[idx] || '') : '';
   };
 
-  // Resolve amount from either single or dual columns
-  const resolveAmount = (row: string[], type: TransactionType): number => {
-    const hasDebit = !!mapping['debit'];
-    const hasCredit = !!mapping['credit'];
-    const hasSingle = !!mapping['amount'];
+  // Resolve amount: if Credit column is also mapped, Amount = debit (expense, negative).
+  // If Credit column is NOT mapped, Amount can be positive (income) or negative (expense).
+  const resolveAmount = (row: string[]): { amount: number; isCredit: boolean } => {
+    const hasCreditCol = !!mapping['credit'];
+    const amountRaw = cleanNum(getCellValue(row, 'amount'));
+    const amountVal = isNaN(amountRaw) ? 0 : Math.abs(amountRaw);
 
-    if (hasDebit || hasCredit) {
-      const debitRaw = getCellValue(row, 'debit');
-      const creditRaw = getCellValue(row, 'credit');
-      const debitVal = cleanNum(debitRaw);
-      const creditVal = cleanNum(creditRaw);
-      const debit = !isNaN(debitVal) && debitVal !== 0 ? debitVal : 0;
-      const credit = !isNaN(creditVal) && creditVal !== 0 ? creditVal : 0;
-      if (credit > 0) return credit;
-      if (debit > 0) return -Math.abs(debit);
-      return 0;
+    if (hasCreditCol) {
+      const creditRaw = cleanNum(getCellValue(row, 'credit'));
+      const creditVal = !isNaN(creditRaw) && creditRaw !== 0 ? Math.abs(creditRaw) : 0;
+      if (creditVal > 0) return { amount: creditVal, isCredit: true };
+      // Amount column = debit when Credit col exists
+      return { amount: -amountVal, isCredit: false };
     }
 
-    if (hasSingle) {
-      const raw = cleanNum(getCellValue(row, 'amount'));
-      return isNaN(raw) ? 0 : raw;
-    }
-    return 0;
+    // No credit column: sign determines direction
+    const raw = cleanNum(getCellValue(row, 'amount'));
+    if (isNaN(raw)) return { amount: 0, isCredit: false };
+    return { amount: raw, isCredit: raw > 0 };
   };
 
-  const normalizeType = (raw: string): TransactionType => {
+  const normalizeType = (raw: string, fallbackIsCredit: boolean): TransactionType => {
     const lower = raw.toLowerCase().trim();
     if (['income', 'credit', 'deposit'].includes(lower)) return 'income';
     if (['expense', 'debit', 'purchase', 'withdrawal'].includes(lower)) return 'expense';
     if (['debt_payment', 'payment'].includes(lower)) return 'debt_payment';
     if (['transfer'].includes(lower)) return 'transfer';
     if (['invest', 'investing', 'buy', 'sell'].includes(lower)) return 'investing';
-    return 'expense';
+    return fallbackIsCredit ? 'income' : 'expense';
   };
 
   const resolveAccountId = (row: string[]): string => {
@@ -276,9 +288,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     const errs: string[] = [];
     if (mode === 'accounts') {
       if (!mapping['date']) errs.push('Required field "Date" is not mapped.');
-      if (!mapping['type']) errs.push('Required field "Type" is not mapped.');
-      const hasAmount = mapping['amount'] || mapping['debit'] || mapping['credit'];
-      if (!hasAmount) errs.push('Map at least one amount column (Amount, Debit, or Credit).');
+      if (!mapping['amount']) errs.push('Required field "Amount" is not mapped.');
       if (!selectedAccountId && !mapping['accountId']) errs.push('Select an account or map the Account column.');
     } else {
       ['symbol', 'date', 'quantity', 'price'].forEach(k => {
@@ -292,26 +302,24 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
   // Build preview stats from all rows
   const previewStats = useMemo(() => {
     if (!csvRows.length || step !== 'map') return null;
-    let income = 0, expense = 0, investments = 0, valid = 0;
+    let income = 0, expense = 0, investments = 0, valid = 0, skipped = 0;
     csvRows.forEach(row => {
       if (mode === 'accounts') {
-        const rawType = getCellValue(row, 'type');
-        const type = normalizeType(rawType);
-        const amount = resolveAmount(row, type);
-        if (amount === 0 && !mapping['amount'] && !mapping['debit'] && !mapping['credit']) return;
+        if (!mapping['amount']) return;
+        const { amount } = resolveAmount(row);
         if (amount > 0) income += amount;
         else expense += Math.abs(amount);
         valid++;
       } else {
+        const symbol = getCellValue(row, 'symbol').trim();
         const rawQty = cleanNum(getCellValue(row, 'quantity'));
         const rawPrice = cleanNum(getCellValue(row, 'price'));
-        if (!isNaN(rawQty) && !isNaN(rawPrice)) {
-          investments += rawQty * rawPrice;
-          valid++;
-        }
+        if (!symbol || isNaN(rawQty) || rawQty === 0 || isNaN(rawPrice) || rawPrice === 0) { skipped++; return; }
+        investments += rawQty * rawPrice;
+        valid++;
       }
     });
-    return { income, expense, netChange: income - expense, investments, valid };
+    return { income, expense, netChange: income - expense, investments, valid, skipped };
   }, [csvRows, mapping, mode, step]);
 
   const doImport = () => {
@@ -325,35 +333,45 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     csvRows.forEach((row, i) => {
       try {
         if (mode === 'accounts') {
-          const rawType = getCellValue(row, 'type');
-          const type = normalizeType(rawType);
-          const amount = resolveAmount(row, type);
+          const { amount, isCredit } = resolveAmount(row);
+          const rawTypeOverride = getCellValue(row, 'type');
+          const type = normalizeType(rawTypeOverride, isCredit);
           const description = getCellValue(row, 'description') || 'Imported Transaction';
           const category = getCellValue(row, 'category') || 'General';
-          const time = getCellValue(row, 'time') || '12:00';
           const accountId = resolveAccountId(row);
           const rawDate = getCellValue(row, 'date');
 
           if (!accountId) { newErrors.push(`Row ${i + 2}: Could not resolve account.`); return; }
-          if (amount === 0 && !getCellValue(row, 'amount') && !getCellValue(row, 'debit') && !getCellValue(row, 'credit')) {
-            newErrors.push(`Row ${i + 2}: Invalid or zero amount.`); return;
-          }
 
-          addTransaction({ date: parseDate(rawDate, time), description, amount, type, category, accountId });
+          // When date and time map to the same column, splitDateTime extracts both
+          const rawTimeCol = getCellValue(row, 'time');
+          const sameCol = mapping['date'] && mapping['time'] && mapping['date'] === mapping['time'];
+          const { datePart, timePart } = splitDateTime(rawDate);
+          const resolvedTime = sameCol ? timePart : (rawTimeCol.trim() || timePart);
+
+          addTransaction({
+            date: parseDate(rawDate, resolvedTime),
+            description, amount, type, category, accountId,
+          });
           if (amount > 0) totalIncome += amount; else totalExpense += Math.abs(amount);
           count++;
         } else {
-          const symbol = getCellValue(row, 'symbol').toUpperCase();
+          const symbol = getCellValue(row, 'symbol').trim().toUpperCase();
           const rawDate = getCellValue(row, 'date');
           const qty = cleanNum(getCellValue(row, 'quantity'));
           const price = cleanNum(getCellValue(row, 'price'));
           const rawCurrency = getCellValue(row, 'currency').toUpperCase() || 'GBP';
           const description = getCellValue(row, 'description') || symbol;
           const category = getCellValue(row, 'category') || 'Stock';
-          const time = getCellValue(row, 'time') || '12:00';
 
-          if (!symbol) { newErrors.push(`Row ${i + 2}: Missing ticker.`); return; }
-          if (isNaN(qty) || isNaN(price)) { newErrors.push(`Row ${i + 2}: Invalid quantity or price.`); return; }
+          // Skip rows missing required investment values (e.g. deposit rows in Trading212)
+          if (!symbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
+
+          // Trading212 "Time" column contains datetime — split when same column mapped for date+time
+          const sameCol = mapping['date'] && mapping['time'] && mapping['date'] === mapping['time'];
+          const { datePart, timePart } = splitDateTime(rawDate);
+          const rawTimeCol = getCellValue(row, 'time');
+          const resolvedTime = sameCol ? timePart : (rawTimeCol.trim() || timePart);
 
           const validCurrency: Currency = (['GBP', 'USD', 'EUR'] as const).includes(rawCurrency as Currency)
             ? rawCurrency as Currency : 'GBP';
@@ -361,7 +379,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           totalInvestments += gbpAmount;
 
           addTransaction({
-            date: parseDate(rawDate, time), description, amount: gbpAmount,
+            date: parseDate(rawDate, resolvedTime), description, amount: gbpAmount,
             type: 'investing', category, accountId: selectedAccountId,
             symbol, quantity: qty, price, currency: validCurrency,
           });
@@ -484,7 +502,14 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 {mode === 'accounts' && (
                   <div className="mt-3 pt-3 border-t border-white/5">
                     <p className="text-[10px] text-iron-dust">
-                      Tip: Use <span className="text-white font-mono">Debit</span> + <span className="text-white font-mono">Credit</span> columns if your bank exports separate columns for each direction.
+                      Only <span className="text-white font-mono">Date</span> and <span className="text-white font-mono">Amount</span> are required. Transaction type is derived automatically from the sign — map the optional <span className="text-white font-mono">Credit</span> column if your bank uses separate debit/credit columns.
+                    </p>
+                  </div>
+                )}
+                {mode === 'investments' && (
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <p className="text-[10px] text-iron-dust">
+                      Rows missing a ticker, quantity, or price are silently skipped. For Trading212, map both <span className="text-white font-mono">Date</span> and <span className="text-white font-mono">Time</span> to the "Time" column — the datetime is split automatically.
                     </p>
                   </div>
                 )}
@@ -545,7 +570,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 </div>
                 {mode === 'accounts' && (
                   <p className="text-[10px] text-iron-dust mt-2.5">
-                    Map <span className="text-white font-mono">Debit</span> + <span className="text-white font-mono">Credit</span> <span className="italic">or</span> just <span className="text-white font-mono">Amount</span>.
+                    <span className="text-white font-mono">Amount</span> is treated as debit (expense) by default. Map <span className="text-white font-mono">Credit</span> to split directions — Amount becomes debit-only, Credit becomes income.
+                  </p>
+                )}
+                {mode === 'investments' && (
+                  <p className="text-[10px] text-iron-dust mt-2.5">
+                    Rows missing a ticker, quantity, or price are automatically skipped. Map <span className="text-white font-mono">Date</span> and <span className="text-white font-mono">Time</span> to the same column to extract both from a datetime value (e.g. Trading212 "Time").
                   </p>
                 )}
               </div>
@@ -580,10 +610,16 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                         <p className="text-[10px] font-mono text-iron-dust uppercase mb-1">Rows</p>
                         <p className="text-lg font-bold text-white font-mono">{previewStats.valid}</p>
                       </div>
-                      <div className="bg-black/20 border border-blue-400/20 rounded-sm p-3 col-span-3">
+                      <div className="bg-black/20 border border-blue-400/20 rounded-sm p-3 col-span-2">
                         <p className="text-[10px] font-mono text-iron-dust uppercase mb-1">Total Invested (native)</p>
                         <p className="text-lg font-bold text-blue-400 font-mono">{fmtCurrency(previewStats.investments)}</p>
                       </div>
+                      {previewStats.skipped > 0 && (
+                        <div className="bg-black/20 border border-amber-400/20 rounded-sm p-3">
+                          <p className="text-[10px] font-mono text-iron-dust uppercase mb-1">Skipped</p>
+                          <p className="text-lg font-bold text-amber-400 font-mono">{previewStats.skipped}</p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
