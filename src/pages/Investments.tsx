@@ -162,7 +162,19 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-                        <div className="flex items-center gap-2 px-3 py-2">
+                        <div className="flex items-center gap-3 px-3 py-2">
+                            <div className="flex items-center gap-2">
+                                <span className={clsx(
+                                    'w-2 h-2 rounded-full animate-pulse',
+                                    loading ? 'bg-yellow-400' : isStale ? 'bg-red-400' : 'bg-emerald-vein'
+                                )} />
+                                <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[2px]">
+                                    {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
+                                </span>
+                            </div>
+                            <span className="font-mono text-[10px] text-iron-dust">
+                                Updated {format(lastUpdated, 'HH:mm')}
+                            </span>
                             <button
                                 onClick={() => refreshData()}
                                 disabled={loading}
@@ -170,9 +182,6 @@ export const Investments: React.FC = () => {
                             >
                                 <RefreshCw size={14} />
                             </button>
-                            <div className="text-[10px] font-mono text-iron-dust">
-                                Updated {format(lastUpdated, 'HH:mm')}
-                            </div>
                         </div>
                     </div>
                 </div>

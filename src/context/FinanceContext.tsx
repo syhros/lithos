@@ -45,6 +45,8 @@ interface FinanceContextType {
   updateAccount: (id: string, updates: Partial<Omit<Asset, 'id'>>) => void;
   addDebt: (debt: Omit<Debt, 'id'>) => void;
   updateDebt: (id: string, updates: Partial<Omit<Debt, 'id'>>) => void;
+  addBill: (bill: Omit<Bill, 'id'>) => void;
+  updateBill: (id: string, updates: Partial<Omit<Bill, 'id'>>) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
@@ -524,6 +526,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
+  const addBill = (bill: Omit<Bill, 'id'>) => {
+    const newBill: Bill = { ...bill, id: crypto.randomUUID() };
+    setData(prev => ({ ...prev, bills: [...prev.bills, newBill] }));
+  };
+
+  const updateBill = (id: string, updates: Partial<Omit<Bill, 'id'>>) => {
+    setData(prev => ({
+      ...prev,
+      bills: prev.bills.map(b => b.id === id ? { ...b, ...updates } : b)
+    }));
+  };
+
   const updateUserProfile = (updates: Partial<UserProfile>) => {
       setData(prev => ({ ...prev, user: { ...prev.user, ...updates } }));
   };
@@ -549,6 +563,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateAccount,
       addDebt,
       updateDebt,
+      addBill,
+      updateBill,
       updateUserProfile,
       refreshData,
       currencySymbol: getCurrencySymbol(data.user.currency)

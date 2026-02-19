@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
-import { AssetType, Currency, DebtType, MinPaymentType, Debt } from '../data/mockData';
+import { AssetType, Currency, DebtType, MinPaymentType, Debt, Asset } from '../data/mockData';
 import { clsx } from 'clsx';
 
 type ModalMode = 'asset' | 'debt';
@@ -12,6 +12,7 @@ interface AddAccountModalProps {
   defaultType?: AssetType;
   mode?: ModalMode;
   debtToEdit?: Debt;
+  accountToEdit?: Asset;
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
@@ -22,10 +23,12 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   defaultType = 'checking',
   mode = 'asset',
   debtToEdit,
+  accountToEdit,
 }) => {
-  const { addAccount, addDebt, currencySymbol, updateDebt } = useFinance();
+  const { addAccount, addDebt, currencySymbol, updateDebt, updateAccount } = useFinance();
 
-  const isEditing = !!debtToEdit;
+  const isEditing = !!debtToEdit || !!accountToEdit;
+  const isEditingAccount = !!accountToEdit;
 
   const [assetType, setAssetType] = useState<AssetType>(defaultType);
   const [name, setName] = useState('');
@@ -34,6 +37,9 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   const [currency, setCurrency] = useState<Currency>('GBP');
   const [color, setColor] = useState(COLORS[0]);
   const [interestRate, setInterestRate] = useState('');
+  const [isClosed, setIsClosed] = useState(false);
+  const [openedDate, setOpenedDate] = useState('');
+  const [closedDate, setClosedDate] = useState('');
 
   const [debtType, setDebtType] = useState<DebtType>('credit_card');
   const [debtLimit, setDebtLimit] = useState('');
@@ -52,6 +58,9 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
     setCurrency('GBP');
     setColor(COLORS[0]);
     setInterestRate('');
+    setIsClosed(false);
+    setOpenedDate('');
+    setClosedDate('');
     setDebtType('credit_card');
     setDebtLimit('');
     setDebtApr('');
@@ -64,7 +73,18 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isEditing && debtToEdit) {
+    if (isEditingAccount && accountToEdit) {
+      setName(accountToEdit.name);
+      setAssetType(accountToEdit.type);
+      setInstitution(accountToEdit.institution);
+      setStartingValue(accountToEdit.startingValue.toString());
+      setCurrency(accountToEdit.currency);
+      setColor(accountToEdit.color || COLORS[0]);
+      setInterestRate(accountToEdit.interestRate?.toString() || '');
+      setIsClosed(accountToEdit.isClosed || false);
+      setOpenedDate(accountToEdit.openedDate || '');
+      setClosedDate(accountToEdit.closedDate || '');
+    } else if (isEditing && debtToEdit) {
       setName(debtToEdit.name);
       setDebtType(debtToEdit.type);
       setDebtLimit(debtToEdit.limit.toString());
@@ -79,7 +99,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
     } else if (!isOpen) {
       resetForm();
     }
-  }, [isEditing, debtToEdit, isOpen, resetForm]);
+  }, [isEditingAccount, accountToEdit, isEditing, debtToEdit, isOpen, resetForm]);
 
   if (!isOpen) return null;
 
@@ -107,7 +127,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
         addDebt(debtData);
       }
     } else {
-      addAccount({
+      const accountData = {
         name,
         type: assetType,
         currency,
@@ -115,7 +135,16 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
         color,
         startingValue: parseFloat(startingValue) || 0,
         interestRate: assetType === 'savings' && interestRate ? parseFloat(interestRate) : undefined,
-      });
+        isClosed,
+        openedDate: openedDate || undefined,
+        closedDate: isClosed && closedDate ? closedDate : undefined,
+      };
+
+      if (isEditingAccount && accountToEdit) {
+        updateAccount(accountToEdit.id, accountData);
+      } else {
+        addAccount(accountData);
+      }
     }
 
     resetForm();
@@ -363,6 +392,51 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
                 step="0.01"
                 className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
               />
+            </div>
+          )}
+
+          {mode === 'asset' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Opened Date</label>
+                <input
+                  type="date"
+                  value={openedDate}
+                  onChange={e => setOpenedDate(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                />
+              </div>
+            </div>
+          )}
+
+          {mode === 'asset' && (
+            <div className="border border-white/5 rounded-sm p-4 bg-black/20">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">Mark as Closed</span>
+                <button
+                  onClick={() => setIsClosed(c => !c)}
+                  className={clsx(
+                    'w-10 h-5 rounded-full transition-all relative',
+                    isClosed ? 'bg-red-600' : 'bg-white/10'
+                  )}
+                >
+                  <span className={clsx(
+                    'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all',
+                    isClosed ? 'left-5' : 'left-0.5'
+                  )} />
+                </button>
+              </div>
+              {isClosed && (
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Closed Date</label>
+                  <input
+                    type="date"
+                    value={closedDate}
+                    onChange={e => setClosedDate(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
+                  />
+                </div>
+              )}
             </div>
           )}
 

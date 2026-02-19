@@ -4,10 +4,13 @@ import { Calendar, Check, AlertCircle, Plus } from 'lucide-react';
 import { format, parseISO, isPast, isToday, isThisMonth } from 'date-fns';
 import { clsx } from 'clsx';
 import { Bill } from '../data/mockData';
+import { AddBillModal } from '../components/AddBillModal';
 
 export const Bills: React.FC = () => {
     const { data, currencySymbol } = useFinance();
     const [showUpcoming, setShowUpcoming] = useState(true);
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [billToEdit, setBillToEdit] = useState<Bill | null>(null);
 
     const { upcoming, paid, overdue, monthly } = useMemo(() => {
         const now = new Date();
@@ -45,7 +48,7 @@ export const Bills: React.FC = () => {
         const daysUntilDue = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
 
         return (
-            <div className="bg-[#161618] border border-white/5 p-5 rounded-sm flex items-center justify-between group hover:border-white/10 transition-all">
+            <div onClick={() => setBillToEdit(bill)} className="bg-[#161618] border border-white/5 p-5 rounded-sm flex items-center justify-between group hover:border-white/10 transition-all cursor-pointer">
                 <div className="flex items-center gap-4 flex-1">
                     <div className={clsx(
                         'w-10 h-10 rounded-full flex items-center justify-center border',
@@ -88,6 +91,7 @@ export const Bills: React.FC = () => {
                     <h1 className="text-4xl font-bold text-white tracking-tight">Bills & Payments</h1>
                 </div>
                 <button
+                    onClick={() => setShowAddModal(true)}
                     className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
                 >
                     <Plus size={14} />
@@ -199,6 +203,12 @@ export const Bills: React.FC = () => {
                     </>
                 )}
             </div>
+
+            <AddBillModal
+                isOpen={showAddModal || !!billToEdit}
+                onClose={() => { setShowAddModal(false); setBillToEdit(null); }}
+                billToEdit={billToEdit || undefined}
+            />
         </div>
     );
 };

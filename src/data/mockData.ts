@@ -33,6 +33,9 @@ export interface Asset {
   startingValue: number;
   interestRate?: number;
   symbol?: string;
+  isClosed?: boolean;
+  openedDate?: string;
+  closedDate?: string;
 }
 
 export type MinPaymentType = 'fixed' | 'percentage';

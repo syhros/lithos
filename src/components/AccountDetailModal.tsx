@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check } from 'lucide-react';
+import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Edit2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
@@ -10,11 +10,12 @@ interface AccountDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   account: Asset | null;
+  onEditClick?: (account: Asset) => void;
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
-export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account }) => {
+export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account, onEditClick }) => {
   const { data, currentBalances, updateAccount, getHistory, currencySymbol } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
@@ -122,6 +123,15 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
               {editMode ? <Check size={13} /> : <Pencil size={13} />}
               {editMode ? 'Save' : 'Edit'}
             </button>
+            {!editMode && onEditClick && account && (
+              <button
+                onClick={() => onEditClick(account)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors border bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20"
+              >
+                <Edit2 size={13} />
+                Edit Full
+              </button>
+            )}
             <button onClick={() => { setEditMode(false); onClose(); }} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors">
               <X size={20} />
             </button>
