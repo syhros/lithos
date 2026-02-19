@@ -447,13 +447,13 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 currency: validCurrency,
               });
             } else {
-              // Not reinvested: record as cash income to the investing account
+              // Not reinvested: record as cash dividend to the investing account
               totalInvestments += dividendGbp;
               addTransaction({
                 date: txDate,
                 description: `Dividend — ${description}`,
                 amount: dividendGbp,
-                type: 'income',
+                type: 'investing',
                 category: 'Dividend',
                 accountId: selectedAccountId,
               });
