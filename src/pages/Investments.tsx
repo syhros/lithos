@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -8,15 +8,15 @@ import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
+import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 
 // Returns the base part of a ticker for display: strips '-' and anything after it.
-// e.g. 'ETH-USD' → 'ETH', 'CSP1.L' → 'CSP1', 'AAPL' → 'AAPL'
 const tickerAbbrev = (symbol: string): string => {
   const base = symbol.split('-')[0];
   return base.substring(0, 4).toUpperCase();
 };
 
-// Truncates a name to 40 chars, breaking only on full words (no mid-word hyphen).
+// Truncates a name to 40 chars, breaking only on full words.
 const truncateName = (name: string, max = 40): string => {
   if (name.length <= max) return name;
   const words = name.split(' ');
@@ -28,11 +28,9 @@ const truncateName = (name: string, max = 40): string => {
   return result || name.substring(0, max);
 };
 
-// Converts any string to Title Case (handles ALL-CAPS inputs too).
+// Converts any string to Title Case.
 const toTitleCase = (str: string): string =>
-  str
-    .toLowerCase()
-    .replace(/\b\w/g, c => c.toUpperCase());
+  str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
@@ -47,6 +45,18 @@ export const Investments: React.FC = () => {
 
     const investmentAssets = data?.assets?.filter(a => a.type === 'investment') || [];
 
+    // Build a map of symbol → name from the transaction description field
+    const symbolNameMap = useMemo(() => {
+        const map = new Map<string, string>();
+        (data?.transactions || []).forEach(tx => {
+            if (tx.type === 'investing' && tx.symbol && tx.description && !map.has(tx.symbol)) {
+                // description is the user-entered asset name (e.g. "Vanguard S&P 500")
+                map.set(tx.symbol, tx.description);
+            }
+        });
+        return map;
+    }, [data?.transactions]);
+
     const holdings = useMemo(() => {
         const map = new Map<string, { symbol: string; quantity: number; totalCost: number; buyQty: number; buyTotalCost: number; currency: string }>();
 
@@ -56,8 +66,7 @@ export const Investments: React.FC = () => {
                 const isSell = tx.category === 'Sell';
 
                 if (isSell) {
-                    // Reduce quantity only; avg cost stays based on buys
-                    current.quantity += tx.quantity; // quantity is negative for sells
+                    current.quantity += tx.quantity;
                 } else {
                     current.quantity += tx.quantity;
                     current.totalCost += Math.abs(tx.amount);
@@ -84,14 +93,10 @@ export const Investments: React.FC = () => {
 
             let nativePrice = marketData ? marketData.price : 0;
             let displayPrice = nativePrice;
-            if (stockIsGbx) {
-              displayPrice = nativePrice / 100;
-            } else {
-              displayPrice = nativePrice * fxRate;
-            }
+            if (stockIsGbx) { displayPrice = nativePrice / 100; }
+            else { displayPrice = nativePrice * fxRate; }
 
             const currentValue = h.quantity * displayPrice;
-            // Avg cost based solely on buy transactions
             const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
             const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
@@ -104,7 +109,8 @@ export const Investments: React.FC = () => {
             const todayPrice = history[today] || nativePrice;
             const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
 
-            const tickerName = marketData?.name ?? h.symbol;
+            // Use transaction description as the name; fall back to symbol
+            const tickerName = symbolNameMap.get(h.symbol) ?? h.symbol;
 
             return {
                 ...h,
@@ -122,14 +128,31 @@ export const Investments: React.FC = () => {
                 tickerName,
             };
         }).sort((a, b) => b.currentValue - a.currentValue);
-    }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
+    }, [data.transactions, currentPrices, gbpUsdRate, userCurrency, symbolNameMap]);
 
-    // Use a small epsilon to guard against floating-point residuals from sells
     const EPSILON = 0.000001;
     const activeHoldings = holdings.filter(h => h.quantity > EPSILON);
     const closedHoldings = holdings.filter(h => h.quantity <= EPSILON);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
+
+    // --- Animated portfolio value with syncing-pulse then roll ---
+    const portfolioCacheKey = 'lithos_portfolio_value';
+    const cachedPortfolioValue = useMemo(() => {
+        try {
+            const cached = localStorage.getItem(portfolioCacheKey);
+            if (cached) {
+                const { value, timestamp } = JSON.parse(cached);
+                if (Date.now() - timestamp < 30 * 60 * 1000) return value as number;
+            }
+        } catch (_) {}
+        return 0;
+    }, []);
+
+    // While loading, hold at the last known value so the roll fires once data arrives
+    const animTarget = loading ? cachedPortfolioValue : portfolioValue;
+    const { displayValue: portfolioDisplay, isAnimating } = useAnimatedCounter(animTarget, 1500, portfolioCacheKey);
+    const [pvInt, pvDec] = portfolioDisplay.toFixed(2).split('.');
 
     const portfolioChartData = useMemo(() => {
         const history = getHistory('1M');
@@ -209,7 +232,6 @@ export const Investments: React.FC = () => {
         return result;
     }, [holdings, historicalPrices, gbpUsdRate]);
 
-    // Sparkline for closed holdings — price-only (no qty multiplication since qty = 0)
     const closedSparklines = useMemo(() => {
         const result: Record<string, { date: string; value: number }[]> = {};
         closedHoldings.forEach(h => {
@@ -242,9 +264,14 @@ export const Investments: React.FC = () => {
                         <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Module</span>
                         <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>
                         <span className="mb-4 font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
-                        <p className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                            {currencySymbol}{parseInt(portfolioValue.toString()).toLocaleString()}
-                            <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
+                        <p
+                            className={clsx(
+                                "text-[6.5rem] font-black leading-none tracking-[-4px] text-white transition-opacity duration-300",
+                                loading && "animate-pulse-opacity"
+                            )}
+                        >
+                            {currencySymbol}{parseInt(pvInt.replace(/,/g, '')).toLocaleString()}
+                            <span className="font-light opacity-30 text-[4rem] tracking-normal">.{pvDec}</span>
                         </p>
                     </div>
                     <div className="flex flex-col gap-4 items-end">
@@ -378,22 +405,19 @@ export const Investments: React.FC = () => {
                                 {/* Header row */}
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-start gap-3">
-                                        {/* Ticker rect + currency tag — fused with a divider line */}
+                                        {/* Fused ticker rect + orange currency tag */}
                                         <div className="flex flex-col" style={{ minWidth: 44 }}>
-                                            {/* Ticker rectangle */}
                                             <div className="flex items-center justify-center bg-white/10 rounded-t-sm font-bold tracking-wider text-[11px] text-white px-2 py-2 leading-none">
                                                 {abbrev}
                                             </div>
-                                            {/* Thin divider */}
                                             <div className="h-px bg-white/20 w-full" />
-                                            {/* Currency tag — orange, no gap */}
                                             <div className="flex items-center justify-center bg-magma rounded-b-sm px-2 py-1 leading-none">
-                                                <span className="text-[7px] font-mono font-bold text-white uppercase tracking-wider">
+                                                <span className="text-[8px] font-mono font-bold text-black uppercase tracking-wider">
                                                     {stock.nativeCurrency}
                                                 </span>
                                             </div>
                                         </div>
-                                        {/* Name — aligned to top of ticker block */}
+                                        {/* Name aligned to top of ticker block */}
                                         <div className="flex-1 min-w-0 pt-0.5">
                                             <h3 className="text-xs font-bold text-white leading-snug line-clamp-2" style={{ wordBreak: 'break-word', overflowWrap: 'break-word', hyphens: 'none' }}>
                                                 {displayName}
@@ -489,17 +513,15 @@ export const Investments: React.FC = () => {
                                         onClick={() => setSelectedHolding(stock)}
                                         className="bg-[#161618] border border-white/5 p-4 rounded-sm relative hover:bg-white/[0.02] transition-colors cursor-pointer flex flex-col opacity-70 hover:opacity-100"
                                     >
-                                        {/* Header */}
                                         <div className="flex justify-between items-center mb-3">
                                             <div className="flex items-center gap-2">
-                                                {/* Fused ticker + currency */}
                                                 <div className="flex flex-col" style={{ minWidth: 38 }}>
                                                     <div className="flex items-center justify-center bg-white/10 rounded-t-sm font-bold tracking-wider text-[10px] text-white px-2 py-1.5 leading-none">
                                                         {abbrev}
                                                     </div>
                                                     <div className="h-px bg-white/20 w-full" />
                                                     <div className="flex items-center justify-center bg-magma rounded-b-sm px-2 py-0.5 leading-none">
-                                                        <span className="text-[7px] font-mono font-bold text-white uppercase tracking-wider">
+                                                        <span className="text-[8px] font-mono font-bold text-black uppercase tracking-wider">
                                                             {stock.nativeCurrency}
                                                         </span>
                                                     </div>
@@ -514,7 +536,6 @@ export const Investments: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Sparkline */}
                                         <div className="h-[32px] w-full my-1">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <LineChart data={sparkline} margin={{ top: 1, right: 1, left: 1, bottom: 1 }}>
@@ -524,7 +545,6 @@ export const Investments: React.FC = () => {
                                             </ResponsiveContainer>
                                         </div>
 
-                                        {/* Stats row */}
                                         <div className="grid grid-cols-3 gap-x-3 border-t border-white/5 pt-2 mt-1">
                                             <div>
                                                 <span className="block text-[7px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>

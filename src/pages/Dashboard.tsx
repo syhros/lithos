@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { AreaChart, Area, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, YAxis, XAxis, CartesianGrid } from 'recharts';
 import { format, differenceInMinutes, subMonths } from 'date-fns';
@@ -136,11 +135,9 @@ const BillItem: React.FC<{ name: string; date: Date; amount: number; currencySym
 const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }: any) => {
     if (active && payload && payload.length) {
         const currentItem = payload[0].payload;
-        // Find current index to compare with previous
         const index = data.findIndex((d: any) => d.name === currentItem.name);
         const prevItem = data[index - 1];
 
-        // Calculate % change
         let pctChange = 0;
         let isUp = false;
 
@@ -159,7 +156,7 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
                 </p>
                 {prevItem && (
                     <p className={clsx("text-[10px] font-mono font-bold flex items-center gap-1", isUp ? "text-magma" : "text-emerald-vein")}>
-                        {Math.abs(pctChange).toFixed(1)}% {isUp ? '▲' : '▼'} vs last month
+                        {Math.abs(pctChange).toFixed(1)}% {isUp ? '\u25b2' : '\u25bc'} vs last month
                     </p>
                 )}
             </div>
@@ -168,27 +165,42 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
     return null;
 };
 
+// --- Animated value display with syncing-pulse then roll ---
+const useValueDisplay = (targetValue: number, loading: boolean, cacheKey: string, duration = 1500) => {
+  const { displayValue, isAnimating } = useAnimatedCounter(
+    // Hold the counter at the previous cached value while loading;
+    // only hand it the real target once loading is done.
+    loading ? (() => {
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const { value, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < 30 * 60 * 1000) return value;
+        }
+      } catch (_) {}
+      return 0;
+    })() : targetValue,
+    duration,
+    cacheKey
+  );
+  return { displayValue, isAnimating, isSyncing: loading };
+};
+
 // --- Main Dashboard ---
 
 export const Dashboard: React.FC = () => {
   const { data, getTotalNetWorth, currentBalances, currentPrices, getHistory, lastUpdated, refreshData, loading, currencySymbol, gbpUsdRate } = useFinance();
 
-  // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
-
-  // Chart Visibility State
   const [visibleSeries, setVisibleSeries] = useState({ netWorth: true, assets: false, debts: false });
 
-  // Calculations
   const currentNetWorth = getTotalNetWorth();
-  const { displayValue } = useAnimatedCounter(currentNetWorth, 1500, 'lithos_net_worth');
+  const { displayValue, isAnimating, isSyncing } = useValueDisplay(currentNetWorth, loading, 'lithos_net_worth', 1500);
   const [nwInt, nwDec] = displayValue.toFixed(2).split('.');
 
-  // Header Metrics Logic
   const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
-  const isStale = minsSinceUpdate > 5; // Consider stale if > 5 mins old
+  const isStale = minsSinceUpdate > 5;
 
-  // Derived Historical Data (Syncs everything)
   const historyData = useMemo(() => getHistory(timeRange), [timeRange, data.transactions, getHistory]);
 
   const checkingAccounts = useMemo(() => data.assets.filter(a => a.type === 'checking' && !a.isClosed), [data.assets]);
@@ -212,12 +224,7 @@ export const Dashboard: React.FC = () => {
       .filter(t => t.type === 'investing' && t.symbol && t.quantity)
       .forEach(t => {
         if (!map.has(t.symbol)) {
-          map.set(t.symbol, {
-            symbol: t.symbol,
-            quantity: 0,
-            totalCost: 0,
-            currency: t.currency || 'GBP'
-          });
+          map.set(t.symbol, { symbol: t.symbol, quantity: 0, totalCost: 0, currency: t.currency || 'GBP' });
         }
         const h = map.get(t.symbol)!;
         h.quantity += t.quantity || 0;
@@ -238,72 +245,43 @@ export const Dashboard: React.FC = () => {
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
-      // nativePrice: keep in native currency (pence for GBX, USD for USD, GBP for GBP)
       const nativePrice = marketData ? marketData.price : 0;
-      
-      // displayPrice: convert to GBP for value calculations
       let displayPrice = nativePrice;
-      if (stockIsGbx) {
-        displayPrice = nativePrice / 100; // Convert pence to pounds
-      } else {
-        displayPrice = nativePrice * fxRate; // Apply FX rate for USD
-      }
-      
+      if (stockIsGbx) { displayPrice = nativePrice / 100; }
+      else { displayPrice = nativePrice * fxRate; }
       const currentValue = h.quantity * displayPrice;
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
     });
   }, [data.transactions, currentPrices, data.user.currency, gbpUsdRate]);
 
-  const totalInvestmentBalance = useMemo(() =>
-    holdings.reduce((sum, h) => sum + h.currentValue, 0),
-    [holdings]
-  );
-  const totalLiabilitiesBalance = useMemo(() =>
-    data.debts.reduce((sum, d) => sum + d.startingValue, 0),
-    [data.debts]
-  );
+  const totalInvestmentBalance = useMemo(() => holdings.reduce((sum, h) => sum + h.currentValue, 0), [holdings]);
+  const totalLiabilitiesBalance = useMemo(() => data.debts.reduce((sum, d) => sum + d.startingValue, 0), [data.debts]);
 
   const accountsPL = useMemo(() => {
     const checkingStarting = checkingAccounts.reduce((sum, a) => sum + a.startingValue, 0);
     const savingsStarting = savingsAccounts.reduce((sum, a) => sum + a.startingValue, 0);
     const totalStarting = checkingStarting + savingsStarting;
-
     const currentAccounts = totalCheckingBalance + totalSavingsBalance;
     const plValue = currentAccounts - totalStarting;
     const plPercent = totalStarting > 0 ? (plValue / totalStarting) * 100 : 0;
-
     return { plValue, plPercent };
   }, [checkingAccounts, savingsAccounts, totalCheckingBalance, totalSavingsBalance]);
 
-  // Expenses for Spending Trend (Simulated from transaction ledger for last 6 months)
   const spendingTrend = useMemo(() => {
-      // Group expenses by month from ledger
-      const monthlySpend = new Map<string, number>();
-      data.transactions
-        .filter(t => t.type === 'expense')
-        .forEach(t => {
-            const m = format(new Date(t.date), 'MMM yy');
-            monthlySpend.set(m, (monthlySpend.get(m) || 0) + Math.abs(t.amount));
-        });
-
-      // Convert to array (last 6 months)
-      const months = [];
-      const today = new Date();
-      // We iterate 0 to 5 (0 is today, 5 is 5 months ago)
-      // Then reverse it so the chart reads left-to-right (oldest-to-newest)
-      for (let i = 5; i >= 0; i--) {
-          const date = subMonths(today, i);
-          const key = format(date, 'MMM yy');
-          const shortName = format(date, 'MMM');
-          // Full name for tooltip: 'Nov 23'
-          months.push({
-              name: shortName, // X-axis label
-              fullName: key, // Tooltip label
-              amount: monthlySpend.get(key) || 0
-          });
-      }
-      return months;
+    const monthlySpend = new Map<string, number>();
+    data.transactions.filter(t => t.type === 'expense').forEach(t => {
+      const m = format(new Date(t.date), 'MMM yy');
+      monthlySpend.set(m, (monthlySpend.get(m) || 0) + Math.abs(t.amount));
+    });
+    const months = [];
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const date = subMonths(today, i);
+      const key = format(date, 'MMM yy');
+      months.push({ name: format(date, 'MMM'), fullName: key, amount: monthlySpend.get(key) || 0 });
+    }
+    return months;
   }, [data.transactions]);
 
   const upcomingBills = useMemo(() => {
@@ -335,7 +313,7 @@ export const Dashboard: React.FC = () => {
       <div className="h-full w-full flex items-center justify-center bg-[#0a0a0c]">
         <div className="text-center max-w-md">
           <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-sm flex items-center justify-center mx-auto mb-6">
-            <span className="text-2xl">📊</span>
+            <span className="text-2xl">\uD83D\uDCCA</span>
           </div>
           <h2 className="text-xl font-bold text-white mb-2">Welcome to Lithos Finance</h2>
           <p className="text-iron-dust text-sm mb-6">Get started by creating your first account to track your finances.</p>
@@ -352,14 +330,11 @@ export const Dashboard: React.FC = () => {
 
         {/* CENTER MAIN CONTENT */}
         <div className="flex flex-col h-full overflow-y-auto p-12 custom-scrollbar">
-            
+
             {/* 1. Hero Section & Header Metrics */}
             <div className="mb-4 mt-4 slide-up">
-                {/* Header Row: Label + Metadata on same line */}
                 <div className="flex justify-between items-center mb-1">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
-                    
-                    {/* Actions Group */}
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
                            <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
@@ -367,10 +342,8 @@ export const Dashboard: React.FC = () => {
                                {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
                            </span>
                         </div>
-                        <span className="font-mono text-[10px] text-iron-dust">
-                            Updated {format(lastUpdated, 'HH:mm')}
-                        </span>
-                        <button 
+                        <span className="font-mono text-[10px] text-iron-dust">Updated {format(lastUpdated, 'HH:mm')}</span>
+                        <button
                             onClick={() => refreshData()}
                             disabled={loading}
                             className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
@@ -380,8 +353,13 @@ export const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <h1 className="text-[6.5rem] font-black leading-none tracking-[-4px] text-white">
-                    {currencySymbol}{parseInt(nwInt).toLocaleString()}
+                <h1
+                    className={clsx(
+                        "text-[6.5rem] font-black leading-none tracking-[-4px] text-white transition-opacity duration-300",
+                        isSyncing && "animate-pulse-opacity"
+                    )}
+                >
+                    {currencySymbol}{parseInt(nwInt.replace(/,/g, '')).toLocaleString()}
                     <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
                 </h1>
             </div>
@@ -389,49 +367,25 @@ export const Dashboard: React.FC = () => {
             {/* 2. Wealth Trajectory Chart */}
             <div className="mb-6 slide-up" style={{ animationDelay: '0.1s' }}>
                  <h3 className="font-mono text-xs text-iron-dust uppercase tracking-[3px] mb-4">Wealth Trajectory</h3>
-                 
-                 {/* Chart Container */}
                 <div className="h-[400px] w-full bg-[#161618] border border-white/5 rounded-sm relative flex flex-col p-6">
-                     
-                     {/* Controls Header (Flex) */}
                      <div className="flex justify-between items-start mb-2 z-10">
-                         {/* Legend & Toggles - Grey Mono, No Glow */}
                          <div className="flex gap-6">
-                            <button 
-                                onClick={() => setVisibleSeries(p => ({ ...p, netWorth: !p.netWorth }))}
-                                className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.netWorth ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}
-                            >
+                            <button onClick={() => setVisibleSeries(p => ({ ...p, netWorth: !p.netWorth }))} className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.netWorth ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}>
                                 <span className={`w-2 h-2 rounded-full ${visibleSeries.netWorth ? 'bg-emerald-vein' : 'bg-iron-dust'}`} /> Net Worth
                             </button>
-                            <button 
-                                onClick={() => setVisibleSeries(p => ({ ...p, assets: !p.assets }))}
-                                className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.assets ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}
-                            >
+                            <button onClick={() => setVisibleSeries(p => ({ ...p, assets: !p.assets }))} className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.assets ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}>
                                 <span className={`w-2 h-2 rounded-full ${visibleSeries.assets ? 'bg-gold-ore' : 'bg-iron-dust'}`} /> Assets
                             </button>
-                            <button 
-                                onClick={() => setVisibleSeries(p => ({ ...p, debts: !p.debts }))}
-                                className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.debts ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}
-                            >
+                            <button onClick={() => setVisibleSeries(p => ({ ...p, debts: !p.debts }))} className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries.debts ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}>
                                 <span className={`w-2 h-2 rounded-full ${visibleSeries.debts ? 'bg-magma' : 'bg-iron-dust'}`} /> Debts
                             </button>
                         </div>
-
-                        {/* Range Selector */}
                         <div className="flex bg-[#1a1c1e] rounded-sm p-1 border border-white/5">
                             {['1W', '1M', '1Y'].map(range => (
-                                <button
-                                    key={range}
-                                    onClick={() => setTimeRange(range as any)}
-                                    className={`px-4 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all ${timeRange === range ? 'bg-white text-black' : 'text-iron-dust hover:text-white'}`}
-                                >
-                                    {range}
-                                </button>
+                                <button key={range} onClick={() => setTimeRange(range as any)} className={`px-4 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all ${timeRange === range ? 'bg-white text-black' : 'text-iron-dust hover:text-white'}`}>{range}</button>
                             ))}
                         </div>
                      </div>
-
-                    {/* Chart Area */}
                     <div className="flex-1 w-full min-h-0">
                          <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={historyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -446,30 +400,12 @@ export const Dashboard: React.FC = () => {
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" vertical={false} strokeOpacity={0.05} />
-                                <XAxis 
-                                    hide={true}
-                                    dataKey="date" 
-                                />
-                                <YAxis 
-                                    tick={{fill: '#8e8e93', fontSize: 10, fontFamily: 'JetBrains Mono'}} 
-                                    tickLine={false} 
-                                    axisLine={false} 
-                                    tickFormatter={(val) => `${currencySymbol}${val/1000}k`}
-                                />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: '#1a1c1e', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '12px', fontFamily: 'JetBrains Mono' }}
-                                    itemStyle={{ padding: 0, textTransform: 'capitalize' }}
-                                    formatter={(value: number, name: string) => [`${currencySymbol}${value.toLocaleString()}`, name]}
-                                />
-                                {visibleSeries.assets && (
-                                    <Area type="monotone" name="Assets" dataKey="assets" stroke="#d4af37" strokeWidth={2} fill="url(#gradAsset)" isAnimationActive={true} />
-                                )}
-                                {visibleSeries.debts && (
-                                    <Area type="monotone" name="Debts" dataKey="debts" stroke="#ff4d00" strokeWidth={2} fill="transparent" isAnimationActive={true} />
-                                )}
-                                {visibleSeries.netWorth && (
-                                    <Area type="monotone" name="Net Worth" dataKey="netWorth" stroke="#00f2ad" strokeWidth={3} fill="url(#gradNW)" isAnimationActive={true} />
-                                )}
+                                <XAxis hide={true} dataKey="date" />
+                                <YAxis tick={{fill: '#8e8e93', fontSize: 10, fontFamily: 'JetBrains Mono'}} tickLine={false} axisLine={false} tickFormatter={(val) => `${currencySymbol}${val/1000}k`} />
+                                <Tooltip contentStyle={{ backgroundColor: '#1a1c1e', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '12px', fontFamily: 'JetBrains Mono' }} itemStyle={{ padding: 0, textTransform: 'capitalize' }} formatter={(value: number, name: string) => [`${currencySymbol}${value.toLocaleString()}`, name]} />
+                                {visibleSeries.assets && <Area type="monotone" name="Assets" dataKey="assets" stroke="#d4af37" strokeWidth={2} fill="url(#gradAsset)" isAnimationActive={true} />}
+                                {visibleSeries.debts && <Area type="monotone" name="Debts" dataKey="debts" stroke="#ff4d00" strokeWidth={2} fill="transparent" isAnimationActive={true} />}
+                                {visibleSeries.netWorth && <Area type="monotone" name="Net Worth" dataKey="netWorth" stroke="#00f2ad" strokeWidth={3} fill="url(#gradNW)" isAnimationActive={true} />}
                             </AreaChart>
                          </ResponsiveContainer>
                     </div>
@@ -478,90 +414,41 @@ export const Dashboard: React.FC = () => {
 
             {/* 3. Asset/Liability Grid (2x2) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 slide-up" style={{ animationDelay: '0.2s' }}>
-                <GridBox
-                    label="Accounts"
-                    value={totalCheckingBalance + totalSavingsBalance}
-                    color="#00f2ad"
-                    history={historyData}
-                    dataKey="checking"
-                    currencySymbol={currencySymbol}
-                    plValue={accountsPL.plValue}
-                    plPercent={accountsPL.plPercent}
-                />
-                <GridBox
-                    label="Savings"
-                    value={totalSavingsBalance}
-                    color="#d4af37"
-                    history={historyData}
-                    dataKey="savings"
-                    currencySymbol={currencySymbol}
-                />
-                <GridBox
-                    label="Stocks"
-                    value={totalInvestmentBalance}
-                    color="#3b82f6"
-                    history={historyData}
-                    dataKey="investing"
-                    currencySymbol={currencySymbol}
-                />
-                <GridBox
-                    label="Liabilities"
-                    value={totalLiabilitiesBalance}
-                    color="#ff4d00"
-                    history={historyData}
-                    dataKey="debts"
-                    currencySymbol={currencySymbol}
-                />
+                <GridBox label="Accounts" value={totalCheckingBalance + totalSavingsBalance} color="#00f2ad" history={historyData} dataKey="checking" currencySymbol={currencySymbol} plValue={accountsPL.plValue} plPercent={accountsPL.plPercent} />
+                <GridBox label="Savings" value={totalSavingsBalance} color="#d4af37" history={historyData} dataKey="savings" currencySymbol={currencySymbol} />
+                <GridBox label="Stocks" value={totalInvestmentBalance} color="#3b82f6" history={historyData} dataKey="investing" currencySymbol={currencySymbol} />
+                <GridBox label="Liabilities" value={totalLiabilitiesBalance} color="#ff4d00" history={historyData} dataKey="debts" currencySymbol={currencySymbol} />
             </div>
         </div>
 
-        {/* RIGHT SIDEBAR - Activity & Trends */}
+        {/* RIGHT SIDEBAR */}
         <div className="bg-[#111315] border-l border-white/5 p-10 overflow-y-auto custom-scrollbar flex flex-col">
-            
-            {/* Activity Log */}
             <div className="slide-up mb-12" style={{ animationDelay: '0.3s' }}>
                 <div className="flex justify-between items-center mb-6">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Activity Log</span>
-                    <Link to="/transactions" className="text-[10px] font-bold uppercase tracking-wider text-magma hover:text-white transition-colors">
-                        View All
-                    </Link>
+                    <Link to="/transactions" className="text-[10px] font-bold uppercase tracking-wider text-magma hover:text-white transition-colors">View All</Link>
                 </div>
                 <div className="space-y-1">
                     {data.transactions.slice(0, 6).map(tx => (
-                        <ActivityItem
-                            key={tx.id}
-                            title={tx.description.split('-')[0].trim()}
-                            subtitle={tx.category}
-                            amount={tx.amount}
-                            currencySymbol={currencySymbol}
-                        />
+                        <ActivityItem key={tx.id} title={tx.description.split('-')[0].trim()} subtitle={tx.category} amount={tx.amount} currencySymbol={currencySymbol} />
                     ))}
                 </div>
             </div>
 
-            {/* Upcoming Bills */}
             <div className="slide-up mb-12" style={{ animationDelay: '0.4s' }}>
                  <div className="flex justify-between items-center mb-6">
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Upcoming Bills</span>
-                    <Link to="/bills" className="text-[10px] font-bold uppercase tracking-wider text-magma hover:text-white transition-colors">
-                        View All
-                    </Link>
+                    <Link to="/bills" className="text-[10px] font-bold uppercase tracking-wider text-magma hover:text-white transition-colors">View All</Link>
                 </div>
-                <div className="space-y-1">
-                    {upcomingBills}
-                </div>
+                <div className="space-y-1">{upcomingBills}</div>
             </div>
 
-            {/* Spending Trend Bar Chart (Reduced Spacing via flex layout or margin) */}
             <div className="mt-auto slide-up" style={{ animationDelay: '0.5s' }}>
                  <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-6">Spending Trend</span>
                  <div className="h-[150px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={spendingTrend}>
-                            <Tooltip 
-                                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                                content={<CustomSpendingTooltip data={spendingTrend} currencySymbol={currencySymbol} />}
-                            />
+                            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} content={<CustomSpendingTooltip data={spendingTrend} currencySymbol={currencySymbol} />} />
                             <Bar dataKey="amount" radius={[2, 2, 0, 0]}>
                                 {spendingTrend.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={index === spendingTrend.length - 1 ? '#ff4d00' : '#2d3136'} />
