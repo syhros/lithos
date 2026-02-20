@@ -40,7 +40,8 @@ Deno.serve(async (req: Request) => {
         .from("price_history_cache")
         .select("date, close")
         .eq("symbol", symbol)
-        .order("date", { ascending: true });
+        .order("date", { ascending: true })
+        .limit(-1);
 
       let fetchFromDate = from;
       if (cached && cached.length > 0) {
@@ -87,7 +88,8 @@ Deno.serve(async (req: Request) => {
         .from("price_history_cache")
         .select("date, close")
         .eq("symbol", symbol)
-        .order("date", { ascending: true });
+        .order("date", { ascending: true })
+        .limit(-1);
 
       result[symbol] = allCached || [];
     }

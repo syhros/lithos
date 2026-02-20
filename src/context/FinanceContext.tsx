@@ -305,7 +305,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 .from('price_history_cache')
                 .select('date, close')
                 .eq('symbol', sym)
-                .order('date', { ascending: true });
+                .order('date', { ascending: true })
+                .limit(-1);
 
               if (cached && cached.length > 0) {
                 cached.forEach((row: { date: string; close: number }) => {

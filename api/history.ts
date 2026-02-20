@@ -24,7 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('date, close')
       .eq('symbol', symbol)
       .gte('date', period1)
-      .order('date', { ascending: true });
+      .order('date', { ascending: true })
+      .limit(-1);
 
     if (!cacheErr && cached && cached.length > 50) {
       res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate');
