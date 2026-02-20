@@ -97,7 +97,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
   const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
-  const [liveUsdToGbp, setLiveUsdToGbp] = useState<number>(0);
+  const [gbpUsdRate, setGbpUsdRate] = useState<number>(0);
+  const [rateUpdatedAt, setRateUpdatedAt] = useState<string>('');
 
   const fetchFxRate = async () => {
     try {
@@ -113,13 +114,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const { data } = await supabase
         .from('exchange_rates')
-        .select('rate')
+        .select('rate, updated_at')
         .eq('from_currency', 'GBP')
         .eq('to_currency', 'USD')
         .maybeSingle();
 
-      if (data?.rate && data.rate > 1) {
-        setLiveUsdToGbp(1 / Number(data.rate));
+      if (data?.rate && data.rate > 0) {
+        setGbpUsdRate(Number(data.rate));
+        setRateUpdatedAt(data.updated_at);
       }
     } catch (e) {
       console.info('Failed to load FX rate from database');
@@ -405,9 +407,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
-      if (liveUsdToGbp > 0) {
-        if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
-        if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+      if (gbpUsdRate > 0) {
+        if (stockIsUsd && !userIsUsd) fxRate = 1 / gbpUsdRate;
+        if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
       const nativePrice = marketData ? marketData.price : 0;
@@ -833,7 +835,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateUserProfile,
       refreshData,
       currencySymbol: getCurrencySymbol(data.user.currency),
-      usdToGbp: liveUsdToGbp
+      gbpUsdRate,
+      rateUpdatedAt
     }}>
       {children}
     </FinanceContext.Provider>

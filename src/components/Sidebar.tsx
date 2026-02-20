@@ -34,9 +34,19 @@ const navItems = [
 ];
 
 export const Sidebar: React.FC = () => {
-  const { data } = useFinance();
+  const { data, gbpUsdRate, rateUpdatedAt } = useFinance();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+
+  const formatUpdateTime = (updatedAt: string) => {
+    if (!updatedAt) return '';
+    try {
+      const date = new Date(updatedAt);
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return '';
+    }
+  };
 
   return (
     <>
@@ -70,8 +80,18 @@ export const Sidebar: React.FC = () => {
           ))}
         </nav>
 
+        {/* Exchange Rate Display */}
+        {gbpUsdRate > 0 && (
+          <div className="mt-6 pb-6 px-4 border-b border-white/5">
+            <div className="text-[9px] text-iron-dust space-y-1">
+              <div className="font-bold text-white">1 GBP = {gbpUsdRate.toFixed(3)} USD</div>
+              <div className="text-[8px]">Updated {formatUpdateTime(rateUpdatedAt)}</div>
+            </div>
+          </div>
+        )}
+
         {/* User Profile Footer (Restored Layout) */}
-        <div className="mt-8 pt-6 border-t border-white/5 px-4">
+        <div className="mt-6 pt-6 border-t border-white/5 px-4">
              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-slate flex items-center justify-center border border-white/10 text-white">
