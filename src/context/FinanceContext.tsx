@@ -529,13 +529,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const updateTransaction = (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
-    supabase.from('transactions').update(updates).eq('id', id).then(() => {
-      setData(prev => ({
-        ...prev,
-        transactions: prev.transactions.map(t => t.id === id ? { ...t, ...updates } : t)
-      }));
-    });
+  const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
+    const { error } = await supabase.from('transactions').update(updates).eq('id', id);
+    if (error) {
+      console.error('Failed to update transaction:', error);
+      return;
+    }
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t => t.id === id ? { ...t, ...updates } : t)
+    }));
   };
 
   const deleteTransaction = (id: string) => {

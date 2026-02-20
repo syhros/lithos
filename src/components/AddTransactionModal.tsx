@@ -140,7 +140,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       return 'Unknown Account';
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Basic Validation
     if (!accountId) return;
     if (type === 'investing' && (!ticker || !shares || !pricePerShare)) return;
@@ -153,7 +153,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
     // If editing, update the transaction
     if (editTransaction) {
-      updateTransaction(editTransaction.id, {
+      await updateTransaction(editTransaction.id, {
         date: fullDate,
         description: merchant,
         amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
