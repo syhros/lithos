@@ -45,14 +45,16 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { loading: dataLoading } = useFinance();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [showLoading, setShowLoading] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
-      if (session && isFirstLoad) {
-        setIsFirstLoad(false);
+      if (session && !hasInitialized) {
+        setShowLoading(true);
+        setHasInitialized(true);
       }
     };
 
@@ -65,7 +67,13 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [isFirstLoad]);
+  }, [hasInitialized]);
+
+  useEffect(() => {
+    if (!dataLoading && showLoading) {
+      setShowLoading(false);
+    }
+  }, [dataLoading, showLoading]);
 
   if (isAuthenticated === null) {
     return (
@@ -84,7 +92,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   return (
     <>
-      <LoadingAnimation isVisible={dataLoading && !isFirstLoad} onComplete={() => {}} />
+      <LoadingAnimation isVisible={showLoading} onComplete={() => {}} />
       {children}
     </>
   );
