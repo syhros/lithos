@@ -19,6 +19,9 @@ type PullPhase =
   | 'pulling'
   | 'done';
 
+// Strip any timestamp component, return just YYYY-MM-DD
+const toDateOnly = (dateStr: string): string => dateStr.substring(0, 10);
+
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { data, refreshData } = useFinance();
@@ -67,6 +70,7 @@ export const Settings: React.FC = () => {
     setPullPhase('scanning');
 
     const transactions = data?.transactions || [];
+    const today = toDateOnly(new Date().toISOString());
 
     // ── PHASE 1: Scan all tickers for earliest transaction date ──
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
@@ -74,17 +78,17 @@ export const Settings: React.FC = () => {
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
     await sleep(150);
 
-    const firstTxDate = new Map<string, string>();
+    const firstTxDate = new Map<string, string>(); // symbol -> YYYY-MM-DD
     const investingTxs = transactions.filter(t => t.type === 'investing' && t.symbol && t.date);
-
-    // Get unique symbols first for ordered logging
     const allSymbols = Array.from(new Set(investingTxs.map(t => t.symbol!)));
 
     for (const sym of allSymbols) {
       addLog(`  Checking earliest transaction for ${sym}...`, 'dim');
       await sleep(30);
-      const dates = investingTxs.filter(t => t.symbol === sym).map(t => t.date).sort();
-      const earliest = dates[0];
+      const earliest = investingTxs
+        .filter(t => t.symbol === sym)
+        .map(t => toDateOnly(t.date))
+        .sort()[0];
       firstTxDate.set(sym, earliest);
       addLog(`  → ${sym}: first transaction on ${earliest}`, 'info');
     }
@@ -101,7 +105,8 @@ export const Settings: React.FC = () => {
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
     await sleep(150);
 
-    const toFetch = new Map<string, string>(); // symbol -> fromDate
+    // toFetch: symbol -> { from: YYYY-MM-DD, to: YYYY-MM-DD }
+    const toFetch = new Map<string, { from: string; to: string }>();
     const ignored: string[] = [];
 
     for (const sym of allSymbols) {
@@ -109,7 +114,6 @@ export const Settings: React.FC = () => {
       addLog(`  Checking cache for ${sym} (need from ${txFrom})...`, 'dim');
       await sleep(40);
 
-      // Query supabase for the earliest cached row for this symbol
       const { data: cached } = await supabase
         .from('price_history_cache')
         .select('date')
@@ -118,15 +122,20 @@ export const Settings: React.FC = () => {
         .limit(1)
         .single();
 
-      if (cached?.date && cached.date <= txFrom) {
-        addLog(`  → ${sym}: cache covers ${cached.date} ✓ — skipping`, 'success');
+      const cacheStart = cached?.date ? toDateOnly(cached.date) : null;
+
+      if (cacheStart && cacheStart <= txFrom) {
+        // Cache already covers the first transaction date — nothing to do
+        addLog(`  → ${sym}: cache covers ${cacheStart} ✓ — skipping`, 'success');
         ignored.push(sym);
-      } else if (cached?.date) {
-        addLog(`  → ${sym}: cache starts ${cached.date}, need ${txFrom} — will backfill gap`, 'info');
-        toFetch.set(sym, txFrom);
+      } else if (cacheStart) {
+        // Gap exists: pull from first tx date up to (but not including) the cache start
+        addLog(`  → ${sym}: cache starts ${cacheStart}, need ${txFrom} — gap: ${txFrom} → ${cacheStart}`, 'info');
+        toFetch.set(sym, { from: txFrom, to: cacheStart });
       } else {
-        addLog(`  → ${sym}: no cache found — will fetch from ${txFrom}`, 'info');
-        toFetch.set(sym, txFrom);
+        // No cache at all — pull from first tx date to today
+        addLog(`  → ${sym}: no cache found — will fetch ${txFrom} → ${today}`, 'info');
+        toFetch.set(sym, { from: txFrom, to: today });
       }
     }
 
@@ -152,8 +161,8 @@ export const Settings: React.FC = () => {
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
     await sleep(150);
 
-    for (const [sym, from] of toFetch.entries()) {
-      addLog(`  ${sym.padEnd(16)} from ${from} → today`, 'info');
+    for (const [sym, range] of toFetch.entries()) {
+      addLog(`  ${sym.padEnd(16)} ${range.from} → ${range.to}`, 'info');
       await sleep(25);
     }
     addLog('', 'dim');
@@ -175,14 +184,12 @@ export const Settings: React.FC = () => {
     let totalRows = 0;
     let errors = 0;
 
-    for (const [sym, fromDate] of toFetch.entries()) {
-      addLog(`  Requesting price history for ${sym}...`, 'info');
+    for (const [sym, range] of toFetch.entries()) {
+      addLog(`  Requesting price history for ${sym} (${range.from} → ${range.to})...`, 'info');
 
       try {
-        const res = await fetch(
-          `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(sym)}&from=${fromDate}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const url = `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(sym)}&from=${range.from}&to=${range.to}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 
         if (!res.ok) {
           addLog(`  ✗ ${sym}: HTTP ${res.status}`, 'error');
@@ -196,7 +203,7 @@ export const Settings: React.FC = () => {
           } else {
             const rows = result?.rows ?? 0;
             totalRows += rows;
-            addLog(`  ✓ Price history for ${sym} complete — ${rows.toLocaleString()} rows cached`, 'success');
+            addLog(`  ✓ ${sym} complete — ${rows.toLocaleString()} rows cached`, 'success');
           }
         }
       } catch (e: any) {
@@ -354,9 +361,7 @@ export const Settings: React.FC = () => {
             <Upload size={18} />
             Import Data
           </h3>
-
           <div className="space-y-8">
-            {/* JSON import */}
             <div>
               <p className="text-sm text-iron-dust mb-4">Import a previously exported JSON backup to restore your data</p>
               <label className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors cursor-pointer w-fit">
@@ -366,17 +371,11 @@ export const Settings: React.FC = () => {
               </label>
             </div>
 
-            {/* Divider */}
             <div className="border-t border-white/5" />
 
-            {/* Historic price pull */}
             <div>
-              <div className="flex items-start justify-between mb-1">
-                <div>
-                  <p className="text-sm font-bold text-white mb-1">Pull Historic Price Data</p>
-                  <p className="text-sm text-iron-dust">Backfills price history for all your investment holdings from each ticker's first transaction date. Skips tickers already cached.</p>
-                </div>
-              </div>
+              <p className="text-sm font-bold text-white mb-1">Pull Historic Price Data</p>
+              <p className="text-sm text-iron-dust">Backfills missing price history for all investment holdings. Checks the cache first and only requests the uncached date range per ticker.</p>
 
               <button
                 onClick={handlePullHistoricData}
@@ -398,10 +397,8 @@ export const Settings: React.FC = () => {
                 {phaseLabel[pullPhase]}
               </button>
 
-              {/* Console output */}
               {log.length > 0 && (
                 <div className="mt-4 bg-[#0a0b0c] border border-white/8 rounded-sm overflow-hidden">
-                  {/* Console header bar */}
                   <div className="flex items-center gap-2 px-4 py-2 bg-[#111314] border-b border-white/5">
                     <div className="flex gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
@@ -412,8 +409,6 @@ export const Settings: React.FC = () => {
                     {isPulling && <Loader2 size={10} className="animate-spin text-blue-400 ml-auto" />}
                     {pullPhase === 'done' && <CheckCircle2 size={10} className="text-emerald-vein ml-auto" />}
                   </div>
-
-                  {/* Log lines */}
                   <div
                     ref={logRef}
                     className="max-h-[340px] overflow-y-auto custom-scrollbar p-4 space-y-0.5 font-mono text-[11px] leading-relaxed"

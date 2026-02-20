@@ -11,7 +11,7 @@ const YAHOO_HEADERS = {
   "Accept": "application/json",
 };
 
-// Fetch one year of daily closes from Yahoo Finance.
+// Fetch daily closes from Yahoo Finance for a specific window.
 // period1 / period2 are Unix timestamps.
 const fetchYearChunk = async (
   symbol: string,
@@ -56,17 +56,19 @@ Deno.serve(async (req: Request) => {
   try {
     const urlObj = new URL(req.url);
 
-    // Support both GET (query params) and POST (JSON body)
     let symbols: string[] = [];
     let fromDate: string = "";
+    let toDate: string = "";
 
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       symbols = (body.symbols || "").split(",").map((s: string) => s.trim()).filter(Boolean);
       fromDate = body.from || "";
+      toDate = body.to || "";
     } else {
       symbols = (urlObj.searchParams.get("symbols") || "").split(",").map(s => s.trim()).filter(Boolean);
       fromDate = urlObj.searchParams.get("from") || "";
+      toDate = urlObj.searchParams.get("to") || "";
     }
 
     if (symbols.length === 0) {
@@ -76,12 +78,16 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Default: backfill 2 years if no from date given
+    // from: required (first tx date). to: optional, defaults to now.
+    // Both must be plain YYYY-MM-DD for reliable parsing.
     const fromMs = fromDate
       ? new Date(fromDate).getTime()
       : Date.now() - 2 * 365 * 24 * 60 * 60 * 1000;
 
-    const nowMs = Date.now();
+    const toMs = toDate
+      ? new Date(toDate).getTime()
+      : Date.now();
+
     const summary: Record<string, { rows: number; error?: string }> = {};
 
     for (const symbol of symbols) {
@@ -89,12 +95,11 @@ Deno.serve(async (req: Request) => {
       let hadError: string | undefined;
 
       try {
-        // Walk year-by-year from fromMs to now
         const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
         let chunkStart = fromMs;
 
-        while (chunkStart < nowMs) {
-          const chunkEnd = Math.min(chunkStart + ONE_YEAR_MS, nowMs);
+        while (chunkStart < toMs) {
+          const chunkEnd = Math.min(chunkStart + ONE_YEAR_MS, toMs);
           const period1 = Math.floor(chunkStart / 1000);
           const period2 = Math.floor(chunkEnd / 1000);
 
@@ -107,7 +112,6 @@ Deno.serve(async (req: Request) => {
               break;
             } catch (e: any) {
               if (e.message === "RATE_LIMITED") {
-                // Back off and retry
                 console.warn(`Rate limited on ${symbol}, waiting 2s...`);
                 await sleep(2000);
                 attempt++;
@@ -118,7 +122,6 @@ Deno.serve(async (req: Request) => {
           }
 
           if (rows.length > 0) {
-            // Upsert in batches of 500
             const BATCH = 500;
             for (let i = 0; i < rows.length; i += BATCH) {
               const batch = rows.slice(i, i + BATCH).map(r => ({
@@ -142,8 +145,6 @@ Deno.serve(async (req: Request) => {
           }
 
           chunkStart = chunkEnd;
-
-          // Small pause between year chunks for the same symbol
           await sleep(200);
         }
       } catch (e: any) {
@@ -152,8 +153,6 @@ Deno.serve(async (req: Request) => {
       }
 
       summary[symbol] = { rows: totalRows, ...(hadError ? { error: hadError } : {}) };
-
-      // 500ms pause between symbols to respect Yahoo rate limits
       await sleep(500);
     }
 
