@@ -36,51 +36,60 @@ Deno.serve(async (req: Request) => {
     const period2 = Math.floor(Date.now() / 1000);
 
     for (const symbol of symbols) {
-      const { data: cached, error: cacheErr } = await supabase
+      const { data: cached } = await supabase
         .from("price_history_cache")
         .select("date, close")
         .eq("symbol", symbol)
         .order("date", { ascending: true });
 
-      if (!cacheErr && cached && cached.length > 0) {
-        result[symbol] = cached;
-        continue;
+      let fetchFromDate = from;
+      if (cached && cached.length > 0) {
+        const lastCachedDate = cached[cached.length - 1].date;
+        const lastDate = new Date(lastCachedDate);
+        const nextDay = new Date(lastDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        fetchFromDate = nextDay.toISOString().split("T")[0];
       }
 
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
+      const fetchPeriod1 = Math.floor(new Date(fetchFromDate).getTime() / 1000);
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${fetchPeriod1}&period2=${period2}`;
 
-      const res = await fetch(yahooUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; finance-app/1.0)" },
-      });
+      try {
+        const res = await fetch(yahooUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; finance-app/1.0)" },
+        });
 
-      if (!res.ok) {
-        result[symbol] = [];
-        continue;
+        if (res.ok) {
+          const json = await res.json();
+          const chartResult = json?.chart?.result?.[0];
+          const timestamps: number[] = chartResult?.timestamp ?? [];
+          const closes: number[] = chartResult?.indicators?.quote?.[0]?.close ?? [];
+
+          const freshData = timestamps
+            .map((ts, i) => ({
+              date: new Date(ts * 1000).toISOString().split("T")[0],
+              close: closes[i],
+            }))
+            .filter(r => r.close != null);
+
+          if (freshData.length > 0) {
+            const rows = freshData.map(r => ({ symbol, date: r.date, close: r.close }));
+            await supabase
+              .from("price_history_cache")
+              .upsert(rows, { onConflict: "symbol,date" });
+          }
+        }
+      } catch (e) {
+        console.error(`Failed to fetch fresh data for ${symbol}:`, e);
       }
 
-      const json = await res.json();
-      const chartResult = json?.chart?.result?.[0];
-      const timestamps: number[] = chartResult?.timestamp ?? [];
-      const closes: number[] = chartResult?.indicators?.quote?.[0]?.close ?? [];
+      const { data: allCached } = await supabase
+        .from("price_history_cache")
+        .select("date, close")
+        .eq("symbol", symbol)
+        .order("date", { ascending: true });
 
-      const symbolData = timestamps
-        .map((ts, i) => ({
-          date: new Date(ts * 1000).toISOString().split("T")[0],
-          close: closes[i],
-        }))
-        .filter(r => r.close != null);
-
-      result[symbol] = symbolData;
-
-      if (symbolData.length > 0) {
-        const rows = symbolData.map(r => ({ symbol, date: r.date, close: r.close }));
-        supabase
-          .from("price_history_cache")
-          .upsert(rows, { onConflict: "symbol,date" })
-          .then(({ error }) => {
-            if (error) console.error("Cache write error:", error.message);
-          });
-      }
+      result[symbol] = allCached || [];
     }
 
     return new Response(JSON.stringify(result), {

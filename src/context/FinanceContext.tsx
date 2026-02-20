@@ -253,24 +253,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, number> = {};
 
-          try {
-            const { data: cached } = await supabase
-              .from('price_history_cache')
-              .select('date, close')
-              .eq('symbol', sym)
-              .order('date', { ascending: true });
-
-            if (cached && cached.length > 0) {
-              cached.forEach((row: { date: string; close: number }) => {
-                history[row.date] = row.close;
-              });
-              historyCache[sym] = history;
-              return;
-            }
-          } catch (e) {
-            console.info(`Supabase cache miss for ${sym}`);
-          }
-
           if (liveApiAvailable) {
             try {
               const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -284,9 +266,29 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 rows.forEach(row => { history[row.date] = row.close; });
               }
             } catch (e) {
-              history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+              console.info(`Failed to fetch history for ${sym}:`, e);
             }
-          } else {
+          }
+
+          if (Object.keys(history).length === 0) {
+            try {
+              const { data: cached } = await supabase
+                .from('price_history_cache')
+                .select('date, close')
+                .eq('symbol', sym)
+                .order('date', { ascending: true });
+
+              if (cached && cached.length > 0) {
+                cached.forEach((row: { date: string; close: number }) => {
+                  history[row.date] = row.close;
+                });
+              }
+            } catch (e) {
+              console.info(`Supabase cache miss for ${sym}`);
+            }
+          }
+
+          if (Object.keys(history).length === 0) {
             history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
           }
 
