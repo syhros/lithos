@@ -17,16 +17,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   // -- Form State --
   const [type, setType] = useState<TransactionType>('expense');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState(new Date().toTimeString().slice(0, 5)); // HH:MM
+  const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
   
-  // General Fields
-  // 'merchant' acts as Description/Reference depending on type
-  const [merchant, setMerchant] = useState(''); 
+  const [merchant, setMerchant] = useState('');
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
-  const [accountId, setAccountId] = useState(''); // "Account From" for transfers
+  const [accountId, setAccountId] = useState('');
   
-  // Transfer / Debt Specifics
   const [accountToId, setAccountToId] = useState('');
 
   // Investing Specifics
@@ -34,7 +31,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const [assetName, setAssetName] = useState('');
   const [shares, setShares] = useState('');
   const [pricePerShare, setPricePerShare] = useState('');
+  // assetType = Stock/ETF/Crypto etc — stored in description context, shown as Type in table
   const [assetType, setAssetType] = useState('Stock');
+  // investCategory = Buy/Sell/Dividend — saved to the DB category column
+  const [investCategory, setInvestCategory] = useState('Buy');
   const [investCurrency, setInvestCurrency] = useState<Currency>('GBP');
 
   // Validation
@@ -44,7 +44,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
   const uniqueMerchants = useMemo(() => Array.from(new Set(data.transactions.filter(t => t.type !== 'investing').map(t => t.description))).sort(), [data.transactions]);
   
-  // Ticker History for Auto-population
   const tickerMap = useMemo(() => {
     const map: Record<string, string> = {};
     data.transactions.forEach(t => {
@@ -54,8 +53,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     });
     return map;
   }, [data.transactions]);
-
-  // -- Effects --
 
   // Auto-populate Asset Name when Ticker changes
   useEffect(() => {
@@ -93,19 +90,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setShares('');
       setPricePerShare('');
       setAssetType('Stock');
+      setInvestCategory('Buy');
       setInvestCurrency('GBP');
       setType('expense');
       setDate(new Date().toISOString().split('T')[0]);
       setTime(new Date().toTimeString().slice(0, 5));
   };
 
-  // Default Category for Debt Payment
   useEffect(() => {
       if (type === 'debt_payment') {
           setCategory('Debt Payment');
       } else if (type === 'transfer') {
           setCategory('Transfer');
-      } else {
+      } else if (type !== 'investing') {
           setCategory('');
       }
   }, [type]);
@@ -126,7 +123,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         setAssetName(editTransaction.description);
         setShares((Math.abs(editTransaction.quantity || 0)).toString());
         setPricePerShare((editTransaction.price || 0).toString());
-        setAssetType(editTransaction.category);
+        // category column holds Buy/Sell/Dividend for investing rows
+        setInvestCategory(editTransaction.category || 'Buy');
+        setAssetType('Stock'); // assetType is visual-only, not stored separately
         setInvestCurrency(editTransaction.currency || 'GBP');
         setAmount(Math.abs(editTransaction.amount).toFixed(2));
       } else {
@@ -139,7 +138,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
   if (!isOpen) return null;
 
-  // Helper to get name
   const getAccountName = (id: string) => {
       const a = data.assets.find(x => x.id === id);
       if (a) return a.name;
@@ -167,10 +165,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     const fullDate = new Date(`${date}T${time}:00`).toISOString();
     const amountNum = parseFloat(amount);
 
-    // If editing, update the transaction
     if (editTransaction) {
       if (editTransaction.type === 'transfer') {
-        // For transfers, update both sides
         const outflowTx = editTransaction;
         const inflowTx = data.transactions.find(t =>
           t.type === 'transfer' &&
@@ -197,7 +193,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           });
         }
       } else if (editTransaction.type === 'debt_payment') {
-        // For debt payments, update both sides
         const outflowTx = editTransaction;
         const debtTx = data.transactions.find(t =>
           t.type === 'debt_payment' &&
@@ -222,18 +217,26 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             accountId: accountToId,
           });
         }
+      } else if (editTransaction.type === 'investing') {
+        await updateTransaction(editTransaction.id, {
+          date: fullDate,
+          description: assetName,
+          amount: amountNum,
+          // investCategory (Buy/Sell/Dividend) saves to DB category column
+          category: investCategory,
+          accountId,
+          symbol: ticker.toUpperCase(),
+          quantity: parseFloat(shares),
+          price: parseFloat(pricePerShare),
+          currency: investCurrency,
+        });
       } else {
-        // For other types, update single transaction
         await updateTransaction(editTransaction.id, {
           date: fullDate,
           description: merchant,
           amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
           category,
           accountId,
-          symbol: type === 'investing' ? ticker.toUpperCase() : undefined,
-          quantity: type === 'investing' ? parseFloat(shares) : undefined,
-          price: type === 'investing' ? parseFloat(pricePerShare) : undefined,
-          currency: type === 'investing' ? investCurrency : undefined,
         });
       }
       resetForm();
@@ -241,20 +244,15 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       return;
     }
 
-    // --- Logic Switch based on Type (for new transactions) ---
-
     if (type === 'transfer') {
-        // Double Entry:
-        // 1. Outflow from Source
         addTransaction({
             date: fullDate,
-            description: merchant || `Transfer to ${getAccountName(accountToId)}`, // Use Reference if provided
+            description: merchant || `Transfer to ${getAccountName(accountToId)}`,
             amount: -Math.abs(amountNum),
             type: 'transfer',
             category: 'Transfer',
             accountId: accountId
         });
-        // 2. Inflow to Dest
         addTransaction({
             date: fullDate,
             description: merchant || `Transfer from ${getAccountName(accountId)}`,
@@ -265,8 +263,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         });
 
     } else if (type === 'debt_payment') {
-        // Double Entry:
-        // 1. Outflow from Source (Asset)
         addTransaction({
             date: fullDate,
             description: `Payment to ${getAccountName(accountToId)}`,
@@ -275,7 +271,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             category: category || 'Debt Payment',
             accountId: accountId
         });
-        // 2. Reduction of Debt (Debt Account)
         addTransaction({
             date: fullDate,
             description: `Payment from ${getAccountName(accountId)}`,
@@ -290,18 +285,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         addTransaction({
             date: fullDate,
             description: assetName,
-            amount: amountNum, // stored in GBP (auto-calculated from price, including /100 for GBX)
+            amount: amountNum,
             type: 'investing',
-            category: assetType,
+            // investCategory (Buy/Sell/Dividend) is what gets saved to DB category
+            category: investCategory,
             accountId: accountId,
             symbol: ticker.toUpperCase(),
             quantity: parseFloat(shares),
-            price: nativePrice,        // native currency price (pence for GBX)
-            currency: investCurrency,  // 'GBX', 'USD', 'GBP', etc.
+            price: nativePrice,
+            currency: investCurrency,
         });
 
     } else {
-        // Income / Expense
         let finalAmount = Math.abs(amountNum);
         if (type === 'expense') finalAmount = -finalAmount;
 
@@ -319,12 +314,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     onClose();
   };
 
-  // -- Render Logic --
-
   const isInvesting = type === 'investing';
   const isTransfer = type === 'transfer';
   const isDebtPayment = type === 'debt_payment';
-  const isGbxInvest = investCurrency === 'GBX';
 
   // Price symbol for Price/Share input (native to the stock)
   const priceSymbol = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
@@ -448,14 +440,15 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                             onChange={e => setInvestCurrency(e.target.value as Currency)}
                             className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
                         >
-                            <option value="GBP">GBP (\u00a3)</option>
-                            <option value="USD">USD ($)</option>
-                            <option value="EUR">EUR (\u20ac)</option>
-                            <option value="GBX">GBX (p)</option>
+                            <option value="GBP">GBP</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBX">GBX</option>
                         </select>
                     </div>
                     <div className="col-span-12 md:col-span-3">
-                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share {isGbxInvest ? '(pence)' : ''}</label>
+                         {/* Label is always 'Price / Share' — no '(pence)' suffix */}
+                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
                          <div className="relative">
                             <span className="absolute left-3 top-3 text-iron-dust text-xs">
                                 {priceSymbol}
@@ -501,15 +494,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         </select>
                     </div>
                     <div>
+                        {/* Category: Buy / Sell / Dividend — saved to DB category column */}
                         <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
                         <div className="flex gap-1.5 h-[42px]">
                             {['Buy', 'Sell', 'Dividend'].map(cat => (
                                 <button
                                     key={cat}
-                                    onClick={() => setCategory(cat)}
+                                    type="button"
+                                    onClick={() => setInvestCategory(cat)}
                                     className={clsx(
                                         'flex-1 px-3 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
-                                        category === cat
+                                        investCategory === cat
                                             ? 'bg-magma text-white border border-magma'
                                             : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'
                                     )}
@@ -541,7 +536,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         </select>
                     </div>
                     
-                    {/* Visual Arrow */}
                     <div className="flex justify-center mt-9 opacity-30 text-white">
                         <ArrowRight size={18} />
                     </div>
@@ -591,7 +585,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         <input 
                             type="text"
                             placeholder={isDebtPayment ? "e.g. Debt Payment" : "e.g. Savings Goal"}
-                            value={isDebtPayment ? category : merchant} // Use merchant state for Reference in Transfer
+                            value={isDebtPayment ? category : merchant}
                             onChange={e => isDebtPayment ? setCategory(e.target.value) : setMerchant(e.target.value)}
                             className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
                         />
@@ -680,7 +674,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                             ${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}
                         </span>
                     )}
-                    {isGbxInvest && shares && pricePerShare && (
+                    {investCurrency === 'GBX' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
                             {nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}
                         </span>
@@ -688,7 +682,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
                 <div className="flex items-center gap-2">
                      <Calculator size={14} className="text-magma" />
-                     {/* Amount is always in GBP */}
                      <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
                 </div>
             </div>

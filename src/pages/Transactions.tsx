@@ -10,6 +10,26 @@ import { Transaction } from '../data/mockData';
 
 type SortOption = 'newest' | 'oldest' | 'amount-high' | 'amount-low';
 
+// For investing rows, 'category' in the DB stores Buy/Sell/Dividend.
+// We display that as the Category badge and show a separate 'Type' pill
+// (Stock/ETF/Crypto etc) — but since assetType isn't stored separately in
+// the DB, we fall back to showing the transaction type label instead.
+const TYPE_LABELS: Record<string, string> = {
+  income: 'Income',
+  expense: 'Expense',
+  investing: 'Investing',
+  transfer: 'Transfer',
+  debt_payment: 'Debt Payment',
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  income: 'text-emerald-vein bg-emerald-vein/10 border-emerald-vein/20',
+  expense: 'text-magma bg-magma/10 border-magma/20',
+  investing: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  transfer: 'text-iron-dust bg-white/5 border-white/10',
+  debt_payment: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
+};
+
 export const Transactions: React.FC = () => {
   const { data, deleteTransaction, deleteTransactions, currencySymbol, deletingTransactions } = useFinance();
   const [search, setSearch] = useState('');
@@ -200,6 +220,7 @@ export const Transactions: React.FC = () => {
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5">Date</th>
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5">Description</th>
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5">Account</th>
+                <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5">Type</th>
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5">Category</th>
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5 text-right">Amount</th>
                 <th className="py-3 px-6 text-[10px] font-bold text-iron-dust uppercase tracking-[2px] border-b border-white/5 w-10"></th>
@@ -208,6 +229,8 @@ export const Transactions: React.FC = () => {
             <tbody className="divide-y divide-white/5">
               {filteredTransactions.map((tx) => {
                 const isSelected = selectedIds.has(tx.id);
+                const typeLabel = TYPE_LABELS[tx.type] ?? tx.type;
+                const typeColor = TYPE_COLORS[tx.type] ?? 'text-iron-dust bg-white/5 border-white/10';
                 return (
                   <tr
                     key={tx.id}
@@ -235,6 +258,13 @@ export const Transactions: React.FC = () => {
                            {accountMap[tx.accountId] || 'Unknown'}
                        </span>
                     </td>
+                    {/* Type column — coloured pill showing transaction type */}
+                    <td className="py-4 px-6">
+                      <span className={clsx('inline-flex items-center px-2 py-1 rounded-sm text-[10px] font-mono font-bold border uppercase', typeColor)}>
+                        {typeLabel}
+                      </span>
+                    </td>
+                    {/* Category column — for investing rows shows Buy/Sell/Dividend */}
                     <td className="py-4 px-6">
                       <span className="inline-flex items-center px-2 py-1 rounded-sm text-[10px] font-mono bg-white/5 text-iron-dust border border-white/5 uppercase">
                         {tx.category}
@@ -262,7 +292,7 @@ export const Transactions: React.FC = () => {
               })}
               {filteredTransactions.length === 0 && (
                   <tr>
-                      <td colSpan={selectMode ? 7 : 6} className="py-12 text-center text-iron-dust font-mono text-xs">
+                      <td colSpan={selectMode ? 8 : 7} className="py-12 text-center text-iron-dust font-mono text-xs">
                           No transactions found.
                       </td>
                   </tr>
