@@ -74,6 +74,23 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     }
   }, [shares, pricePerShare, type, investCurrency]);
 
+  const resetForm = () => {
+      setMerchant('');
+      setCategory('');
+      setAmount('');
+      setAccountId('');
+      setAccountToId('');
+      setTicker('');
+      setAssetName('');
+      setShares('');
+      setPricePerShare('');
+      setAssetType('Stock');
+      setInvestCurrency('GBP');
+      setType('expense');
+      setDate(new Date().toISOString().split('T')[0]);
+      setTime(new Date().toTimeString().slice(0, 5));
+  };
+
   // Default Category for Debt Payment
   useEffect(() => {
       if (type === 'debt_payment') {
@@ -230,23 +247,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     
     resetForm();
     onClose();
-  };
-
-  const resetForm = () => {
-      setMerchant('');
-      setCategory('');
-      setAmount('');
-      setAccountId('');
-      setAccountToId('');
-      setTicker('');
-      setAssetName('');
-      setShares('');
-      setPricePerShare('');
-      setAssetType('Stock');
-      setInvestCurrency('GBP');
-      setType('expense');
-      setDate(new Date().toISOString().split('T')[0]);
-      setTime(new Date().toTimeString().slice(0, 5));
   };
 
   // -- Render Logic --
