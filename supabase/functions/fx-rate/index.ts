@@ -13,7 +13,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/GBP%3DX?interval=1d&range=1d`;
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/USD%3DX?interval=1d&range=1d`;
     const res = await fetch(yahooUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -41,15 +41,17 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const gbpUsdRate = meta.regularMarketPrice ?? meta.previousClose;
+    const usdGbpRate = meta.regularMarketPrice ?? meta.previousClose;
 
-    if (!gbpUsdRate || gbpUsdRate <= 1) {
-      console.error(`Invalid rate: ${gbpUsdRate}`);
-      return new Response(JSON.stringify({ error: "Invalid rate received", rate: gbpUsdRate }), {
+    if (!usdGbpRate || usdGbpRate <= 0) {
+      console.error(`Invalid rate: ${usdGbpRate}`);
+      return new Response(JSON.stringify({ error: "Invalid rate received", rate: usdGbpRate }), {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const gbpUsdRate = 1 / usdGbpRate;
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -72,7 +74,7 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(
-      JSON.stringify({ from_currency: "GBP", to_currency: "USD", rate: gbpUsdRate, updated_at: new Date().toISOString() }),
+      JSON.stringify({ from_currency: "GBP", to_currency: "USD", rate: gbpUsdRate, usdGbpRate: usdGbpRate, updated_at: new Date().toISOString() }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
