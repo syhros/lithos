@@ -23,7 +23,7 @@ interface HoldingDetailModalProps {
 
 const TIME_RANGES: TimeRange[] = ['1W', '1M', '3M', '6M', '1Y', 'ALL'];
 
-const getStartDate = (range: TimeRange, allDates: Date[]): Date => {
+const getStartDate = (range: TimeRange, allDates: Date[], chartMode: ChartMode, firstTxDate: Date): Date => {
   const today = new Date();
   switch (range) {
     case '1W': return subWeeks(today, 1);
@@ -31,7 +31,12 @@ const getStartDate = (range: TimeRange, allDates: Date[]): Date => {
     case '3M': return subMonths(today, 3);
     case '6M': return subMonths(today, 6);
     case '1Y': return subDays(today, 365);
-    case 'ALL': return allDates.length > 0 ? allDates[0] : subDays(today, 365);
+    case 'ALL':
+      if (chartMode === 'VALUE') {
+        return firstTxDate;
+      } else {
+        return allDates.length > 0 ? allDates[0] : subDays(today, 365);
+      }
   }
 };
 
@@ -143,7 +148,9 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
     if (!holding || allChartData.length === 0) return [];
 
     const allDates = allChartData.map(d => d.date);
-    const startDate = getStartDate(timeRange, allDates);
+    const sortedTxs = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const firstTxDate = sortedTxs.length > 0 ? parseISO(sortedTxs[0].date) : subDays(new Date(), 365);
+    const startDate = getStartDate(timeRange, allDates, chartMode, firstTxDate);
     const fmt = getDateFormat(timeRange);
 
     return allChartData
@@ -153,7 +160,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
         value: parseFloat(d.value.toFixed(2)),
         price: parseFloat(d.price.toFixed(2)),
       }));
-  }, [allChartData, timeRange, holding]);
+  }, [allChartData, timeRange, holding, chartMode, transactions]);
 
   if (!isOpen || !holding) return null;
 
