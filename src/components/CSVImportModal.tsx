@@ -188,7 +188,7 @@ const MappingSelect: React.FC<{
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
-  const { data, addTransaction, currencySymbol, historicalPrices, refreshData, usdToGbp } = useFinance();
+  const { data, addTransaction, currencySymbol, historicalPrices, refreshData, gbpUsdRate } = useFinance();
 
   const [mode, setMode] = useState<ImportMode>('accounts');
   const [step, setStep] = useState<Step>('upload');
@@ -492,7 +492,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           if (tradeType === 'dividend') {
             // Dividend value = qty * price (qty = shares owned, price = dividend per share)
             const dividendNative = qty * price;
-            const dividendGbp = (validCurrency === 'USD' && usdToGbp > 0) ? dividendNative * usdToGbp : dividendNative;
+            const fxRate = (validCurrency === 'USD' && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
+            const dividendGbp = dividendNative * fxRate;
 
             // Always reinvest dividends: look up historical price on that day to calculate fractional shares
             const dateStr = txDate.split('T')[0];
@@ -506,7 +507,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             // For dividends, we need the actual stock price, not the dividend per share
             // If no historical price available, just record as cash dividend
             if (historicalPrice) {
-              const fxSharePrice = (validCurrency === 'USD' && usdToGbp > 0) ? historicalPrice * usdToGbp : historicalPrice;
+              const fxSharePrice = historicalPrice * fxRate;
               const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
               totalInvestments += dividendGbp;
               addTransaction({
@@ -536,7 +537,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           } else {
             // buy or sell
             const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
-            const gbpAmount = (validCurrency === 'USD' && usdToGbp > 0) ? Math.abs(qty) * price * usdToGbp : Math.abs(qty) * price;
+            const fxRate = (validCurrency === 'USD' && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
+            const gbpAmount = Math.abs(qty) * price * fxRate;
             const signedAmount = tradeType === 'sell' ? gbpAmount : -gbpAmount;
             totalInvestments += gbpAmount;
 

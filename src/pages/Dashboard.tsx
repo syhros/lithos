@@ -170,7 +170,7 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
 // --- Main Dashboard ---
 
 export const Dashboard: React.FC = () => {
-  const { data, getTotalNetWorth, currentBalances, currentPrices, getHistory, lastUpdated, refreshData, loading, currencySymbol, usdToGbp } = useFinance();
+  const { data, getTotalNetWorth, currentBalances, currentPrices, getHistory, lastUpdated, refreshData, loading, currencySymbol, gbpUsdRate } = useFinance();
   
   // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
@@ -230,9 +230,9 @@ export const Dashboard: React.FC = () => {
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
-      if (usdToGbp > 0) {
-        if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
-        if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+      if (gbpUsdRate > 0) {
+        if (stockIsUsd && !userIsUsd) fxRate = 1 / gbpUsdRate;
+        if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
       const nativePrice = marketData ? marketData.price : 0;
@@ -241,7 +241,7 @@ export const Dashboard: React.FC = () => {
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
     });
-  }, [data.transactions, currentPrices, data.user.currency, usdToGbp]);
+  }, [data.transactions, currentPrices, data.user.currency, gbpUsdRate]);
 
   const totalInvestmentBalance = useMemo(() =>
     holdings.reduce((sum, h) => sum + h.currentValue, 0),

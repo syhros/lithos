@@ -15,7 +15,7 @@ interface InvestmentAccountModalProps {
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
 export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ isOpen, onClose, account }) => {
-  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol, usdToGbp } = useFinance();
+  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol, gbpUsdRate } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
@@ -75,7 +75,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
       const isUsd = h.currency === 'USD';
-      const fxRate = (isUsd && usdToGbp > 0) ? usdToGbp : 1;
+      const fxRate = (isUsd && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
       const nativePrice = marketData?.price || 0;
       const displayPrice = nativePrice * fxRate;
       const currentValue = h.quantity * displayPrice;
@@ -132,7 +132,8 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
         const dateStr = format(date, 'yyyy-MM-dd');
         const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
         const isUsd = symbolCurrencies[sym] === 'USD';
-        val += qty * price * (isUsd ? usdToGbp : 1);
+        const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+        val += qty * price * fxRate;
       });
 
       if (val > 0) lastKnownValue = val;

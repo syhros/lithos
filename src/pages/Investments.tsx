@@ -11,7 +11,7 @@ import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
 
 export const Investments: React.FC = () => {
-    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, usdToGbp } = useFinance();
+    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
     const userCurrency = data?.user?.currency || 'GBP';
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
@@ -54,16 +54,16 @@ export const Investments: React.FC = () => {
             const userIsUsd = userCurrency === 'USD';
 
             let fxRate = 1;
-            if (usdToGbp > 0) {
-              if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
-              if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+            if (gbpUsdRate > 0) {
+              if (stockIsUsd && !userIsUsd) fxRate = 1 / gbpUsdRate;
+              if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
             }
 
             const nativePrice = marketData ? marketData.price : 0;
             const displayPrice = nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-            const avgPrice = (usdToGbp > 0 && stockIsUsd && !userIsUsd) ? avgPriceCost / usdToGbp : (stockIsUsd === userIsUsd ? avgPriceCost : (usdToGbp > 0 ? avgPriceCost * usdToGbp : avgPriceCost));
+            const avgPrice = (gbpUsdRate > 0 && stockIsUsd && !userIsUsd) ? avgPriceCost * fxRate : (stockIsUsd === userIsUsd ? avgPriceCost : (gbpUsdRate > 0 ? avgPriceCost / fxRate : avgPriceCost));
             const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
@@ -77,7 +77,7 @@ export const Investments: React.FC = () => {
 
             return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate, dailyChangePercent };
         }).sort((a, b) => b.currentValue - a.currentValue);
-    }, [data.transactions, currentPrices, usdToGbp]);
+    }, [data.transactions, currentPrices, gbpUsdRate]);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -121,7 +121,8 @@ export const Investments: React.FC = () => {
                     const dateStr = format(date, 'yyyy-MM-dd');
                     const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
                     const isUsd = symbolCurrencies[sym] === 'USD';
-                    val += qty * price * (isUsd ? usdToGbp : 1);
+                    const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+                    val += qty * price * fxRate;
                 });
 
                 return { date: format(date, 'dd MMM'), value: val > 0 ? parseFloat(val.toFixed(2)) : fallbackBalance };
@@ -130,7 +131,7 @@ export const Investments: React.FC = () => {
             result[asset.id] = chartPoints;
         });
         return result;
-    }, [investmentAssets, data.transactions, historicalPrices, currentPrices, currentBalances, usdToGbp]);
+    }, [investmentAssets, data.transactions, historicalPrices, currentPrices, currentBalances, gbpUsdRate]);
 
     const holdingSparklines = useMemo(() => {
         const result: Record<string, { date: string; value: number }[]> = {};
@@ -140,7 +141,7 @@ export const Investments: React.FC = () => {
             const dates = eachDayOfInterval({ start, end: today }).slice(-7);
             const hist = historicalPrices[h.symbol] || {};
             const isUsd = h.nativeCurrency === 'USD';
-            const fx = isUsd ? usdToGbp : 1;
+            const fx = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
 
             result[h.symbol] = dates.map(date => {
                 const dateStr = format(date, 'yyyy-MM-dd');
@@ -149,7 +150,7 @@ export const Investments: React.FC = () => {
             });
         });
         return result;
-    }, [holdings, historicalPrices, usdToGbp]);
+    }, [holdings, historicalPrices, gbpUsdRate]);
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
