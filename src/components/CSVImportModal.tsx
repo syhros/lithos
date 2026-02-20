@@ -22,14 +22,15 @@ interface FieldDef {
 }
 
 const ACCOUNT_FIELDS: FieldDef[] = [
-  { key: 'date',        label: 'Date',     required: true,  description: '2024-01-15 or 15/01/2024' },
-  { key: 'amount',      label: 'Amount',   required: true,  description: 'Debit (expense) — or debit when Credit is also mapped' },
-  { key: 'credit',      label: 'Credit',   required: false, description: 'Optional: income column. If mapped, Amount becomes debit-only' },
-  { key: 'description', label: 'Merchant', required: false, description: 'Payee / merchant name' },
-  { key: 'category',    label: 'Category', required: false, description: 'e.g. Groceries' },
-  { key: 'type',        label: 'Type',     required: false, description: 'Override auto-type: income, expense...' },
-  { key: 'time',        label: 'Time',     required: false, description: 'HH:MM (optional)' },
-  { key: 'accountId',   label: 'Account',  required: false, description: 'Account name per row' },
+  { key: 'date',        label: 'Date',        required: true,  description: '2024-01-15 or 15/01/2024' },
+  { key: 'amount',      label: 'Amount',      required: true,  description: 'Debit (expense) — or debit when Credit is also mapped' },
+  { key: 'credit',      label: 'Credit',      required: false, description: 'Optional: income column. If mapped, Amount becomes debit-only' },
+  { key: 'description', label: 'Merchant',    required: false, description: 'Payee / merchant name' },
+  { key: 'category',    label: 'Category',    required: false, description: 'e.g. Groceries' },
+  { key: 'notes',       label: 'Notes',       required: false, description: 'Extra details / memo column from your bank' },
+  { key: 'type',        label: 'Type',        required: false, description: 'Override auto-type: income, expense...' },
+  { key: 'time',        label: 'Time',        required: false, description: 'HH:MM (optional)' },
+  { key: 'accountId',   label: 'Account',     required: false, description: 'Account name per row' },
 ];
 
 const INVESTMENT_FIELDS: FieldDef[] = [
@@ -44,7 +45,7 @@ const INVESTMENT_FIELDS: FieldDef[] = [
 ];
 
 
-// ── CSV helpers ──────────────────────────────────────────────────────────────
+// ── CSV helpers ────────────────────────────────────────────
 
 const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
   const lines = text.trim().split(/\r?\n/);
@@ -105,6 +106,7 @@ const AUTO_MAPPING: Record<string, string[]> = {
   credit:      ['credit', 'credit amount', 'deposits', 'deposit', 'in'],
   description: ['description', 'merchant', 'payee', 'reference', 'narrative', 'details', 'memo', 'name'],
   category:    ['category', 'action type'],
+  notes:       ['notes', 'note', 'comment', 'comments', 'additional info', 'extra', 'remarks', 'transaction details'],
   type:        ['transaction type', 'trans type'],
   tradeType:   ['type', 'action', 'trade type', 'order type'],
   time:        ['time', 'transaction time'],
@@ -129,10 +131,10 @@ const autoDetect = (headers: string[]): Record<string, string> => {
 const downloadTemplate = (mode: ImportMode) => {
   let csv = '';
   if (mode === 'accounts') {
-    csv = 'date,amount,credit,description,category,time,account\n';
-    csv += '2024-01-15,45.50,,Waitrose,Groceries,09:30,Monzo Current\n';
-    csv += '2024-01-01,,4200.00,Tech Solutions Ltd,Salary,08:00,Monzo Current\n';
-    csv += '2024-01-20,150.00,,Amex Payment,Payment,12:00,Monzo Current\n';
+    csv = 'date,amount,credit,description,category,notes,time,account\n';
+    csv += '2024-01-15,45.50,,Waitrose,Groceries,Weekly shop,09:30,Monzo Current\n';
+    csv += '2024-01-01,,4200.00,Tech Solutions Ltd,Salary,,08:00,Monzo Current\n';
+    csv += '2024-01-20,150.00,,Amex Payment,Payment,,12:00,Monzo Current\n';
   } else {
     csv = 'ticker,date,quantity,price,type,currency,description,time\n';
     csv += 'AAPL,2024-01-15,10,178.35,buy,USD,Apple Inc.,14:30\n';
@@ -149,7 +151,7 @@ const downloadTemplate = (mode: ImportMode) => {
   URL.revokeObjectURL(url);
 };
 
-// ── Mapping row select ────────────────────────────────────────────────────────
+// ── Mapping row select ────────────────────────────────────────────
 
 const MappingSelect: React.FC<{
   field: FieldDef;
@@ -184,7 +186,7 @@ const MappingSelect: React.FC<{
   </div>
 );
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
@@ -383,14 +385,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
       const cachedSymbols = allSymbols.filter(sym => historicalPrices[sym]);
       const symbolsToFetch = allSymbols.filter(sym => !historicalPrices[sym]);
 
-      // Check cache first
       if (cachedSymbols.length > 0) {
         setLoadingStatus(`Checking local cache for ${cachedSymbols.length} ticker${cachedSymbols.length === 1 ? '' : 's'}...`);
         await new Promise(r => setTimeout(r, 300));
         fetchedHistoricalPrices = { ...historicalPrices, ...fetchedHistoricalPrices };
       }
 
-      // Fetch missing data
       if (symbolsToFetch.length > 0) {
         setLoadingStatus(`Fetching historical prices for ${symbolsToFetch.length} ticker${symbolsToFetch.length === 1 ? '' : 's'}...`);
         try {
@@ -402,7 +402,6 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           });
           if (historyRes.ok) {
             const historyData = await historyRes.json();
-            // Convert from [{ date, close }] format to { date: close } format
             const convertedData: Record<string, Record<string, number>> = {};
             for (const [symbol, rows] of Object.entries(historyData)) {
               const dateMap: Record<string, number> = {};
@@ -448,12 +447,13 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const type = normalizeType(rawTypeOverride, isCredit);
           const description = getCellValue(row, 'description') || 'Imported Transaction';
           const category = getCellValue(row, 'category') || 'General';
+          const notesRaw = getCellValue(row, 'notes').trim();
+          const notes = notesRaw || undefined;
           const accountId = resolveAccountId(row);
           const rawDate = getCellValue(row, 'date');
 
           if (!accountId) { newErrors.push(`Row ${i + 2}: Could not resolve account.`); return; }
 
-          // When date and time map to the same column, splitDateTime extracts both
           const rawTimeCol = getCellValue(row, 'time');
           const sameCol = mapping['date'] && mapping['time'] && mapping['date'] === mapping['time'];
           const { datePart, timePart } = splitDateTime(rawDate);
@@ -461,7 +461,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
 
           addTransaction({
             date: parseDate(rawDate, resolvedTime),
-            description, amount, type, category, accountId,
+            description, amount, type, category, accountId, notes,
           });
           if (amount > 0) totalIncome += amount; else totalExpense += Math.abs(amount);
           count++;
@@ -476,10 +476,8 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const tradeType = resolveTradeType(row);
           const category: InvestmentCategory = tradeType === 'sell' ? 'Sell' : tradeType === 'dividend' ? 'Dividend' : 'Buy';
 
-          // Skip rows missing required investment values (e.g. deposit rows in Trading212)
           if (!rawSymbol || isNaN(qty) || qty === 0 || isNaN(price) || price === 0) return;
 
-          // Trading212 "Time" column contains datetime — split when same column mapped for date+time
           const sameCol = mapping['date'] && mapping['time'] && mapping['date'] === mapping['time'];
           const { datePart, timePart } = splitDateTime(rawDate);
           const rawTimeCol = getCellValue(row, 'time');
@@ -490,27 +488,19 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             ? rawCurrency as Currency : 'GBP';
 
           if (tradeType === 'dividend') {
-            // Dividend value = qty * price (qty = shares owned, price = dividend per share)
             const dividendNative = qty * price;
             let fxRate = 1;
-            if (validCurrency === 'USD' && gbpUsdRate > 0) {
-              fxRate = 1 / gbpUsdRate;
-            } else if (validCurrency === 'GBX') {
-              fxRate = 1 / 100;
-            }
+            if (validCurrency === 'USD' && gbpUsdRate > 0) fxRate = 1 / gbpUsdRate;
+            else if (validCurrency === 'GBX') fxRate = 1 / 100;
             const dividendGbp = dividendNative * fxRate;
 
-            // Always reinvest dividends: look up historical price on that day to calculate fractional shares
             const dateStr = txDate.split('T')[0];
             const histForSymbol = fetchedHistoricalPrices[symbol] || {};
-            // Walk back up to 7 days to find a trading day price
             let historicalPrice: number | null = null;
             for (let d = 0; d < 7; d++) {
               const checkDate = format(subDays(parseISO(dateStr), d), 'yyyy-MM-dd');
               if (histForSymbol[checkDate] !== undefined) { historicalPrice = histForSymbol[checkDate]; break; }
             }
-            // For dividends, we need the actual stock price, not the dividend per share
-            // If no historical price available, just record as cash dividend
             if (historicalPrice) {
               const fxSharePrice = historicalPrice * fxRate;
               const sharesEarned = fxSharePrice > 0 ? dividendGbp / fxSharePrice : 0;
@@ -528,7 +518,6 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 currency: validCurrency,
               });
             } else {
-              // No price data available, just record as cash dividend
               totalInvestments += dividendGbp;
               addTransaction({
                 date: txDate,
@@ -540,14 +529,10 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
               });
             }
           } else {
-            // buy or sell
             const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
             let fxRate = 1;
-            if (validCurrency === 'USD' && gbpUsdRate > 0) {
-              fxRate = 1 / gbpUsdRate;
-            } else if (validCurrency === 'GBX') {
-              fxRate = 1 / 100;
-            }
+            if (validCurrency === 'USD' && gbpUsdRate > 0) fxRate = 1 / gbpUsdRate;
+            else if (validCurrency === 'GBX') fxRate = 1 / 100;
             const gbpAmount = Math.abs(qty) * price * fxRate;
             const signedAmount = tradeType === 'sell' ? gbpAmount : -gbpAmount;
             totalInvestments += gbpAmount;
@@ -646,7 +631,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
 
-          {/* ── STEP 1: Upload ────────────────────────────────────────────── */}
+          {/* ── STEP 1: Upload ──────────────────────────────────────────────── */}
           {step === 'upload' && (
             <div className="p-8">
               <div
@@ -705,7 +690,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {/* ── STEP 2: Map Fields & Preview ─────────────────────────────── */}
+          {/* ── STEP 2: Map Fields & Preview ────────────────────────────────── */}
           {step === 'map' && (
             <div className="p-6 space-y-5">
               {/* File pill + account select */}
@@ -881,7 +866,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {/* ── STEP 3: Confirm ──────────────────────────────────────────── */}
+          {/* ── STEP 3: Confirm ──────────────────────────────────────────────── */}
           {step === 'confirm' && (
             <div className="p-8 space-y-6">
               {isLoading ? (
@@ -1038,7 +1023,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {/* ── DONE ─────────────────────────────────────────────────────── */}
+          {/* ── DONE ───────────────────────────────────────────────────────────── */}
           {step === 'done' && (
             <div className="p-12 flex flex-col items-center justify-center text-center">
               <CheckCircle size={48} className="text-emerald-vein mb-5" />

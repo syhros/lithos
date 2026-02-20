@@ -184,6 +184,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         category: t.category,
         // Resolve accountId from whichever FK column is set
         accountId: t.account_id || t.debt_id || undefined,
+        notes: t.notes ?? undefined,
         symbol: t.symbol,
         quantity: t.quantity ? parseFloat(t.quantity) : undefined,
         price: t.price ? parseFloat(t.price) : undefined,
@@ -295,14 +296,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
         const updatedPrices = { ...fetchedPrices };
 
-        // For any symbol that the live API didn't return a price for, use the
-        // most recent close from the history cache as the current price.
         uniqueSymbols.forEach(sym => {
           if (!updatedPrices[sym] || !updatedPrices[sym].price) {
             const hist = historyCache[sym];
             const mostRecentClose = hist ? getMostRecentClose(hist) : undefined;
             if (mostRecentClose !== undefined && mostRecentClose > 0) {
-              // Derive change vs previous trading day close
               const dates = Object.keys(hist).sort();
               const prevClose = dates.length >= 2 ? hist[dates[dates.length - 2]] : mostRecentClose;
               const chg = mostRecentClose - prevClose;
@@ -317,7 +315,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         });
 
-        // Recalculate change vs yesterday's close for symbols that DO have a live price
         uniqueSymbols.forEach(sym => {
           const hist = historyCache[sym];
           const currentPrice = updatedPrices[sym]?.price;
@@ -371,24 +368,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
-  /**
-   * currentBalances
-   *
-   * Assets:  startingValue + all non-investing transactions on that account.
-   * Debts:   startingValue (what is currently owed) adjusted by transactions:
-   *   - expense on debt  → INCREASES balance (+)
-   *   - income/payment   → DECREASES balance (-)
-   *
-   * Sign convention used when saving:
-   *   Expense on debt:        amount = +abs (charge to card)
-   *   Income on debt:         amount = -abs (credit/refund)
-   *   debt_payment debt side: amount = -abs (you paid it down)
-   */
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
     const debtIdSet = new Set(data.debts.map(d => d.id));
 
-    // Assets
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -398,7 +381,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    // Apply non-investing transactions to ASSET accounts only
     data.transactions.forEach(tx => {
       if (!tx.accountId || tx.type === 'investing') return;
       if (!debtIdSet.has(tx.accountId) && balances[tx.accountId] !== undefined) {
@@ -406,14 +388,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    // Debts — start at startingValue
     data.debts.forEach(debt => { balances[debt.id] = debt.startingValue; });
 
-    // Apply transactions posted against a debt account
     data.transactions.forEach(tx => {
       if (!tx.accountId || !debtIdSet.has(tx.accountId)) return;
-      // expense  → positive amount stored  → adds to debt (you owe more)
-      // income / debt_payment debt side → negative amount stored → reduces debt
       balances[tx.accountId] += tx.amount;
     });
 
@@ -451,20 +429,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const historicalData = historicalPrices[h.symbol] || {};
             let priceOnDate = historicalData[dateStr];
             if (priceOnDate === undefined) {
-              // Forward-fill: find the most recent close on or before this date.
-              // If none exists yet (date is before first entry), use the earliest close.
               const dates = Object.keys(historicalData).sort();
               const latestBeforeDate = dates.filter(date => date <= dateStr).pop();
               if (latestBeforeDate) {
                 priceOnDate = historicalData[latestBeforeDate];
               } else {
-                // Date is before the first cached entry — use earliest available close
-                // rather than 0 so the chart doesn't spike down.
                 priceOnDate = dates.length > 0 ? historicalData[dates[0]] : currentPrices[h.symbol]?.price;
               }
             }
-            // If we still have no price, skip this holding for this date point
-            // (leaves investing += 0 for that day) rather than producing a £0 spike.
             if (priceOnDate !== undefined && priceOnDate > 0) {
               const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
@@ -499,18 +471,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return assetTotal - debtTotal;
   };
 
-  /**
-   * addTransaction
-   *
-   * Routing:
-   *   - If accountId is a debt → save to debt_id column, account_id = null
-   *   - Otherwise              → save to account_id column, debt_id = null
-   *
-   * Amount sign convention for debt accounts:
-   *   expense on debt        → +abs  (increases what you owe)
-   *   income / payment       → -abs  (decreases what you owe)
-   * The caller (AddTransactionModal) is responsible for passing the right sign.
-   */
   const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -524,6 +484,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount: tx.amount,
       type: tx.type,
       category: tx.category,
+      notes: tx.notes ?? null,
       symbol: tx.symbol ?? null,
       quantity: tx.quantity ?? null,
       price: tx.price ?? null,
@@ -553,6 +514,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         else if (key === 'quantity') { dbUpdates['quantity'] = value; }
         else if (key === 'price')    { dbUpdates['price']    = value; }
         else if (key === 'currency') { dbUpdates['currency'] = value; }
+        else if (key === 'notes')    { dbUpdates['notes']    = value ?? null; }
         else                         { dbUpdates[key]        = value; }
     });
     const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
