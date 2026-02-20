@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Calculator, ArrowRight } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
-import { TransactionType, Currency } from '../data/mockData';
+import { TransactionType, Currency, Transaction } from '../data/mockData';
 
 const USD_TO_GBP = 0.74;
 
 interface AddTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
+  editTransaction?: Transaction | null;
 }
 
-export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose }) => {
-  const { data, addTransaction, currencySymbol } = useFinance();
+export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, editTransaction }) => {
+  const { data, addTransaction, updateTransaction, currencySymbol } = useFinance();
   
   // -- Form State --
   const [type, setType] = useState<TransactionType>('expense');
@@ -84,6 +85,33 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       }
   }, [type]);
 
+  // Populate form when editing
+  useEffect(() => {
+    if (editTransaction && isOpen) {
+      setType(editTransaction.type);
+      const [datePart, timePart] = editTransaction.date.split('T');
+      setDate(datePart);
+      setTime(timePart?.substring(0, 5) || '00:00');
+      setMerchant(editTransaction.description);
+      setCategory(editTransaction.category);
+      setAccountId(editTransaction.accountId);
+
+      if (editTransaction.type === 'investing' && editTransaction.symbol) {
+        setTicker(editTransaction.symbol);
+        setAssetName(editTransaction.description);
+        setShares((Math.abs(editTransaction.quantity || 0)).toString());
+        setPricePerShare((editTransaction.price || 0).toString());
+        setAssetType(editTransaction.category);
+        setInvestCurrency(editTransaction.currency || 'GBP');
+        setAmount(Math.abs(editTransaction.amount).toFixed(2));
+      } else {
+        setAmount(Math.abs(editTransaction.amount).toFixed(2));
+      }
+    } else {
+      resetForm();
+    }
+  }, [editTransaction, isOpen]);
+
   if (!isOpen) return null;
 
   // Helper to get name
@@ -105,8 +133,26 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
     const fullDate = new Date(`${date}T${time}:00`).toISOString();
     const amountNum = parseFloat(amount);
-    
-    // --- Logic Switch based on Type ---
+
+    // If editing, update the transaction
+    if (editTransaction) {
+      updateTransaction(editTransaction.id, {
+        date: fullDate,
+        description: merchant,
+        amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
+        category,
+        accountId,
+        symbol: type === 'investing' ? ticker.toUpperCase() : undefined,
+        quantity: type === 'investing' ? parseFloat(shares) : undefined,
+        price: type === 'investing' ? parseFloat(pricePerShare) : undefined,
+        currency: type === 'investing' ? investCurrency : undefined,
+      });
+      resetForm();
+      onClose();
+      return;
+    }
+
+    // --- Logic Switch based on Type (for new transactions) ---
 
     if (type === 'transfer') {
         // Double Entry: 
@@ -215,7 +261,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         {/* Header */}
         <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#131517] sticky top-0 z-10">
           <h3 className="text-sm font-bold uppercase tracking-[2px] text-white">
-            {isInvesting ? 'Add Investment' : isTransfer ? 'Transfer Funds' : isDebtPayment ? 'Record Payment' : 'Add Transaction'}
+            {editTransaction
+              ? 'Edit Transaction'
+              : isInvesting ? 'Add Investment' : isTransfer ? 'Transfer Funds' : isDebtPayment ? 'Record Payment' : 'Add Transaction'}
           </h3>
           <button onClick={onClose} className="text-iron-dust hover:text-white">
             <X size={18} />
@@ -228,14 +276,15 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 md:col-span-4">
               <label className="block text-xs font-mono text-iron-dust mb-2">Type</label>
-              <select 
+              <select
                 value={type}
                 onChange={e => {
                     setType(e.target.value as TransactionType);
                     setAccountId('');
                     setAccountToId('');
                 }}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
+                disabled={!!editTransaction}
+                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>

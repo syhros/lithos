@@ -1,9 +1,10 @@
-import React from 'react';
-import { X, TrendingUp, TrendingDown, ArrowLeftRight, CreditCard, Landmark, BarChart2, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, TrendingUp, TrendingDown, ArrowLeftRight, CreditCard, Landmark, BarChart2, Trash2, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { Transaction } from '../data/mockData';
+import { AddTransactionModal } from './AddTransactionModal';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -28,6 +29,7 @@ const DetailRow: React.FC<{ label: string; value: React.ReactNode; mono?: boolea
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ transaction, onClose, onDelete }) => {
   const { data, currencySymbol } = useFinance();
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   if (!transaction) return null;
 
@@ -115,7 +117,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-white/5 bg-[#131517] flex justify-between items-center">
+        <div className="px-5 py-4 border-t border-white/5 bg-[#131517] flex justify-between items-center gap-2">
           <button
             onClick={handleDelete}
             className="flex items-center gap-2 px-4 py-2 bg-magma/10 border border-magma/30 text-magma rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/20 transition-colors"
@@ -123,14 +125,32 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
             <Trash2 size={13} />
             Delete
           </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-2 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
-          >
-            Close
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-white rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+            >
+              <Pencil size={13} />
+              Edit
+            </button>
+            <button
+              onClick={onClose}
+              className="px-5 py-2 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
+
+      <AddTransactionModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          onClose();
+        }}
+        editTransaction={transaction}
+      />
     </div>
   );
 };

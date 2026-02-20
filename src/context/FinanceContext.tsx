@@ -33,6 +33,7 @@ interface FinanceContextType {
   getTotalNetWorth: () => number;
 
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
+  updateTransaction: (id: string, updates: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
   deleteTransactions: (ids: string[]) => void;
   addAccount: (account: Omit<Asset, 'id'>) => void;
@@ -527,6 +528,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  const updateTransaction = (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
+    supabase.from('transactions').update(updates).eq('id', id).then(() => {
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t => t.id === id ? { ...t, ...updates } : t)
+      }));
+    });
+  };
+
   const deleteTransaction = (id: string) => {
     supabase.from('transactions').delete().eq('id', id).then(() => {
       setData(prev => ({
@@ -754,6 +764,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       getHistory,
       getTotalNetWorth,
       addTransaction,
+      updateTransaction,
       deleteTransaction,
       deleteTransactions,
       addAccount,
