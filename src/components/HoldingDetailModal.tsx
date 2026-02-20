@@ -15,11 +15,11 @@ interface HoldingDetailModalProps {
     symbol: string;
     quantity: number;
     nativeCurrency: string;
-    currentValue: number;    // GBP
-    avgPrice: number;        // GBP cost-per-share
-    profitValue: number;     // GBP
+    currentValue: number;
+    avgPrice: number;
+    profitValue: number;
     profitPercent: number;
-    nativePrice: number;     // native currency (pence for GBX)
+    nativePrice: number;
   } | null;
 }
 
@@ -34,15 +34,18 @@ const getStartDate = (range: TimeRange, allDates: Date[], chartMode: ChartMode, 
     case '6M': return subMonths(today, 6);
     case '1Y': return subDays(today, 365);
     case 'ALL':
-      if (chartMode === 'VALUE') {
-        return firstTxDate;
-      } else {
-        return allDates.length > 0 ? allDates[0] : subDays(today, 365);
-      }
+      if (chartMode === 'VALUE') return firstTxDate;
+      return allDates.length > 0 ? allDates[0] : subDays(today, 365);
   }
 };
 
-const getDateFormat = (range: TimeRange): string => {
+/**
+ * Always returns 'dd MMM yyyy' so the tooltip always has the full date.
+ * The XAxis tick format is handled separately (and the axis is hidden anyway).
+ */
+const getTooltipDateFormat = (): string => 'dd MMM yyyy';
+
+const getAxisDateFormat = (range: TimeRange): string => {
   switch (range) {
     case '1W': return 'dd MMM';
     case '1M': return 'dd MMM';
@@ -53,14 +56,20 @@ const getDateFormat = (range: TimeRange): string => {
   }
 };
 
-const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, gbpUsdRate }: any) => {
+const CustomTooltip = ({ active, payload, mode, nativeCurrency, currencySymbol, gbpUsdRate }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
+    // The full ISO date is stored as `fullDate` on each data point
+    const fullDate: string | undefined = payload[0]?.payload?.fullDate;
     const isUsd = nativeCurrency === 'USD';
     const isGbx = nativeCurrency === 'GBX';
     return (
       <div className="bg-[#1a1c1e] border border-white/10 p-3 rounded-sm shadow-xl min-w-[160px]">
-        <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest mb-2">{label}</p>
+        {fullDate && (
+          <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest mb-2">
+            {format(parseISO(fullDate), 'dd MMM yyyy')}
+          </p>
+        )}
         <p className="text-xs font-bold text-white font-mono">
           {mode === 'VALUE'
             ? `${currencySymbol}${value?.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
@@ -174,12 +183,14 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
     const sortedTxs = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const firstTxDate = sortedTxs.length > 0 ? parseISO(sortedTxs[0].date) : subDays(new Date(), 365);
     const startDate = getStartDate(timeRange, allDates, chartMode, firstTxDate);
-    const fmt = getDateFormat(timeRange);
 
     return allChartData
       .filter(d => !isBefore(d.date, startDate))
       .map(d => ({
-        date: format(d.date, fmt),
+        // `date` is the axis label (formatted for tick density, but axis is hidden)
+        date: format(d.date, getAxisDateFormat(timeRange)),
+        // `fullDate` is the ISO string used by the tooltip for the precise date
+        fullDate: d.dateStr,
         value: parseFloat(d.value.toFixed(2)),
         price: parseFloat(d.price.toFixed(2)),
       }));
@@ -300,7 +311,16 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                               : `\u00a3${val.toFixed(0)}`
                       }
                     />
-                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} gbpUsdRate={gbpUsdRate} />} />
+                    <Tooltip
+                      content={
+                        <CustomTooltip
+                          mode={chartMode}
+                          nativeCurrency={nativeCurrency}
+                          currencySymbol={currencySymbol}
+                          gbpUsdRate={gbpUsdRate}
+                        />
+                      }
+                    />
                     <Area
                       key={chartMode}
                       type="monotone"

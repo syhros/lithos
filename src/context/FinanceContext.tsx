@@ -158,8 +158,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   /**
    * Core data loader.
-   * @param isInitialLoad  – true on first mount; applies the 2s splash delay.
-   * @param suppressLoadingOff – when true, the caller owns setLoading(false).
+   * @param isInitialLoad        – true on first mount; applies the 2s splash delay.
+   * @param suppressLoadingOff   – when true, the caller owns setLoading(false).
    */
   const loadUserData = async (
     isInitialLoad: boolean = false,
@@ -237,7 +237,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         amount: parseFloat(t.amount),
         type: t.type as TransactionType,
         category: t.category,
-        accountId: t.account_id,
+        // Prefer account_id; fall back to debt_id for debt-linked transactions.
+        accountId: t.account_id || t.debt_id,
         symbol: t.symbol,
         quantity: t.quantity ? parseFloat(t.quantity) : undefined,
         price: t.price ? parseFloat(t.price) : undefined,
@@ -529,9 +530,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
+  /**
+   * currentBalances: computed balance for every asset AND debt account.
+   *
+   * For assets:  startingValue + all non-investing transactions posted to that account.
+   * For debts:   startingValue + all debt_payment / expense / income transactions
+   *              posted to that debt's id (stored as accountId after the mapping fix).
+   *              Payments reduce the balance (they come in as negative amounts from
+   *              the source account side, but the debt side should also be reduced).
+   */
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
 
+    // --- Assets ---
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -541,14 +552,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
+    // Apply non-investing transactions to asset accounts
     data.transactions.forEach(tx => {
       if (tx.accountId && balances[tx.accountId] !== undefined && tx.type !== 'investing') {
         balances[tx.accountId] += tx.amount;
       }
     });
 
+    // --- Debts ---
+    // Initialise each debt with its starting balance (what is owed)
+    data.debts.forEach(debt => {
+      balances[debt.id] = debt.startingValue;
+    });
+
+    // Apply transactions that target a debt id.
+    // debt_payment transactions are saved with accountId = debt.id so the
+    // two sides are: source account (negative amount) and debt account.
+    // For the debt balance we want payments to REDUCE what is owed, so
+    // we add the (negative) amount — a payment of -100 reduces the debt by 100.
+    data.transactions.forEach(tx => {
+      const debtId = tx.accountId;
+      if (debtId && data.debts.some(d => d.id === debtId) && tx.type === 'debt_payment') {
+        balances[debtId] += tx.amount; // tx.amount is negative (outflow from source)
+      }
+    });
+
     return balances;
-  }, [data.assets, data.transactions, currentPrices, gbpUsdRate]);
+  }, [data.assets, data.transactions, data.debts, currentPrices, gbpUsdRate]);
 
   const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
     const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
@@ -634,13 +664,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return assets - debts;
   };
 
+  /**
+   * addTransaction
+   *
+   * For debt_payment transactions the debt side uses `debt_id` column in the
+   * DB so the row is linked to the debt record. We also set `account_id` to
+   * null for the debt-side row so it doesn't accidentally appear on an asset
+   * account. The mapping in loadUserData resolves `account_id || debt_id` so
+   * in-memory `accountId` always works for balance calculations.
+   */
   const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
+    // Determine whether the accountId points to a debt
+    const isDebtAccount = data.debts.some(d => d.id === tx.accountId);
+
     const { data: newTx } = await supabase.from('transactions').insert({
       user_id: session.user.id,
-      account_id: tx.accountId,
+      // For debt-linked rows use debt_id; for everything else use account_id
+      account_id: isDebtAccount ? null : tx.accountId,
+      debt_id:    isDebtAccount ? tx.accountId : (tx as any).debtId ?? null,
       date: tx.date,
       description: tx.description,
       amount: tx.amount,
@@ -650,13 +694,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       quantity: tx.quantity,
       price: tx.price,
       currency: tx.currency,
-      debt_id: (tx as any).debtId
     }).select().maybeSingle();
 
     if (newTx) {
       setData(prev => ({
         ...prev,
-        transactions: [...prev.transactions, { id: newTx.id, ...tx }]
+        transactions: [...prev.transactions, {
+          id: newTx.id,
+          ...tx,
+          // Ensure in-memory accountId is always set correctly
+          accountId: newTx.account_id || newTx.debt_id || tx.accountId,
+        }]
       }));
     }
   };
@@ -664,12 +712,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
     const dbUpdates: Record<string, any> = {};
     Object.entries(updates).forEach(([key, value]) => {
-      if (key === 'accountId') dbUpdates['account_id'] = value;
-      else if (key === 'symbol') dbUpdates['symbol'] = value;
-      else if (key === 'quantity') dbUpdates['quantity'] = value;
-      else if (key === 'price') dbUpdates['price'] = value;
-      else if (key === 'currency') dbUpdates['currency'] = value;
-      else dbUpdates[key] = value;
+      if (key === 'accountId') {
+        // Check if it resolves to a debt
+        const isDebt = data.debts.some(d => d.id === value);
+        dbUpdates['account_id'] = isDebt ? null : value;
+        dbUpdates['debt_id']    = isDebt ? value : null;
+      } else if (key === 'symbol')   { dbUpdates['symbol']   = value; }
+      else if (key === 'quantity')   { dbUpdates['quantity'] = value; }
+      else if (key === 'price')      { dbUpdates['price']    = value; }
+      else if (key === 'currency')   { dbUpdates['currency'] = value; }
+      else                           { dbUpdates[key]        = value; }
     });
     const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
     if (error) { console.error('Failed to update transaction:', error); return; }
@@ -821,8 +873,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   /**
    * Refresh triggered by the user pressing the refresh button.
    * Guarantees loading stays true for AT LEAST 2 seconds.
-   * loadUserData is called with suppressLoadingOff=true so it
-   * does NOT call setLoading(false) itself — we own that here.
    */
   const refreshData = async () => {
     setLoading(true);
