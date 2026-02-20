@@ -499,9 +499,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               const userIsUsd = userCurrency === 'USD';
 
               let fxRate = 1;
-              if (liveUsdToGbp > 0) {
-                if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
-                if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+              if (gbpUsdRate > 0) {
+                if (stockIsUsd && !userIsUsd) fxRate = 1 / gbpUsdRate;
+                if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
               }
 
               const displayPrice = priceOnDate * fxRate;
