@@ -12,7 +12,7 @@ interface AddTransactionModalProps {
 }
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, editTransaction }) => {
-  const { data, addTransaction, updateTransaction, currencySymbol, usdToGbp } = useFinance();
+  const { data, addTransaction, updateTransaction, currencySymbol, gbpUsdRate } = useFinance();
   
   // -- Form State --
   const [type, setType] = useState<TransactionType>('expense');
@@ -666,7 +666,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost</span>
                     {investCurrency === 'USD' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{usdToGbp.toFixed(4)}
+                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{(gbpUsdRate > 0 ? (1 / gbpUsdRate).toFixed(4) : '0.0000')}
                         </span>
                     )}
                 </div>
