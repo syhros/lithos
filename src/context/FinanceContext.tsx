@@ -461,6 +461,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const marketData = currentPrices[h.symbol];
       const nativeCurrency = marketData?.currency || h.currency || 'GBP';
       const stockIsUsd = nativeCurrency === 'USD';
+      const stockIsGbx = nativeCurrency === 'GBX';
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
@@ -469,11 +470,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
+      // nativePrice: keep in native currency (pence for GBX, USD for USD, GBP for GBP)
       let nativePrice = marketData ? marketData.price : 0;
-      if (h.currency === 'GBX') {
-        nativePrice = nativePrice / 100;
+      
+      // displayPrice: convert to GBP for value calculations
+      let displayPrice = nativePrice;
+      if (stockIsGbx) {
+        displayPrice = nativePrice / 100; // Convert pence to pounds
+      } else {
+        displayPrice = nativePrice * fxRate; // Apply FX rate for USD
       }
-      const displayPrice = nativePrice * fxRate;
+      
       const currentValue = h.quantity * displayPrice;
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
@@ -556,6 +563,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               const marketData = currentPrices[h.symbol];
               const nativeCurrency = marketData?.currency || h.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
+              const stockIsGbx = nativeCurrency === 'GBX';
               const userIsUsd = userCurrency === 'USD';
 
               let fxRate = 1;
@@ -565,11 +573,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               }
 
               let adjustedPrice = priceOnDate;
-              if (h.currency === 'GBX') {
-                adjustedPrice = priceOnDate / 100;
+              if (stockIsGbx) {
+                adjustedPrice = priceOnDate / 100; // Convert pence to pounds
+              } else {
+                adjustedPrice = priceOnDate * fxRate; // Apply FX rate for USD
               }
-              const displayPrice = adjustedPrice * fxRate;
-              investing += h.quantity * displayPrice;
+              investing += h.quantity * adjustedPrice;
             }
           });
         }
