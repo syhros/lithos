@@ -63,9 +63,10 @@ export const Investments: React.FC = () => {
             const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
             const avgPrice = stockIsUsd && !userIsUsd ? avgPriceCost / USD_TO_GBP : (stockIsUsd === userIsUsd ? avgPriceCost : avgPriceCost * USD_TO_GBP);
             const profitValue = currentValue - h.totalCost;
-            const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
+            const isZeroCost = h.totalCost === 0;
+            const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
 
-            return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, marketData, fxRate };
+            return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate };
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices]);
 
@@ -265,7 +266,7 @@ export const Investments: React.FC = () => {
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
-                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctProfitPercent.toFixed(2)}%)
+                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctTotalCost === 0 ? '+∞' : acctProfitPercent.toFixed(2)}%)
                                     </div>
                                 </div>
                             </div>
@@ -314,7 +315,7 @@ export const Investments: React.FC = () => {
                                     </div>
                                     <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5', isProfit ? 'text-emerald-vein' : 'text-magma')}>
                                         {isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {stock.profitPercent.toFixed(1)}%
+                                        {stock.avgPrice === 0 ? '+∞' : stock.profitPercent.toFixed(1)}%
                                     </div>
                                 </div>
 

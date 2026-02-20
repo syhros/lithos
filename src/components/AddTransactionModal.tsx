@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Calculator, ArrowRight } from 'lucide-react';
+import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency, Transaction } from '../data/mockData';
 
@@ -66,7 +67,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     if (type === 'investing') {
         const s = parseFloat(shares) || 0;
         const p = parseFloat(pricePerShare) || 0;
-        if (s > 0 && p > 0) {
+        if (s > 0 && p >= 0) {
             const nativeTotal = s * p;
             const gbpTotal = investCurrency === 'USD' ? nativeTotal * USD_TO_GBP : nativeTotal;
             setAmount(gbpTotal.toFixed(2));
@@ -140,30 +141,96 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       return 'Unknown Account';
   };
 
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  const validate = () => {
+    const errors: string[] = [];
+    if (!accountId) errors.push('Please select an account');
+    if (type === 'investing' && !ticker) errors.push('Please enter a ticker symbol');
+    if (type === 'investing' && !shares) errors.push('Please enter the number of shares');
+    if (type === 'investing' && pricePerShare === '') errors.push('Please enter the price per share');
+    if (type === 'transfer' && !accountToId) errors.push('Please select destination account');
+    if (type === 'debt_payment' && !accountToId) errors.push('Please select a debt account');
+    if (!amount) errors.push('Please enter an amount');
+    setValidationErrors(errors);
+    return errors.length === 0;
+  };
+
   const handleSave = async () => {
-    // Basic Validation
-    if (!accountId) return;
-    if (type === 'investing' && (!ticker || !shares || !pricePerShare)) return;
-    if (type === 'transfer' && !accountToId) return;
-    if (type === 'debt_payment' && !accountToId) return;
-    if (!amount) return;
+    if (!validate()) return;
 
     const fullDate = new Date(`${date}T${time}:00`).toISOString();
     const amountNum = parseFloat(amount);
 
     // If editing, update the transaction
     if (editTransaction) {
-      await updateTransaction(editTransaction.id, {
-        date: fullDate,
-        description: merchant,
-        amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
-        category,
-        accountId,
-        symbol: type === 'investing' ? ticker.toUpperCase() : undefined,
-        quantity: type === 'investing' ? parseFloat(shares) : undefined,
-        price: type === 'investing' ? parseFloat(pricePerShare) : undefined,
-        currency: type === 'investing' ? investCurrency : undefined,
-      });
+      if (editTransaction.type === 'transfer') {
+        // For transfers, update both sides
+        const outflowTx = editTransaction;
+        const inflowTx = data.transactions.find(t =>
+          t.type === 'transfer' &&
+          t.accountId === accountToId &&
+          t.description.includes(getAccountName(accountId)) &&
+          Math.abs(t.amount - amountNum) < 0.01
+        );
+
+        await updateTransaction(outflowTx.id, {
+          date: fullDate,
+          description: merchant || `Transfer to ${getAccountName(accountToId)}`,
+          amount: -Math.abs(amountNum),
+          category: 'Transfer',
+          accountId: accountId,
+        });
+
+        if (inflowTx) {
+          await updateTransaction(inflowTx.id, {
+            date: fullDate,
+            description: merchant || `Transfer from ${getAccountName(accountId)}`,
+            amount: Math.abs(amountNum),
+            category: 'Transfer',
+            accountId: accountToId,
+          });
+        }
+      } else if (editTransaction.type === 'debt_payment') {
+        // For debt payments, update both sides
+        const outflowTx = editTransaction;
+        const debtTx = data.transactions.find(t =>
+          t.type === 'debt_payment' &&
+          t.accountId === accountToId &&
+          new Date(t.date).getTime() === new Date(outflowTx.date).getTime()
+        );
+
+        await updateTransaction(outflowTx.id, {
+          date: fullDate,
+          description: `Payment to ${getAccountName(accountToId)}`,
+          amount: -Math.abs(amountNum),
+          category: category || 'Debt Payment',
+          accountId: accountId,
+        });
+
+        if (debtTx) {
+          await updateTransaction(debtTx.id, {
+            date: fullDate,
+            description: `Payment from ${getAccountName(accountId)}`,
+            amount: -Math.abs(amountNum),
+            category: category || 'Debt Payment',
+            accountId: accountToId,
+          });
+        }
+      } else {
+        // For other types, update single transaction
+        await updateTransaction(editTransaction.id, {
+          date: fullDate,
+          description: merchant,
+          amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
+          category,
+          accountId,
+          symbol: type === 'investing' ? ticker.toUpperCase() : undefined,
+          quantity: type === 'investing' ? parseFloat(shares) : undefined,
+          price: type === 'investing' ? parseFloat(pricePerShare) : undefined,
+          currency: type === 'investing' ? investCurrency : undefined,
+        });
+      }
       resetForm();
       onClose();
       return;
@@ -172,7 +239,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     // --- Logic Switch based on Type (for new transactions) ---
 
     if (type === 'transfer') {
-        // Double Entry: 
+        // Double Entry:
         // 1. Outflow from Source
         addTransaction({
             date: fullDate,
@@ -197,19 +264,19 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         // 1. Outflow from Source (Asset)
         addTransaction({
             date: fullDate,
-            description: `Payment to ${getAccountName(accountToId)}`, 
+            description: `Payment to ${getAccountName(accountToId)}`,
             amount: -Math.abs(amountNum),
             type: 'debt_payment',
             category: category || 'Debt Payment',
             accountId: accountId
         });
         // 2. Reduction of Debt (Debt Account)
-        // In this system, Debt accounts have positive balances (Liability). 
+        // In this system, Debt accounts have positive balances (Liability).
         // A payment reduces the liability, so it is a NEGATIVE transaction on the Debt account.
         addTransaction({
             date: fullDate,
             description: `Payment from ${getAccountName(accountId)}`,
-            amount: -Math.abs(amountNum), 
+            amount: -Math.abs(amountNum),
             type: 'debt_payment',
             category: category || 'Debt Payment',
             accountId: accountToId
@@ -234,7 +301,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         // Income / Expense
         let finalAmount = Math.abs(amountNum);
         if (type === 'expense') finalAmount = -finalAmount;
-        
+
         addTransaction({
             date: fullDate,
             description: merchant,
@@ -244,7 +311,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             accountId: accountId
         });
     }
-    
+
     resetForm();
     onClose();
   };
@@ -271,7 +338,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         </div>
         
         <div className="p-8 space-y-6">
-          
+
+          {/* Validation Errors */}
+          {validationErrors.length > 0 && (
+            <div className="bg-magma/10 border border-magma/50 rounded-sm p-3">
+              <ul className="text-xs text-magma space-y-1">
+                {validationErrors.map((error, i) => (
+                  <li key={i}>• {error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Row 1: Type, Date, Time */}
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 md:col-span-4">
@@ -366,9 +444,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         </select>
                     </div>
                     <div className="col-span-12 md:col-span-3">
-                         <label className="block text-xs font-mono text-iron-dust mb-2">
-                             Price / Share ({investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : '£'})
-                         </label>
+                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
                          <div className="relative">
                             <span className="absolute left-3 top-3 text-iron-dust text-xs">
                                 {investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : '£'}
@@ -401,10 +477,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
                 <div>
                     <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
-                    <select 
+                    <select
                         value={accountId}
                         onChange={e => setAccountId(e.target.value)}
-                        className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
+                        className={clsx("w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none", validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}
                     >
                         <option value="">Select Account...</option>
                         <optgroup label="Investment Accounts">
