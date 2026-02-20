@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
-import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
+import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, Database, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes, subDays } from 'date-fns';
@@ -8,6 +8,15 @@ import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
+import { supabase } from '../lib/supabase';
+
+type LogLine = {
+    id: number;
+    symbol: string;
+    status: 'pending' | 'pulling' | 'done' | 'error';
+    rows?: number;
+    message?: string;
+};
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
@@ -15,6 +24,14 @@ export const Investments: React.FC = () => {
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
+
+    // Historic pull state
+    const [isPulling, setIsPulling] = useState(false);
+    const [showLog, setShowLog] = useState(false);
+    const [logLines, setLogLines] = useState<LogLine[]>([]);
+    const [pullComplete, setPullComplete] = useState(false);
+    const logRef = useRef<HTMLDivElement>(null);
+    const logIdRef = useRef(0);
 
     const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
     const isStale = minsSinceUpdate > 5;
@@ -39,17 +56,13 @@ export const Investments: React.FC = () => {
                   current.quantity += tx.quantity;
                   current.totalCost += Math.abs(tx.amount);
                 }
-                // Always update currency from the latest transaction record
                 if (tx.currency) current.currency = tx.currency;
-
                 map.set(tx.symbol, current);
             }
         });
 
         return Array.from(map.values()).map(h => {
             const marketData = currentPrices[h.symbol];
-            // Use transaction-derived currency as the source of truth.
-            // The API may report 'GBP' for UK stocks that actually trade in GBX (pence).
             const nativeCurrency = h.currency || marketData?.currency || 'GBP';
             const stockIsUsd = nativeCurrency === 'USD';
             const stockIsGbx = nativeCurrency === 'GBX';
@@ -61,13 +74,10 @@ export const Investments: React.FC = () => {
               if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
             }
 
-            // nativePrice: raw price from API (pence for GBX, USD for USD, GBP for GBP)
             let nativePrice = marketData ? marketData.price : 0;
-
-            // displayPrice: always in GBP for portfolio value calculations
             let displayPrice = nativePrice;
             if (stockIsGbx) {
-              displayPrice = nativePrice / 100; // pence → pounds
+              displayPrice = nativePrice / 100;
             } else {
               displayPrice = nativePrice * fxRate;
             }
@@ -102,6 +112,81 @@ export const Investments: React.FC = () => {
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
 
+    // Auto-scroll log to bottom
+    useEffect(() => {
+        if (logRef.current) {
+            logRef.current.scrollTop = logRef.current.scrollHeight;
+        }
+    }, [logLines]);
+
+    const updateLine = (id: number, update: Partial<LogLine>) => {
+        setLogLines(prev => prev.map(l => l.id === id ? { ...l, ...update } : l));
+    };
+
+    const handlePullHistoricData = async () => {
+        if (isPulling) return;
+
+        const symbols = Array.from(new Set(
+            (data?.transactions || [])
+                .filter(t => t.type === 'investing' && t.symbol)
+                .map(t => t.symbol!)
+        ));
+
+        if (symbols.length === 0) return;
+
+        setIsPulling(true);
+        setPullComplete(false);
+        setShowLog(true);
+
+        // Build initial log lines — all pending
+        const initialLines: LogLine[] = symbols.map(sym => ({
+            id: ++logIdRef.current,
+            symbol: sym,
+            status: 'pending',
+        }));
+        setLogLines(initialLines);
+
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const fromDate = '2023-01-01';
+
+        // Process one symbol at a time so we can show live progress
+        for (let i = 0; i < symbols.length; i++) {
+            const symbol = symbols[i];
+            const lineId = initialLines[i].id;
+
+            updateLine(lineId, { status: 'pulling' });
+
+            try {
+                const res = await fetch(
+                    `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(symbol)}&from=${fromDate}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+
+                if (!res.ok) {
+                    updateLine(lineId, { status: 'error', message: `HTTP ${res.status}` });
+                } else {
+                    const json = await res.json();
+                    const result = json?.summary?.[symbol];
+                    if (result?.error) {
+                        updateLine(lineId, { status: 'error', message: result.error });
+                    } else {
+                        updateLine(lineId, { status: 'done', rows: result?.rows ?? 0 });
+                    }
+                }
+            } catch (e: any) {
+                updateLine(lineId, { status: 'error', message: e.message || 'Network error' });
+            }
+        }
+
+        setIsPulling(false);
+        setPullComplete(true);
+
+        // Refresh market data after backfill
+        await refreshData();
+    };
+
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
     const portfolioChartData = useMemo(() => {
@@ -124,7 +209,6 @@ export const Investments: React.FC = () => {
                 .filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === asset.id)
                 .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-            // Build symbol→currency map from transactions (ground truth)
             const symbolCurrencies: Record<string, string> = {};
             sortedTxs.forEach(t => { if (t.symbol && t.currency) symbolCurrencies[t.symbol] = t.currency; });
 
@@ -144,7 +228,6 @@ export const Investments: React.FC = () => {
                     const hist = historicalPrices[sym] || {};
                     const dateStr = format(date, 'yyyy-MM-dd');
                     let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
-                    // Use transaction-derived currency as ground truth
                     const symCurrency = symbolCurrencies[sym] || currentPrices[sym]?.currency || 'GBP';
                     const isUsd = symCurrency === 'USD';
                     const isGbx = symCurrency === 'GBX';
@@ -184,6 +267,10 @@ export const Investments: React.FC = () => {
         return result;
     }, [holdings, historicalPrices, gbpUsdRate]);
 
+    const doneCount = logLines.filter(l => l.status === 'done').length;
+    const errorCount = logLines.filter(l => l.status === 'error').length;
+    const totalCount = logLines.length;
+
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
@@ -198,7 +285,7 @@ export const Investments: React.FC = () => {
                             <span className="font-light opacity-30 text-[4rem] tracking-normal">.{portfolioValue.toFixed(2).split('.')[1]}</span>
                         </p>
                     </div>
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4 items-end">
                         <button
                             onClick={() => setIsAddAccountModalOpen(true)}
                             className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
@@ -206,28 +293,125 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
+
                         {/* Actions Group */}
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
-                           <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
-                           <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
-                               {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
-                           </span>
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
+                               <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
+                               <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
+                                   {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
+                               </span>
+                            </div>
+                            <span className="font-mono text-[10px] text-iron-dust">
+                                Updated {format(lastUpdated, 'HH:mm')}
+                            </span>
+                            <button
+                                onClick={() => refreshData()}
+                                disabled={loading}
+                                className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
+                            >
+                                <RefreshCw size={12} />
+                            </button>
                         </div>
-                        <span className="font-mono text-[10px] text-iron-dust">
-                            Updated {format(lastUpdated, 'HH:mm')}
-                        </span>
-                        <button 
-                            onClick={() => refreshData()}
-                            disabled={loading}
-                            className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
+
+                        {/* Pull Historic Data button */}
+                        <button
+                            onClick={handlePullHistoricData}
+                            disabled={isPulling}
+                            className={clsx(
+                                'flex items-center gap-2 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider border transition-all',
+                                isPulling
+                                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed'
+                                    : pullComplete
+                                    ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
+                                    : 'bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20'
+                            )}
                         >
-                            <RefreshCw size={12} />
+                            {isPulling
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : pullComplete
+                                ? <CheckCircle2 size={12} />
+                                : <Database size={12} />}
+                            {isPulling ? 'Pulling...' : pullComplete ? 'Pull Complete' : 'Pull Historic Data'}
                         </button>
                     </div>
                 </div>
-                </div>
             </div>
+
+            {/* Historic Pull Log Panel */}
+            {showLog && (
+                <div className="mb-8 bg-[#0d0f10] border border-white/10 rounded-sm overflow-hidden">
+                    {/* Log header */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-[#131517]">
+                        <div className="flex items-center gap-3">
+                            <Database size={13} className="text-blue-400" />
+                            <span className="text-[11px] font-bold text-white uppercase tracking-[2px]">Historic Price Pull</span>
+                            {totalCount > 0 && (
+                                <span className="text-[10px] font-mono text-iron-dust">
+                                    {doneCount + errorCount} / {totalCount} tickers
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                            {pullComplete && (
+                                <span className="text-[10px] font-mono text-emerald-vein">
+                                    {doneCount} succeeded {errorCount > 0 ? `· ${errorCount} failed` : ''}
+                                </span>
+                            )}
+                            <button
+                                onClick={() => setShowLog(false)}
+                                className="text-iron-dust hover:text-white text-xs transition-colors"
+                            >✕</button>
+                        </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    {totalCount > 0 && (
+                        <div className="h-0.5 bg-white/5">
+                            <div
+                                className="h-full bg-blue-500 transition-all duration-500"
+                                style={{ width: `${((doneCount + errorCount) / totalCount) * 100}%`,
+                                         backgroundColor: pullComplete ? (errorCount === 0 ? '#00f2ad' : '#f97316') : '#3b82f6' }}
+                            />
+                        </div>
+                    )}
+
+                    {/* Scrollable log */}
+                    <div
+                        ref={logRef}
+                        className="max-h-[220px] overflow-y-auto custom-scrollbar p-4 space-y-1 font-mono text-[11px]"
+                    >
+                        {logLines.map(line => (
+                            <div key={line.id} className={clsx(
+                                'flex items-center gap-3 py-0.5 transition-all',
+                                line.status === 'pulling' && 'text-blue-400',
+                                line.status === 'done' && 'text-emerald-vein',
+                                line.status === 'error' && 'text-magma',
+                                line.status === 'pending' && 'text-iron-dust/40',
+                            )}>
+                                <span className="w-4 flex-shrink-0">
+                                    {line.status === 'pending' && <span className="opacity-30">·</span>}
+                                    {line.status === 'pulling' && <Loader2 size={11} className="animate-spin" />}
+                                    {line.status === 'done' && <CheckCircle2 size={11} />}
+                                    {line.status === 'error' && <XCircle size={11} />}
+                                </span>
+                                <span className="w-24 flex-shrink-0 font-bold tracking-wider">{line.symbol}</span>
+                                <span className="text-current opacity-80">
+                                    {line.status === 'pending' && 'Waiting...'}
+                                    {line.status === 'pulling' && 'Pulling historic prices...'}
+                                    {line.status === 'done' && `Complete — ${line.rows?.toLocaleString()} rows cached`}
+                                    {line.status === 'error' && `Failed — ${line.message}`}
+                                </span>
+                            </div>
+                        ))}
+                        {pullComplete && (
+                            <div className="pt-2 border-t border-white/5 mt-2 text-emerald-vein">
+                                ✓ All tickers processed. Refreshing data...
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Section 1: Accounts */}
             <div className="mb-12">
