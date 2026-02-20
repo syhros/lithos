@@ -530,7 +530,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
-    const { error } = await supabase.from('transactions').update(updates).eq('id', id);
+    const dbUpdates: Record<string, any> = {};
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key === 'accountId') dbUpdates['account_id'] = value;
+      else if (key === 'symbol') dbUpdates['symbol'] = value;
+      else if (key === 'quantity') dbUpdates['quantity'] = value;
+      else if (key === 'price') dbUpdates['price'] = value;
+      else if (key === 'currency') dbUpdates['currency'] = value;
+      else dbUpdates[key] = value;
+    });
+
+    const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
     if (error) {
       console.error('Failed to update transaction:', error);
       return;
