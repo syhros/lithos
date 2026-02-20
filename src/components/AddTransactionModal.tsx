@@ -4,7 +4,6 @@ import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency, Transaction } from '../data/mockData';
 
-
 interface AddTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -13,137 +12,145 @@ interface AddTransactionModalProps {
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, editTransaction }) => {
   const { data, addTransaction, updateTransaction, currencySymbol, gbpUsdRate } = useFinance();
-  
-  // -- Form State --
+
   const [type, setType] = useState<TransactionType>('expense');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
-  
   const [merchant, setMerchant] = useState('');
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
   const [accountId, setAccountId] = useState('');
-  
   const [accountToId, setAccountToId] = useState('');
 
-  // Investing Specifics
+  // Investing
   const [ticker, setTicker] = useState('');
   const [assetName, setAssetName] = useState('');
   const [shares, setShares] = useState('');
   const [pricePerShare, setPricePerShare] = useState('');
-  // assetType = Stock/ETF/Crypto etc — stored in description context, shown as Type in table
   const [assetType, setAssetType] = useState('Stock');
-  // investCategory = Buy/Sell/Dividend — saved to the DB category column
   const [investCategory, setInvestCategory] = useState('Buy');
   const [investCurrency, setInvestCurrency] = useState<Currency>('GBP');
 
-  // Validation
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
-  // -- Derived Data for Autocomplete --
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
-  const uniqueMerchants = useMemo(() => Array.from(new Set(data.transactions.filter(t => t.type !== 'investing').map(t => t.description))).sort(), [data.transactions]);
-  
+  const uniqueMerchants  = useMemo(() => Array.from(new Set(data.transactions.filter(t => t.type !== 'investing').map(t => t.description))).sort(), [data.transactions]);
+
   const tickerMap = useMemo(() => {
     const map: Record<string, string> = {};
-    data.transactions.forEach(t => {
-        if (t.type === 'investing' && t.symbol && t.description) {
-            map[t.symbol.toUpperCase()] = t.description;
-        }
-    });
+    data.transactions.forEach(t => { if (t.type === 'investing' && t.symbol && t.description) map[t.symbol.toUpperCase()] = t.description; });
     return map;
   }, [data.transactions]);
 
-  // Auto-populate Asset Name when Ticker changes
   useEffect(() => {
-    if (type === 'investing' && ticker.toUpperCase() in tickerMap) {
-        setAssetName(tickerMap[ticker.toUpperCase()]);
-    }
+    if (type === 'investing' && ticker.toUpperCase() in tickerMap) setAssetName(tickerMap[ticker.toUpperCase()]);
   }, [ticker, type, tickerMap]);
 
-  // Auto-calculate amount for investing (always stored in GBP)
   useEffect(() => {
     if (type === 'investing') {
-        const s = parseFloat(shares) || 0;
-        const p = parseFloat(pricePerShare) || 0;
-        if (s > 0 && p >= 0) {
-            let nativeTotal = s * p;
-            let gbpTotal = nativeTotal;
-            if (investCurrency === 'USD' && gbpUsdRate > 0) {
-              gbpTotal = nativeTotal / gbpUsdRate;
-            } else if (investCurrency === 'GBX') {
-              gbpTotal = nativeTotal / 100;
-            }
-            setAmount(gbpTotal.toFixed(2));
-        }
+      const s = parseFloat(shares) || 0;
+      const p = parseFloat(pricePerShare) || 0;
+      if (s > 0 && p >= 0) {
+        let gbpTotal = s * p;
+        if (investCurrency === 'USD' && gbpUsdRate > 0) gbpTotal = gbpTotal / gbpUsdRate;
+        else if (investCurrency === 'GBX') gbpTotal = gbpTotal / 100;
+        setAmount(gbpTotal.toFixed(2));
+      }
     }
   }, [shares, pricePerShare, type, investCurrency, gbpUsdRate]);
 
   const resetForm = () => {
-      setMerchant('');
-      setCategory('');
-      setAmount('');
-      setAccountId('');
-      setAccountToId('');
-      setTicker('');
-      setAssetName('');
-      setShares('');
-      setPricePerShare('');
-      setAssetType('Stock');
-      setInvestCategory('Buy');
-      setInvestCurrency('GBP');
-      setType('expense');
-      setDate(new Date().toISOString().split('T')[0]);
-      setTime(new Date().toTimeString().slice(0, 5));
+    setMerchant(''); setCategory(''); setAmount(''); setAccountId(''); setAccountToId('');
+    setTicker(''); setAssetName(''); setShares(''); setPricePerShare('');
+    setAssetType('Stock'); setInvestCategory('Buy'); setInvestCurrency('GBP');
+    setType('expense');
+    setDate(new Date().toISOString().split('T')[0]);
+    setTime(new Date().toTimeString().slice(0, 5));
   };
 
   useEffect(() => {
-      if (type === 'debt_payment') {
-          setCategory('Debt Payment');
-      } else if (type === 'transfer') {
-          setCategory('Transfer');
-      } else if (type !== 'investing') {
-          setCategory('');
-      }
+    if (type === 'debt_payment') setCategory('Debt Payment');
+    else if (type === 'transfer') setCategory('Transfer');
+    else if (type !== 'investing') setCategory('');
   }, [type]);
 
+  // ---------------------------------------------------------------
   // Populate form when editing
+  // ---------------------------------------------------------------
   useEffect(() => {
-    if (editTransaction && isOpen) {
-      setType(editTransaction.type);
-      const [datePart, timePart] = editTransaction.date.split('T');
-      setDate(datePart);
-      setTime(timePart?.substring(0, 5) || '00:00');
-      setMerchant(editTransaction.description);
-      setCategory(editTransaction.category);
-      setAccountId(editTransaction.accountId);
+    if (!editTransaction || !isOpen) { if (!editTransaction) resetForm(); return; }
 
-      if (editTransaction.type === 'investing' && editTransaction.symbol) {
-        setTicker(editTransaction.symbol);
-        setAssetName(editTransaction.description);
-        setShares((Math.abs(editTransaction.quantity || 0)).toString());
-        setPricePerShare((editTransaction.price || 0).toString());
-        // category column holds Buy/Sell/Dividend for investing rows
-        setInvestCategory(editTransaction.category || 'Buy');
-        setAssetType('Stock'); // assetType is visual-only, not stored separately
-        setInvestCurrency(editTransaction.currency || 'GBP');
-        setAmount(Math.abs(editTransaction.amount).toFixed(2));
+    const tx = editTransaction;
+    setType(tx.type);
+    const [datePart, timePart] = tx.date.split('T');
+    setDate(datePart);
+    setTime(timePart?.substring(0, 5) || '00:00');
+    setAmount(Math.abs(tx.amount).toFixed(2));
+    setAccountId(tx.accountId || '');
+
+    if (tx.type === 'investing') {
+      setTicker(tx.symbol || '');
+      setAssetName(tx.description);
+      setShares(Math.abs(tx.quantity || 0).toString());
+      setPricePerShare((tx.price || 0).toString());
+      setInvestCategory(tx.category || 'Buy');
+      setAssetType('Stock');
+      setInvestCurrency(tx.currency || 'GBP');
+    } else if (tx.type === 'transfer') {
+      // accountId = source account (already set above)
+      // Find the paired inflow transaction to get the destination account
+      const paired = data.transactions.find(t =>
+        t.type === 'transfer' &&
+        t.id !== tx.id &&
+        t.amount > 0 &&
+        Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
+        Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
+      );
+      setAccountToId(paired?.accountId || '');
+      setMerchant(tx.description || '');
+    } else if (tx.type === 'debt_payment') {
+      // Two rows are created: source (negative, asset account) and debt (negative, debt account)
+      // Determine which side this is:
+      const debtIds = new Set(data.debts.map(d => d.id));
+      const isDebtSide = debtIds.has(tx.accountId || '');
+      if (isDebtSide) {
+        // Editing the debt-side row: accountId = debt, find paired source row
+        setAccountToId(tx.accountId || '');
+        const paired = data.transactions.find(t =>
+          t.type === 'debt_payment' &&
+          t.id !== tx.id &&
+          !debtIds.has(t.accountId || '') &&
+          Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
+          Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
+        );
+        setAccountId(paired?.accountId || '');
       } else {
-        setAmount(Math.abs(editTransaction.amount).toFixed(2));
+        // Editing the source-side row: accountId = source asset, find paired debt row
+        setAccountId(tx.accountId || '');
+        const paired = data.transactions.find(t =>
+          t.type === 'debt_payment' &&
+          t.id !== tx.id &&
+          debtIds.has(t.accountId || '') &&
+          Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
+          Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
+        );
+        setAccountToId(paired?.accountId || '');
       }
+      setCategory(tx.category || 'Debt Payment');
     } else {
-      resetForm();
+      // expense / income — accountId might be a debt account
+      setMerchant(tx.description || '');
+      setCategory(tx.category || '');
+      // accountId is already set above
     }
   }, [editTransaction, isOpen]);
 
   if (!isOpen) return null;
 
   const getAccountName = (id: string) => {
-      const a = data.assets.find(x => x.id === id);
-      if (a) return a.name;
-      const d = data.debts.find(x => x.id === id);
-      if (d) return d.name;
-      return 'Unknown Account';
+    return data.assets.find(x => x.id === id)?.name ||
+           data.debts.find(x => x.id === id)?.name ||
+           'Unknown Account';
   };
 
   const validate = () => {
@@ -161,211 +168,109 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
   const handleSave = async () => {
     if (!validate()) return;
-
     const fullDate = new Date(`${date}T${time}:00`).toISOString();
     const amountNum = parseFloat(amount);
+    const debtIds = new Set(data.debts.map(d => d.id));
 
+    // ── EDIT PATH ──────────────────────────────────────────────────
     if (editTransaction) {
       if (editTransaction.type === 'transfer') {
         const outflowTx = editTransaction;
-        const inflowTx = data.transactions.find(t =>
-          t.type === 'transfer' &&
-          t.accountId === accountToId &&
-          t.description.includes(getAccountName(accountId)) &&
-          Math.abs(t.amount - amountNum) < 0.01
+        const paired = data.transactions.find(t =>
+          t.type === 'transfer' && t.id !== outflowTx.id &&
+          Math.abs(new Date(t.date).getTime() - new Date(outflowTx.date).getTime()) < 5000
         );
+        await updateTransaction(outflowTx.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId });
+        if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId });
 
-        await updateTransaction(outflowTx.id, {
-          date: fullDate,
-          description: merchant || `Transfer to ${getAccountName(accountToId)}`,
-          amount: -Math.abs(amountNum),
-          category: 'Transfer',
-          accountId: accountId,
-        });
-
-        if (inflowTx) {
-          await updateTransaction(inflowTx.id, {
-            date: fullDate,
-            description: merchant || `Transfer from ${getAccountName(accountId)}`,
-            amount: Math.abs(amountNum),
-            category: 'Transfer',
-            accountId: accountToId,
-          });
-        }
       } else if (editTransaction.type === 'debt_payment') {
-        const outflowTx = editTransaction;
-        const debtTx = data.transactions.find(t =>
-          t.type === 'debt_payment' &&
-          t.accountId === accountToId &&
-          new Date(t.date).getTime() === new Date(outflowTx.date).getTime()
+        const isDebtSide = debtIds.has(editTransaction.accountId || '');
+        const sourceId = isDebtSide ? accountId : editTransaction.accountId!;
+        const debtId   = isDebtSide ? editTransaction.accountId! : accountToId;
+        const paired = data.transactions.find(t =>
+          t.type === 'debt_payment' && t.id !== editTransaction.id &&
+          Math.abs(new Date(t.date).getTime() - new Date(editTransaction.date).getTime()) < 5000
         );
+        await updateTransaction(editTransaction.id, { date: fullDate, description: isDebtSide ? `Payment from ${getAccountName(sourceId)}` : `Payment to ${getAccountName(debtId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: editTransaction.accountId! });
+        if (paired) await updateTransaction(paired.id, { date: fullDate, description: isDebtSide ? `Payment to ${getAccountName(debtId)}` : `Payment from ${getAccountName(sourceId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: paired.accountId! });
 
-        await updateTransaction(outflowTx.id, {
-          date: fullDate,
-          description: `Payment to ${getAccountName(accountToId)}`,
-          amount: -Math.abs(amountNum),
-          category: category || 'Debt Payment',
-          accountId: accountId,
-        });
-
-        if (debtTx) {
-          await updateTransaction(debtTx.id, {
-            date: fullDate,
-            description: `Payment from ${getAccountName(accountId)}`,
-            amount: -Math.abs(amountNum),
-            category: category || 'Debt Payment',
-            accountId: accountToId,
-          });
-        }
       } else if (editTransaction.type === 'investing') {
-        await updateTransaction(editTransaction.id, {
-          date: fullDate,
-          description: assetName,
-          amount: amountNum,
-          // investCategory (Buy/Sell/Dividend) saves to DB category column
-          category: investCategory,
-          accountId,
-          symbol: ticker.toUpperCase(),
-          quantity: parseFloat(shares),
-          price: parseFloat(pricePerShare),
-          currency: investCurrency,
-        });
+        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: amountNum, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
+
       } else {
-        await updateTransaction(editTransaction.id, {
-          date: fullDate,
-          description: merchant,
-          amount: type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum),
-          category,
-          accountId,
-        });
+        // expense / income — account might be a debt
+        const isDebtAccount = debtIds.has(accountId);
+        let finalAmount: number;
+        if (isDebtAccount) {
+          // expense on debt = positive (charge), income on debt = negative (credit)
+          finalAmount = editTransaction.type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
+        } else {
+          finalAmount = editTransaction.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+        }
+        await updateTransaction(editTransaction.id, { date: fullDate, description: merchant, amount: finalAmount, category, accountId });
       }
-      resetForm();
-      onClose();
-      return;
+      resetForm(); onClose(); return;
     }
 
+    // ── CREATE PATH ────────────────────────────────────────────────
     if (type === 'transfer') {
-        addTransaction({
-            date: fullDate,
-            description: merchant || `Transfer to ${getAccountName(accountToId)}`,
-            amount: -Math.abs(amountNum),
-            type: 'transfer',
-            category: 'Transfer',
-            accountId: accountId
-        });
-        addTransaction({
-            date: fullDate,
-            description: merchant || `Transfer from ${getAccountName(accountId)}`,
-            amount: Math.abs(amountNum),
-            type: 'transfer',
-            category: 'Transfer',
-            accountId: accountToId
-        });
+      addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId });
+      addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId });
 
     } else if (type === 'debt_payment') {
-        addTransaction({
-            date: fullDate,
-            description: `Payment to ${getAccountName(accountToId)}`,
-            amount: -Math.abs(amountNum),
-            type: 'debt_payment',
-            category: category || 'Debt Payment',
-            accountId: accountId
-        });
-        addTransaction({
-            date: fullDate,
-            description: `Payment from ${getAccountName(accountId)}`,
-            amount: -Math.abs(amountNum),
-            type: 'debt_payment',
-            category: category || 'Debt Payment',
-            accountId: accountToId
-        });
+      // Source account: money leaves (negative)
+      addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId });
+      // Debt account: balance reduced (negative)
+      addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId });
 
     } else if (type === 'investing') {
-        const nativePrice = parseFloat(pricePerShare);
-        addTransaction({
-            date: fullDate,
-            description: assetName,
-            amount: amountNum,
-            type: 'investing',
-            // investCategory (Buy/Sell/Dividend) is what gets saved to DB category
-            category: investCategory,
-            accountId: accountId,
-            symbol: ticker.toUpperCase(),
-            quantity: parseFloat(shares),
-            price: nativePrice,
-            currency: investCurrency,
-        });
+      addTransaction({ date: fullDate, description: assetName, amount: amountNum, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
 
     } else {
-        let finalAmount = Math.abs(amountNum);
-        if (type === 'expense') finalAmount = -finalAmount;
-
-        addTransaction({
-            date: fullDate,
-            description: merchant,
-            amount: finalAmount,
-            type: type,
-            category: category || 'General',
-            accountId: accountId
-        });
+      // expense / income on an asset OR debt account
+      const isDebtAccount = debtIds.has(accountId);
+      let finalAmount: number;
+      if (isDebtAccount) {
+        // expense on credit card = +amount (you owe more)
+        // income/refund on debt  = -amount (you owe less)
+        finalAmount = type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
+      } else {
+        finalAmount = type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
+      }
+      addTransaction({ date: fullDate, description: merchant, amount: finalAmount, type, category: category || 'General', accountId });
     }
 
-    resetForm();
-    onClose();
+    resetForm(); onClose();
   };
 
-  const isInvesting = type === 'investing';
-  const isTransfer = type === 'transfer';
+  const isInvesting   = type === 'investing';
+  const isTransfer    = type === 'transfer';
   const isDebtPayment = type === 'debt_payment';
-
-  // Price symbol for Price/Share input (native to the stock)
-  const priceSymbol = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
-
-  // Computed native total (before GBP conversion) for display in hint
-  const nativeTotal = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
+  const priceSymbol   = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
+  const nativeTotal   = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
       <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-xl p-0 shadow-2xl rounded-sm max-h-[90vh] overflow-y-auto custom-scrollbar">
-        {/* Header */}
         <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#131517] sticky top-0 z-10">
           <h3 className="text-sm font-bold uppercase tracking-[2px] text-white">
-            {editTransaction
-              ? 'Edit Transaction'
-              : isInvesting ? 'Add Investment' : isTransfer ? 'Transfer Funds' : isDebtPayment ? 'Record Payment' : 'Add Transaction'}
+            {editTransaction ? 'Edit Transaction' : isInvesting ? 'Add Investment' : isTransfer ? 'Transfer Funds' : isDebtPayment ? 'Record Payment' : 'Add Transaction'}
           </h3>
-          <button onClick={onClose} className="text-iron-dust hover:text-white">
-            <X size={18} />
-          </button>
+          <button onClick={onClose} className="text-iron-dust hover:text-white"><X size={18} /></button>
         </div>
-        
-        <div className="p-8 space-y-6">
 
-          {/* Validation Errors */}
+        <div className="p-8 space-y-6">
           {validationErrors.length > 0 && (
             <div className="bg-magma/10 border border-magma/50 rounded-sm p-3">
-              <ul className="text-xs text-magma space-y-1">
-                {validationErrors.map((error, i) => (
-                  <li key={i}>\u2022 {error}</li>
-                ))}
-              </ul>
+              <ul className="text-xs text-magma space-y-1">{validationErrors.map((e, i) => <li key={i}>\u2022 {e}</li>)}</ul>
             </div>
           )}
 
-          {/* Row 1: Type, Date, Time */}
+          {/* Row 1: Type / Date / Time */}
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 md:col-span-4">
               <label className="block text-xs font-mono text-iron-dust mb-2">Type</label>
-              <select
-                value={type}
-                onChange={e => {
-                    setType(e.target.value as TransactionType);
-                    setAccountId('');
-                    setAccountToId('');
-                }}
-                disabled={!!editTransaction}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <select value={type} onChange={e => { setType(e.target.value as TransactionType); setAccountId(''); setAccountToId(''); }} disabled={!!editTransaction} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none disabled:opacity-50 disabled:cursor-not-allowed">
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>
                 <option value="transfer">Transfer</option>
@@ -375,318 +280,160 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             </div>
             <div className="col-span-7 md:col-span-5">
               <label className="block text-xs font-mono text-iron-dust mb-2">Date</label>
-              <input 
-                type="date"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-              />
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
             </div>
             <div className="col-span-5 md:col-span-3">
-               <label className="block text-xs font-mono text-iron-dust mb-2">Time</label>
-               <input 
-                type="time"
-                value={time}
-                onChange={e => setTime(e.target.value)}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-              />
+              <label className="block text-xs font-mono text-iron-dust mb-2">Time</label>
+              <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
             </div>
           </div>
 
           <hr className="border-white/5" />
 
-          {/* === INVESTING LAYOUT === */}
+          {/* INVESTING */}
           {isInvesting && (
-             <>
-                <div className="grid grid-cols-12 gap-4">
-                    <div className="col-span-4">
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Ticker</label>
-                        <input 
-                            type="text" 
-                            placeholder="AAPL"
-                            value={ticker}
-                            onChange={e => setTicker(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono uppercase" 
-                        />
-                    </div>
-                    <div className="col-span-8">
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Asset Name</label>
-                        <input 
-                            type="text" 
-                            placeholder="e.g. Apple Inc."
-                            value={assetName}
-                            onChange={e => setAssetName(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" 
-                        />
-                    </div>
+            <>
+              <div className="grid grid-cols-12 gap-4">
+                <div className="col-span-4">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Ticker</label>
+                  <input type="text" placeholder="AAPL" value={ticker} onChange={e => setTicker(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono uppercase" />
                 </div>
-
-                <div className="grid grid-cols-12 gap-4">
-                    <div className="col-span-6 md:col-span-3">
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Shares</label>
-                        <input
-                            type="number"
-                            placeholder="0.00000000"
-                            step="any"
-                            value={shares}
-                            onChange={e => setShares(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
-                        />
-                    </div>
-                    <div className="col-span-6 md:col-span-3">
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Currency</label>
-                        <select
-                            value={investCurrency}
-                            onChange={e => setInvestCurrency(e.target.value as Currency)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        >
-                            <option value="GBP">GBP</option>
-                            <option value="USD">USD</option>
-                            <option value="EUR">EUR</option>
-                            <option value="GBX">GBX</option>
-                        </select>
-                    </div>
-                    <div className="col-span-12 md:col-span-3">
-                         {/* Label is always 'Price / Share' — no '(pence)' suffix */}
-                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
-                         <div className="relative">
-                            <span className="absolute left-3 top-3 text-iron-dust text-xs">
-                                {priceSymbol}
-                            </span>
-                            <input
-                                type="number"
-                                placeholder="0.00"
-                                step="any"
-                                value={pricePerShare}
-                                onChange={e => setPricePerShare(e.target.value)}
-                                className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
-                            />
-                         </div>
-                    </div>
-                    <div className="col-span-12 md:col-span-3">
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Asset Type</label>
-                        <select
-                            value={assetType}
-                            onChange={e => setAssetType(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        >
-                            <option value="Stock">Stock</option>
-                            <option value="Crypto">Crypto</option>
-                            <option value="ETF">ETF</option>
-                            <option value="Pension">Pension</option>
-                            <option value="REIT">REIT</option>
-                        </select>
-                    </div>
+                <div className="col-span-8">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Asset Name</label>
+                  <input type="text" placeholder="e.g. Apple Inc." value={assetName} onChange={e => setAssetName(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
                 </div>
-
-                <div className="grid grid-cols-[1.2fr_1fr] gap-4">
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
-                        <select
-                            value={accountId}
-                            onChange={e => setAccountId(e.target.value)}
-                            className={clsx("w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none", validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}
-                        >
-                            <option value="">Select Account...</option>
-                            <optgroup label="Investment Accounts">
-                                {data.assets.filter(a => a.type === 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                            </optgroup>
-                        </select>
-                    </div>
-                    <div>
-                        {/* Category: Buy / Sell / Dividend — saved to DB category column */}
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
-                        <div className="flex gap-1.5 h-[42px]">
-                            {['Buy', 'Sell', 'Dividend'].map(cat => (
-                                <button
-                                    key={cat}
-                                    type="button"
-                                    onClick={() => setInvestCategory(cat)}
-                                    className={clsx(
-                                        'flex-1 px-3 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
-                                        investCategory === cat
-                                            ? 'bg-magma text-white border border-magma'
-                                            : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'
-                                    )}
-                                >
-                                    {cat}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+              </div>
+              <div className="grid grid-cols-12 gap-4">
+                <div className="col-span-6 md:col-span-3">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Shares</label>
+                  <input type="number" placeholder="0.00000000" step="any" value={shares} onChange={e => setShares(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
                 </div>
-             </>
+                <div className="col-span-6 md:col-span-3">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Currency</label>
+                  <select value={investCurrency} onChange={e => setInvestCurrency(e.target.value as Currency)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option value="GBP">GBP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBX">GBX</option>
+                  </select>
+                </div>
+                <div className="col-span-12 md:col-span-3">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-iron-dust text-xs">{priceSymbol}</span>
+                    <input type="number" placeholder="0.00" step="any" value={pricePerShare} onChange={e => setPricePerShare(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
+                  </div>
+                </div>
+                <div className="col-span-12 md:col-span-3">
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Asset Type</label>
+                  <select value={assetType} onChange={e => setAssetType(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option>Stock</option><option>Crypto</option><option>ETF</option><option>Pension</option><option>REIT</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-[1.2fr_1fr] gap-4">
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
+                  <select value={accountId} onChange={e => setAccountId(e.target.value)} className={clsx('w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none', validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}>
+                    <option value="">Select Account...</option>
+                    <optgroup label="Investment Accounts">{data.assets.filter(a => a.type === 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
+                  <div className="flex gap-1.5 h-[42px]">
+                    {['Buy','Sell','Dividend'].map(cat => (
+                      <button key={cat} type="button" onClick={() => setInvestCategory(cat)} className={clsx('flex-1 px-3 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors', investCategory === cat ? 'bg-magma text-white border border-magma' : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20')}>{cat}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
-          {/* === TRANSFER & DEBT PAYMENT LAYOUT === */}
+          {/* TRANSFER & DEBT PAYMENT */}
           {(isTransfer || isDebtPayment) && (
-              <>
-                <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Account From</label>
-                        <select 
-                            value={accountId}
-                            onChange={e => setAccountId(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        >
-                            <option value="">Select Source...</option>
-                            <optgroup label="Liquid Assets">
-                                {data.assets.filter(a => a.type !== 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                            </optgroup>
-                        </select>
-                    </div>
-                    
-                    <div className="flex justify-center mt-9 opacity-30 text-white">
-                        <ArrowRight size={18} />
-                    </div>
-
-                    <div> 
-                        <label className="block text-xs font-mono text-iron-dust mb-2">
-                            {isDebtPayment ? 'Debt Account' : 'Account To'}
-                        </label>
-                        <select 
-                            value={accountToId}
-                            onChange={e => setAccountToId(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        >
-                            <option value="">Select Destination...</option>
-                            {isDebtPayment ? (
-                                <optgroup label="Liabilities">
-                                    {data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                </optgroup>
-                            ) : (
-                                <optgroup label="Assets">
-                                    {data.assets.filter(a => a.id !== accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                </optgroup>
-                            )}
-                        </select>
-                    </div>
+            <>
+              <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Account From</label>
+                  <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option value="">Select Source...</option>
+                    <optgroup label="Liquid Assets">{data.assets.filter(a => a.type !== 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+                  </select>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
-                        <div className="relative">
-                            <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
-                            <input 
-                                type="number" 
-                                placeholder="0.00"
-                                step="any"
-                                value={amount}
-                                onChange={e => setAmount(e.target.value)}
-                                className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" 
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">
-                            {isDebtPayment ? 'Category' : 'Reference'}
-                        </label>
-                        <input 
-                            type="text"
-                            placeholder={isDebtPayment ? "e.g. Debt Payment" : "e.g. Savings Goal"}
-                            value={isDebtPayment ? category : merchant}
-                            onChange={e => isDebtPayment ? setCategory(e.target.value) : setMerchant(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        />
-                    </div>
+                <div className="flex justify-center mt-9 opacity-30 text-white"><ArrowRight size={18} /></div>
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">{isDebtPayment ? 'Debt Account' : 'Account To'}</label>
+                  <select value={accountToId} onChange={e => setAccountToId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option value="">Select Destination...</option>
+                    {isDebtPayment
+                      ? <optgroup label="Liabilities">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
+                      : <optgroup label="Assets">{data.assets.filter(a => a.id !== accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+                    }
+                  </select>
                 </div>
-              </>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
+                    <input type="number" placeholder="0.00" step="any" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">{isDebtPayment ? 'Category' : 'Reference'}</label>
+                  <input type="text" placeholder={isDebtPayment ? 'e.g. Debt Payment' : 'e.g. Savings Goal'} value={isDebtPayment ? category : merchant} onChange={e => isDebtPayment ? setCategory(e.target.value) : setMerchant(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
+                </div>
+              </div>
+            </>
           )}
 
-          {/* === EXPENSE / INCOME LAYOUT === */}
+          {/* EXPENSE / INCOME */}
           {!isInvesting && !isTransfer && !isDebtPayment && (
-             <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">
-                             {type === 'income' ? 'Payer / Source' : 'Merchant'}
-                        </label>
-                        <input 
-                            list="merchants-list"
-                            type="text" 
-                            placeholder={type === 'income' ? "e.g. Employer" : "e.g. Starbucks"}
-                            value={merchant}
-                            onChange={e => setMerchant(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" 
-                        />
-                        <datalist id="merchants-list">
-                            {uniqueMerchants.map((m, i) => <option key={i} value={m} />)}
-                        </datalist>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
-                        <input 
-                            list="categories-list"
-                            type="text"
-                            placeholder="e.g. Food"
-                            value={category}
-                            onChange={e => setCategory(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                        />
-                        <datalist id="categories-list">
-                            {uniqueCategories.map((c, i) => <option key={i} value={c} />)}
-                        </datalist>
-                    </div>
-                </div>
-
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
-                    <div className="relative">
-                        <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
-                        <input 
-                            type="number" 
-                            placeholder="0.00"
-                            step="any"
-                            value={amount}
-                            onChange={e => setAmount(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" 
-                        />
-                    </div>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">{type === 'income' ? 'Payer / Source' : 'Merchant'}</label>
+                  <input list="merchants-list" type="text" placeholder={type === 'income' ? 'e.g. Employer' : 'e.g. Starbucks'} value={merchant} onChange={e => setMerchant(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
+                  <datalist id="merchants-list">{uniqueMerchants.map((m,i) => <option key={i} value={m} />)}</datalist>
                 </div>
-
                 <div>
-                    <label className="block text-xs font-mono text-iron-dust mb-2">Account</label>
-                    <select 
-                        value={accountId}
-                        onChange={e => setAccountId(e.target.value)}
-                        className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                    >
-                        <option value="">Select Account...</option>
-                        <optgroup label="Assets">
-                            {data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </optgroup>
-                        <optgroup label="Debts">
-                            {data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                        </optgroup>
-                    </select>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
+                  <input list="categories-list" type="text" placeholder="e.g. Food" value={category} onChange={e => setCategory(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
+                  <datalist id="categories-list">{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
                 </div>
-             </>
+              </div>
+              <div>
+                <label className="block text-xs font-mono text-iron-dust mb-2">Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
+                  <input type="number" placeholder="0.00" step="any" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-mono text-iron-dust mb-2">Account</label>
+                <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                  <option value="">Select Account...</option>
+                  <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+                  <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
+                </select>
+              </div>
+            </>
           )}
 
-          {/* ESTIMATED TOTAL (Visible for Investing only) */}
+          {/* Investing estimated total */}
           {isInvesting && (
-             <div className="bg-white/5 p-4 rounded-sm border border-white/10 flex justify-between items-center">
-                <div>
-                    <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost (GBP)</span>
-                    {investCurrency === 'USD' && shares && pricePerShare && (
-                        <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            ${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}
-                        </span>
-                    )}
-                    {investCurrency === 'GBX' && shares && pricePerShare && (
-                        <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            {nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center gap-2">
-                     <Calculator size={14} className="text-magma" />
-                     <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
-                </div>
+            <div className="bg-white/5 p-4 rounded-sm border border-white/10 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost (GBP)</span>
+                {investCurrency === 'USD' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}</span>}
+                {investCurrency === 'GBX' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">{nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <Calculator size={14} className="text-magma" />
+                <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
+              </div>
             </div>
           )}
-
         </div>
 
         <div className="p-6 border-t border-white/5 bg-[#131517] flex justify-end gap-3 sticky bottom-0 z-10">
