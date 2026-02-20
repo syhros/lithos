@@ -4,7 +4,6 @@ import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency, Transaction } from '../data/mockData';
 
-const USD_TO_GBP = 0.74;
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -13,7 +12,7 @@ interface AddTransactionModalProps {
 }
 
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen, onClose, editTransaction }) => {
-  const { data, addTransaction, updateTransaction, currencySymbol } = useFinance();
+  const { data, addTransaction, updateTransaction, currencySymbol, usdToGbp } = useFinance();
   
   // -- Form State --
   const [type, setType] = useState<TransactionType>('expense');
@@ -72,7 +71,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         const p = parseFloat(pricePerShare) || 0;
         if (s > 0 && p >= 0) {
             const nativeTotal = s * p;
-            const gbpTotal = investCurrency === 'USD' ? nativeTotal * USD_TO_GBP : nativeTotal;
+            const gbpTotal = investCurrency === 'USD' ? nativeTotal * usdToGbp : nativeTotal;
             setAmount(gbpTotal.toFixed(2));
         }
     }
@@ -667,7 +666,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost</span>
                     {investCurrency === 'USD' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{USD_TO_GBP}
+                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{usdToGbp.toFixed(4)}
                         </span>
                     )}
                 </div>

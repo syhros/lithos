@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
@@ -11,7 +11,7 @@ import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
 
 export const Investments: React.FC = () => {
-    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading } = useFinance();
+    const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, usdToGbp } = useFinance();
     const userCurrency = data?.user?.currency || 'GBP';
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
@@ -54,14 +54,14 @@ export const Investments: React.FC = () => {
             const userIsUsd = userCurrency === 'USD';
 
             let fxRate = 1;
-            if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
-            if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+            if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
+            if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
 
             const nativePrice = marketData ? marketData.price : 0;
             const displayPrice = nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-            const avgPrice = stockIsUsd && !userIsUsd ? avgPriceCost / USD_TO_GBP : (stockIsUsd === userIsUsd ? avgPriceCost : avgPriceCost * USD_TO_GBP);
+            const avgPrice = stockIsUsd && !userIsUsd ? avgPriceCost / usdToGbp : (stockIsUsd === userIsUsd ? avgPriceCost : avgPriceCost * usdToGbp);
             const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
@@ -75,7 +75,7 @@ export const Investments: React.FC = () => {
 
             return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate, dailyChangePercent };
         }).sort((a, b) => b.currentValue - a.currentValue);
-    }, [data.transactions, currentPrices]);
+    }, [data.transactions, currentPrices, usdToGbp]);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -119,7 +119,7 @@ export const Investments: React.FC = () => {
                     const dateStr = format(date, 'yyyy-MM-dd');
                     const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
                     const isUsd = symbolCurrencies[sym] === 'USD';
-                    val += qty * price * (isUsd ? USD_TO_GBP : 1);
+                    val += qty * price * (isUsd ? usdToGbp : 1);
                 });
 
                 return { date: format(date, 'dd MMM'), value: val > 0 ? parseFloat(val.toFixed(2)) : fallbackBalance };
@@ -128,7 +128,7 @@ export const Investments: React.FC = () => {
             result[asset.id] = chartPoints;
         });
         return result;
-    }, [investmentAssets, data.transactions, historicalPrices, currentPrices, currentBalances]);
+    }, [investmentAssets, data.transactions, historicalPrices, currentPrices, currentBalances, usdToGbp]);
 
     const holdingSparklines = useMemo(() => {
         const result: Record<string, { date: string; value: number }[]> = {};
@@ -138,7 +138,7 @@ export const Investments: React.FC = () => {
             const dates = eachDayOfInterval({ start, end: today }).slice(-7);
             const hist = historicalPrices[h.symbol] || {};
             const isUsd = h.nativeCurrency === 'USD';
-            const fx = isUsd ? USD_TO_GBP : 1;
+            const fx = isUsd ? usdToGbp : 1;
 
             result[h.symbol] = dates.map(date => {
                 const dateStr = format(date, 'yyyy-MM-dd');
@@ -147,7 +147,7 @@ export const Investments: React.FC = () => {
             });
         });
         return result;
-    }, [holdings, historicalPrices]);
+    }, [holdings, historicalPrices, usdToGbp]);
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">

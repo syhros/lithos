@@ -3,7 +3,7 @@ import { X, Calendar, DollarSign } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, eachDayOfInterval, isBefore, parseISO, addDays, subWeeks, subMonths } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 
 type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 type ChartMode = 'VALUE' | 'STOCK';
@@ -61,7 +61,7 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencyS
         </p>
         {mode === 'STOCK' && isUsd && (
           <p className="text-[9px] font-mono text-iron-dust mt-0.5">
-            ≈ {currencySymbol}{(value * USD_TO_GBP)?.toFixed(2)} GBP
+            ≈ {currencySymbol}{(value * usdToGbp)?.toFixed(2)} GBP
           </p>
         )}
         <p className="text-[9px] font-mono text-iron-dust mt-0.5 uppercase">
@@ -74,7 +74,7 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencyS
 };
 
 export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, onClose, holding }) => {
-  const { data, historicalPrices, currentPrices, currencySymbol } = useFinance();
+  const { data, historicalPrices, currentPrices, currencySymbol, usdToGbp } = useFinance();
   const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
   const [chartMode, setChartMode] = useState<ChartMode>('VALUE');
 
@@ -91,7 +91,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
   }, [transactions]);
 
   const isUsd = nativeCurrency === 'USD';
-  const fxRate = isUsd ? USD_TO_GBP : 1;
+  const fxRate = isUsd ? usdToGbp : 1;
   const nativeSymbol = isUsd ? '$' : '£';
 
   const allChartData = useMemo(() => {
@@ -298,7 +298,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                 <span className="text-lg font-mono text-white">{nativeSymbol}{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
                 {isUsd && (
                   <span className="text-[10px] font-mono text-iron-dust block">
-                    ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) * USD_TO_GBP).toFixed(2)}
+                    ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) * usdToGbp).toFixed(2)}
                   </span>
                 )}
               </div>

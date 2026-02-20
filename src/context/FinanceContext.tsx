@@ -49,11 +49,12 @@ interface FinanceContextType {
   refreshData: () => Promise<void>;
 
   currencySymbol: string;
+  usdToGbp: number;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-export const USD_TO_GBP = 0.74;
+export const USD_TO_GBP = 0.787;
 
 export const getCurrencySymbol = (currency: string): string => {
     switch (currency) {
@@ -98,6 +99,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
   const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
+  const [liveUsdToGbp, setLiveUsdToGbp] = useState<number>(USD_TO_GBP);
+
+  const fetchFxRate = async () => {
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=GBP%3DX`, {
+        headers: { 'Authorization': `Bearer ${supabaseKey}` }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const gbpXRate = json['GBP=X']?.price;
+        if (gbpXRate && gbpXRate > 0) {
+          const usdToGbp = 1 / gbpXRate;
+          setLiveUsdToGbp(usdToGbp);
+          localStorage.setItem('lithos_usd_to_gbp', JSON.stringify({ rate: usdToGbp, ts: Date.now() }));
+        }
+      }
+    } catch (e) {
+      console.info('FX rate fetch failed, using cached/default');
+    }
+  };
 
   const loadUserData = async () => {
     setLoading(true);
@@ -337,11 +360,32 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.info('Failed to load cached historical prices');
       }
     }
+    const cachedFx = localStorage.getItem('lithos_usd_to_gbp');
+    if (cachedFx) {
+      try {
+        const { rate, ts } = JSON.parse(cachedFx);
+        if (rate > 0 && Date.now() - ts < 2 * 60 * 60 * 1000) {
+          setLiveUsdToGbp(rate);
+        }
+      } catch (e) {
+        console.info('Failed to load cached FX rate');
+      }
+    }
+
+    fetchFxRate();
     loadUserData();
+
+    const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
+    const firstTimeout = setTimeout(() => {
+      fetchFxRate();
+      const hourlyInterval = setInterval(fetchFxRate, 60 * 60 * 1000);
+      return () => clearInterval(hourlyInterval);
+    }, msUntilNextHour);
+
+    return () => clearTimeout(firstTimeout);
   }, []);
 
   const getHoldingsByAccount = (accountId: string) => {
-    const USD_TO_GBP = 1.27;
     const userCurrency = data.user.currency || 'GBP';
     const map = new Map<string, any>();
 
@@ -369,8 +413,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
-      if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
-      if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+      if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
+      if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
 
       const nativePrice = marketData ? marketData.price : 0;
       const displayPrice = nativePrice * fxRate;
@@ -404,7 +448,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
     const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
     const points: HistoricalPoint[] = [];
-    const USD_TO_GBP = 1.27;
     const userCurrency = data.user.currency || 'GBP';
 
     for (let i = days; i >= 0; i--) {
@@ -460,8 +503,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               const userIsUsd = userCurrency === 'USD';
 
               let fxRate = 1;
-              if (stockIsUsd && !userIsUsd) fxRate = USD_TO_GBP;
-              if (!stockIsUsd && userIsUsd) fxRate = 1 / USD_TO_GBP;
+              if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
+              if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
 
               const displayPrice = priceOnDate * fxRate;
               investing += h.quantity * displayPrice;
@@ -793,7 +836,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteBill,
       updateUserProfile,
       refreshData,
-      currencySymbol: getCurrencySymbol(data.user.currency)
+      currencySymbol: getCurrencySymbol(data.user.currency),
+      usdToGbp: liveUsdToGbp
     }}>
       {children}
     </FinanceContext.Provider>

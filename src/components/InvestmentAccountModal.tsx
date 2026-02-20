@@ -3,7 +3,7 @@ import { X, TrendingUp, TrendingDown, Pencil, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { Asset, Currency } from '../data/mockData';
 
 interface InvestmentAccountModalProps {
@@ -15,7 +15,7 @@ interface InvestmentAccountModalProps {
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
 export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ isOpen, onClose, account }) => {
-  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol } = useFinance();
+  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol, usdToGbp } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
@@ -75,7 +75,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
       const isUsd = h.currency === 'USD';
-      const fxRate = isUsd ? USD_TO_GBP : 1;
+      const fxRate = isUsd ? usdToGbp : 1;
       const nativePrice = marketData?.price || 0;
       const displayPrice = nativePrice * fxRate;
       const currentValue = h.quantity * displayPrice;
@@ -132,7 +132,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
         const dateStr = format(date, 'yyyy-MM-dd');
         const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
         const isUsd = symbolCurrencies[sym] === 'USD';
-        val += qty * price * (isUsd ? USD_TO_GBP : 1);
+        val += qty * price * (isUsd ? usdToGbp : 1);
       });
 
       if (val > 0) lastKnownValue = val;
