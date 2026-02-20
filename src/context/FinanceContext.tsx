@@ -80,6 +80,13 @@ const getEarliestTxDate = (symbol: string, transactions: Transaction[]): string 
   return earliest.substring(0, 10);
 };
 
+/** Returns the most recent close price from a history map, or undefined if empty. */
+const getMostRecentClose = (history: Record<string, number>): number | undefined => {
+  const dates = Object.keys(history).sort();
+  if (dates.length === 0) return undefined;
+  return history[dates[dates.length - 1]];
+};
+
 const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
     const history: Record<string, number> = {};
     const today = new Date();
@@ -247,12 +254,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             liveApiAvailable = true;
           } else { console.warn(`live-prices returned ${res.status}`); }
         } catch (e) {
-          console.warn('live-prices fetch failed, using fallback prices:', e);
-          uniqueSymbols.forEach(sym => {
-            const base = fallbackPrices[sym] || 100;
-            const jitter = (Math.random() * 4) - 2;
-            fetchedPrices[sym] = { price: base + jitter, change: jitter, changePercent: 0, currency: symbolCurrencyMap[sym] || 'GBP', name: sym };
-          });
+          console.warn('live-prices fetch failed, will use cached prices:', e);
         }
 
         localStorage.setItem('lithos_last_sync', now.toString());
@@ -292,14 +294,39 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
         const updatedPrices = { ...fetchedPrices };
+
+        // For any symbol that the live API didn't return a price for, use the
+        // most recent close from the history cache as the current price.
+        uniqueSymbols.forEach(sym => {
+          if (!updatedPrices[sym] || !updatedPrices[sym].price) {
+            const hist = historyCache[sym];
+            const mostRecentClose = hist ? getMostRecentClose(hist) : undefined;
+            if (mostRecentClose !== undefined && mostRecentClose > 0) {
+              // Derive change vs previous trading day close
+              const dates = Object.keys(hist).sort();
+              const prevClose = dates.length >= 2 ? hist[dates[dates.length - 2]] : mostRecentClose;
+              const chg = mostRecentClose - prevClose;
+              updatedPrices[sym] = {
+                price: mostRecentClose,
+                change: chg,
+                changePercent: prevClose > 0 ? (chg / prevClose) * 100 : 0,
+                currency: symbolCurrencyMap[sym] || 'GBP',
+                name: sym,
+              };
+            }
+          }
+        });
+
+        // Recalculate change vs yesterday's close for symbols that DO have a live price
         uniqueSymbols.forEach(sym => {
           const hist = historyCache[sym];
           const currentPrice = updatedPrices[sym]?.price;
-          if (hist && currentPrice) {
+          if (hist && currentPrice && updatedPrices[sym]) {
             const prevClose = hist[yesterday];
             if (prevClose && prevClose > 0) { const chg = currentPrice - prevClose; updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: (chg / prevClose) * 100 }; }
           }
         });
+
         setCurrentPrices(updatedPrices);
         localStorage.setItem('lithos_current_prices', JSON.stringify(updatedPrices));
       }
@@ -424,11 +451,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const historicalData = historicalPrices[h.symbol] || {};
             let priceOnDate = historicalData[dateStr];
             if (priceOnDate === undefined) {
+              // Forward-fill: find the most recent close on or before this date.
+              // If none exists yet (date is before first entry), use the earliest close.
               const dates = Object.keys(historicalData).sort();
               const latestBeforeDate = dates.filter(date => date <= dateStr).pop();
-              priceOnDate = latestBeforeDate ? historicalData[latestBeforeDate] : currentPrices[h.symbol]?.price || 0;
+              if (latestBeforeDate) {
+                priceOnDate = historicalData[latestBeforeDate];
+              } else {
+                // Date is before the first cached entry — use earliest available close
+                // rather than 0 so the chart doesn't spike down.
+                priceOnDate = dates.length > 0 ? historicalData[dates[0]] : currentPrices[h.symbol]?.price;
+              }
             }
-            if (priceOnDate) {
+            // If we still have no price, skip this holding for this date point
+            // (leaves investing += 0 for that day) rather than producing a £0 spike.
+            if (priceOnDate !== undefined && priceOnDate > 0) {
               const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
               const stockIsGbx = nativeCurrency === 'GBX';
