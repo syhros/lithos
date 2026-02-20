@@ -47,6 +47,7 @@ interface FinanceContextType {
   deleteBill: (id: string) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
+  refreshHistoricalPrices: () => Promise<void>;
 
   currencySymbol: string;
   gbpUsdRate: number;
@@ -839,6 +840,108 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  const refreshHistoricalPrices = async () => {
+    setLoading(true);
+    const startTime = Date.now();
+    try {
+      const uniqueSymbols = Array.from(new Set(
+        data.transactions
+          .filter(t => t.type === 'investing' && t.symbol)
+          .map(t => t.symbol!)
+      ));
+
+      if (uniqueSymbols.length === 0) return;
+
+      let fetchedPrices: any = {};
+      let liveApiAvailable = false;
+
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
+          headers: { 'Authorization': `Bearer ${supabaseKey}` }
+        });
+        if (res.ok) {
+          fetchedPrices = await res.json();
+          liveApiAvailable = true;
+        }
+      } catch (e) {
+        console.info('Live prices fetch failed, using cached data');
+      }
+
+      const historyCache: Record<string, Record<string, number>> = {};
+
+      await Promise.all(uniqueSymbols.map(async sym => {
+        let history: Record<string, number> = {};
+
+        if (liveApiAvailable) {
+          try {
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+            const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+            const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=1900-01-01`, {
+              headers: { 'Authorization': `Bearer ${supabaseKey}` }
+            });
+            if (hRes.ok) {
+              const response = await hRes.json();
+              const rows: { date: string; close: number }[] = response[sym] || [];
+              rows.forEach(row => { history[row.date] = row.close; });
+            }
+          } catch (e) {
+            console.info(`Failed to fetch history for ${sym}:`, e);
+          }
+        }
+
+        if (Object.keys(history).length === 0) {
+          try {
+            let allCached: any[] = [];
+            let offset = 0;
+            const pageSize = 1000;
+            let hasMore = true;
+
+            while (hasMore) {
+              const { data: cached, error } = await supabase
+                .from('price_history_cache')
+                .select('date, close')
+                .eq('symbol', sym)
+                .order('date', { ascending: true })
+                .range(offset, offset + pageSize - 1);
+
+              if (error || !cached || cached.length === 0) {
+                hasMore = false;
+              } else {
+                allCached = allCached.concat(cached);
+                if (cached.length < pageSize) {
+                  hasMore = false;
+                } else {
+                  offset += pageSize;
+                }
+              }
+            }
+
+            if (allCached && allCached.length > 0) {
+              allCached.forEach((row: { date: string; close: number }) => {
+                history[row.date] = row.close;
+              });
+            }
+          } catch (e) {
+            console.info(`Supabase cache miss for ${sym}`);
+          }
+        }
+
+        historyCache[sym] = history;
+      }));
+
+      setHistoricalPrices(historyCache);
+      localStorage.setItem('lithos_historical_prices', JSON.stringify(historyCache));
+    } finally {
+      const elapsed = Date.now() - startTime;
+      const remainingDelay = Math.max(0, 1500 - elapsed);
+      setTimeout(() => {
+        setLoading(false);
+      }, remainingDelay);
+    }
+  };
+
   return (
     <FinanceContext.Provider value={{
       data,
@@ -864,6 +967,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteBill,
       updateUserProfile,
       refreshData,
+      refreshHistoricalPrices,
       currencySymbol: getCurrencySymbol(data.user.currency),
       gbpUsdRate,
       rateUpdatedAt
