@@ -49,7 +49,7 @@ interface FinanceContextType {
   refreshData: () => Promise<void>;
 
   currencySymbol: string;
-  usdToGbp: number;
+  gbpUsdRate: number;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);

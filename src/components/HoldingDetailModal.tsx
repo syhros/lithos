@@ -46,7 +46,7 @@ const getDateFormat = (range: TimeRange): string => {
   }
 };
 
-const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, nativeSymbol, usdToGbp }: any) => {
+const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, nativeSymbol, gbpUsdRate }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
     const isUsd = nativeCurrency === 'USD';
@@ -61,7 +61,7 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencyS
         </p>
         {mode === 'STOCK' && isUsd && (
           <p className="text-[9px] font-mono text-iron-dust mt-0.5">
-            ≈ {currencySymbol}{(value * usdToGbp)?.toFixed(2)} GBP
+            ≈ {currencySymbol}{(value / gbpUsdRate)?.toFixed(2)} GBP
           </p>
         )}
         <p className="text-[9px] font-mono text-iron-dust mt-0.5 uppercase">
@@ -74,7 +74,7 @@ const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencyS
 };
 
 export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, onClose, holding }) => {
-  const { data, historicalPrices, currentPrices, currencySymbol, usdToGbp } = useFinance();
+  const { data, historicalPrices, currentPrices, currencySymbol, gbpUsdRate } = useFinance();
   const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
   const [chartMode, setChartMode] = useState<ChartMode>('VALUE');
 
@@ -91,7 +91,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
   }, [transactions]);
 
   const isUsd = nativeCurrency === 'USD';
-  const fxRate = (isUsd && usdToGbp > 0) ? usdToGbp : 1;
+  const fxRate = (isUsd && gbpUsdRate > 0) ? (1 / gbpUsdRate) : 1;
   const nativeSymbol = isUsd ? '$' : '£';
 
   const allChartData = useMemo(() => {
@@ -266,7 +266,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                           : `${nativeSymbol}${val.toFixed(0)}`
                       }
                     />
-                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} nativeSymbol={nativeSymbol} usdToGbp={usdToGbp} />} />
+                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} nativeSymbol={nativeSymbol} gbpUsdRate={gbpUsdRate} />} />
                     <Area
                       key={chartMode}
                       type="monotone"
@@ -298,7 +298,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                 <span className="text-lg font-mono text-white">{nativeSymbol}{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
                 {isUsd && (
                   <span className="text-[10px] font-mono text-iron-dust block">
-                    ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) * usdToGbp).toFixed(2)}
+                    ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) / gbpUsdRate).toFixed(2)}
                   </span>
                 )}
               </div>
