@@ -23,6 +23,7 @@ interface HistoricalPoint {
 interface FinanceContextType {
   data: MockData;
   loading: boolean;
+  deletingTransactions: boolean;
   lastUpdated: Date;
 
   currentPrices: Record<string, MarketData>;
@@ -35,7 +36,7 @@ interface FinanceContextType {
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
   updateTransaction: (id: string, updates: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
-  deleteTransactions: (ids: string[]) => void;
+  deleteTransactions: (ids: string[]) => Promise<void>;
   addAccount: (account: Omit<Asset, 'id'>) => void;
   updateAccount: (id: string, updates: Partial<Omit<Asset, 'id'>>) => void;
   deleteAccount: (id: string) => void;
@@ -95,6 +96,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     user: { username: '', currency: 'GBP', notifications: 0 }
   });
   const [loading, setLoading] = useState(true);
+  const [deletingTransactions, setDeletingTransactions] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
   const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
@@ -142,19 +144,43 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       const userId = session.user.id;
 
+      let allTransactions: any[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: txBatch, error: txError } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', userId)
+          .range(offset, offset + pageSize - 1);
+
+        if (txError || !txBatch) {
+          hasMore = false;
+        } else {
+          allTransactions = allTransactions.concat(txBatch);
+          if (txBatch.length < pageSize) {
+            hasMore = false;
+          } else {
+            offset += pageSize;
+          }
+        }
+      }
+
       const [
         { data: profile },
         { data: accounts },
-        { data: transactions },
         { data: debts },
         { data: bills }
       ] = await Promise.all([
         supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
         supabase.from('accounts').select('*').eq('user_id', userId),
-        supabase.from('transactions').select('*').eq('user_id', userId),
         supabase.from('debts').select('*').eq('user_id', userId),
         supabase.from('bills').select('*').eq('user_id', userId)
       ]);
+
+      const transactions = allTransactions;
 
       const mappedAccounts: Asset[] = (accounts || []).map(a => ({
         id: a.id,
@@ -640,14 +666,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
-  const deleteTransactions = (ids: string[]) => {
-    const idSet = new Set(ids);
-    supabase.from('transactions').delete().in('id', ids).then(() => {
+  const deleteTransactions = async (ids: string[]): Promise<void> => {
+    setDeletingTransactions(true);
+    try {
+      const batchSize = 50;
+      const idSet = new Set(ids);
+
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        const { error } = await supabase.from('transactions').delete().in('id', batch);
+        if (error) {
+          console.error('Error deleting transaction batch:', error);
+        }
+      }
+
       setData(prev => ({
         ...prev,
         transactions: prev.transactions.filter(t => !idSet.has(t.id))
       }));
-    });
+    } finally {
+      setDeletingTransactions(false);
+    }
   };
 
   const addAccount = async (account: Omit<Asset, 'id'>) => {
@@ -851,6 +890,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <FinanceContext.Provider value={{
       data,
       loading,
+      deletingTransactions,
       lastUpdated,
       currentPrices,
       currentBalances,

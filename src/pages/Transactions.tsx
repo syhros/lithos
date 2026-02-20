@@ -11,7 +11,7 @@ import { Transaction } from '../data/mockData';
 type SortOption = 'newest' | 'oldest' | 'amount-high' | 'amount-low';
 
 export const Transactions: React.FC = () => {
-  const { data, deleteTransaction, deleteTransactions, currencySymbol } = useFinance();
+  const { data, deleteTransaction, deleteTransactions, currencySymbol, deletingTransactions } = useFinance();
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
@@ -78,8 +78,8 @@ export const Transactions: React.FC = () => {
     }
   };
 
-  const handleConfirmDelete = () => {
-    deleteTransactions(Array.from(selectedIds));
+  const handleConfirmDelete = async () => {
+    await deleteTransactions(Array.from(selectedIds));
     setSelectedIds(new Set());
     setShowConfirmDelete(false);
     setSelectMode(false);
@@ -285,30 +285,47 @@ export const Transactions: React.FC = () => {
           <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-sm rounded-sm shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#131517]">
               <h3 className="text-sm font-bold uppercase tracking-[2px] text-white">Confirm Delete</h3>
-              <button onClick={() => setShowConfirmDelete(false)} className="text-iron-dust hover:text-white">
+              <button onClick={() => setShowConfirmDelete(false)} disabled={deletingTransactions} className="text-iron-dust hover:text-white disabled:opacity-50">
                 <X size={18} />
               </button>
             </div>
             <div className="p-8">
-              <p className="text-sm text-white mb-2">
-                You are about to delete <span className="text-magma font-bold">{selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''}</span>.
-              </p>
-              <p className="text-xs text-iron-dust font-mono">This action is not reversible.</p>
+              {deletingTransactions ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 bg-cyan-blue rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <p className="text-xs text-iron-dust font-mono">Deleting transactions...</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-white mb-2">
+                    You are about to delete <span className="text-magma font-bold">{selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''}</span>.
+                  </p>
+                  <p className="text-xs text-iron-dust font-mono">This action is not reversible.</p>
+                </>
+              )}
             </div>
-            <div className="p-6 border-t border-white/5 bg-[#131517] flex justify-end gap-3">
-              <button
-                onClick={() => setShowConfirmDelete(false)}
-                className="px-6 py-3 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors"
-              >
-                Delete {selectedIds.size}
-              </button>
-            </div>
+            {!deletingTransactions && (
+              <div className="p-6 border-t border-white/5 bg-[#131517] flex justify-end gap-3">
+                <button
+                  onClick={() => setShowConfirmDelete(false)}
+                  className="px-6 py-3 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors"
+                >
+                  Delete {selectedIds.size}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
