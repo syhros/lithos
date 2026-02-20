@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { MockData, Transaction, Asset, Debt, Bill, UserProfile, currentStockPrices as fallbackPrices, TransactionType, AssetType, Currency, DebtType, Frequency, MinPaymentType } from '../data/mockData';
+import { MockData, Transaction, Asset, Debt, Bill, UserProfile, TransactionType, AssetType, Currency, DebtType, Frequency, MinPaymentType } from '../data/mockData';
 import { subDays, format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 
@@ -61,28 +61,6 @@ export const getCurrencySymbol = (currency: string): string => {
         case 'EUR': return '€';
         default: return '£';
     }
-};
-
-const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
-    const history: Record<string, number> = {};
-    const today = new Date();
-    const volatility = 0.015;
-    const prices: number[] = [currentPrice];
-
-    for (let i = 1; i < 365; i++) {
-        const prev = prices[i - 1];
-        const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
-        prices.push(move);
-    }
-
-    prices.reverse();
-
-    for (let i = 0; i < 365; i++) {
-        const d = subDays(today, i);
-        history[format(d, 'yyyy-MM-dd')] = prices[i];
-    }
-
-    return history;
 };
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -272,16 +250,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             liveApiAvailable = true;
           }
         } catch (e) {
-          uniqueSymbols.forEach(sym => {
-            const base = fallbackPrices[sym] || 100;
-            const jitter = (Math.random() * 4) - 2;
-            fetchedPrices[sym] = {
-              price: base + jitter,
-              change: jitter,
-              changePercent: 0,
-              currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
-            };
-          });
+          console.info('Live prices fetch failed, using cached data only');
         }
 
         localStorage.setItem('lithos_last_sync', now.toString());
@@ -343,10 +312,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             } catch (e) {
               console.info(`Supabase cache miss for ${sym}`);
             }
-          }
-
-          if (Object.keys(history).length === 0) {
-            history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
           }
 
           historyCache[sym] = history;
@@ -954,7 +919,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
                 let retryCount = 0;
                 while (retryCount < 3 && Object.keys(history).length === 0) {
-                  await new Promise(resolve => setTimeout(resolve, 500));
+                  await new Promise(resolve => setTimeout(resolve, 2000));
 
                   let allCachedRetry: any[] = [];
                   let offsetRetry = 0;

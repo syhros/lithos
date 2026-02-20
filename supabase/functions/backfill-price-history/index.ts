@@ -101,6 +101,27 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const { count, error: verifyError } = await supabase
+        .from("price_history_cache")
+        .select("*", { count: "exact", head: true })
+        .eq("symbol", symbol);
+
+      if (verifyError || !count || count === 0) {
+        console.error("Verification failed after upsert:", verifyError);
+        return new Response(
+          JSON.stringify({ error: "Failed to verify data persistence", symbol }),
+          {
+            status: 500,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
