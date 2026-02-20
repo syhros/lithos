@@ -449,7 +449,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     return balances;
-  }, [data.assets, data.transactions, currentPrices]);
+  }, [data.assets, data.transactions, currentPrices, gbpUsdRate]);
 
   const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
     const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
