@@ -476,7 +476,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     </div>
                 </div>
 
-                <div className="grid grid-cols-[1fr_auto] gap-4">
+                <div className="grid grid-cols-[1.2fr_1fr] gap-4">
                     <div>
                         <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
                         <select
@@ -492,13 +492,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     </div>
                     <div>
                         <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
-                        <div className="flex gap-2 h-[42px]">
+                        <div className="flex gap-1.5 h-[42px]">
                             {['Buy', 'Sell', 'Dividend'].map(cat => (
                                 <button
                                     key={cat}
                                     onClick={() => setCategory(cat)}
                                     className={clsx(
-                                        'flex-1 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
+                                        'flex-1 px-3 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
                                         category === cat
                                             ? 'bg-magma text-white border border-magma'
                                             : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'

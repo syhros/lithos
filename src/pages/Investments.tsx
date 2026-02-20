@@ -209,7 +209,7 @@ export const Investments: React.FC = () => {
                           const holdingTx = data.transactions.find(t => t.symbol === h.symbol && t.type === 'investing' && t.accountId === asset.id);
                           return holdingTx !== undefined;
                         });
-                        const balance = acctHoldings.reduce((sum, h) => sum + h.currentValue, 0);
+                        const balance = currentBalances[asset.id] || 0;
                         const acctTotalCost = acctHoldings.reduce((sum, h) => sum + h.totalCost, 0);
                         const acctTotalProfit = balance - acctTotalCost;
                         const acctProfitPercent = acctTotalCost > 0 ? (acctTotalProfit / acctTotalCost) * 100 : 0;
@@ -315,7 +315,7 @@ export const Investments: React.FC = () => {
                                         </div>
                                         <div>
                                             <h3 className="text-sm font-bold text-white leading-none">{stock.symbol}</h3>
-                                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold text-white uppercase tracking-wider" style={{ backgroundColor: '#e85d04' }}>
+                                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold text-black uppercase tracking-wider" style={{ backgroundColor: '#e85d04' }}>
                                                 {stock.nativeCurrency}
                                             </span>
                                         </div>
