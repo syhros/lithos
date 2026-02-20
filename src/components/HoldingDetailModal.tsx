@@ -99,10 +99,18 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
 
     const today = new Date();
     const sortedTxs = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const history = historicalPrices[holding.symbol] || {};
 
     const firstTxDate = sortedTxs.length > 0 ? parseISO(sortedTxs[0].date) : subDays(today, 365);
-    const dates = eachDayOfInterval({ start: firstTxDate, end: today });
-    const history = historicalPrices[holding.symbol] || {};
+
+    const historyDates = Object.keys(history).sort();
+    const earliestHistoryDate = historyDates.length > 0 ? parseISO(historyDates[0]) : firstTxDate;
+    const latestHistoryDate = historyDates.length > 0 ? parseISO(historyDates[historyDates.length - 1]) : today;
+
+    const chartStartDate = isBefore(earliestHistoryDate, firstTxDate) ? earliestHistoryDate : firstTxDate;
+    const chartEndDate = isBefore(today, latestHistoryDate) ? latestHistoryDate : today;
+
+    const dates = eachDayOfInterval({ start: chartStartDate, end: chartEndDate });
 
     let currentQty = 0;
     let txIndex = 0;

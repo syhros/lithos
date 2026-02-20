@@ -286,15 +286,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         localStorage.setItem('lithos_last_sync', now.toString());
 
         const historyCache: Record<string, Record<string, number>> = {};
-        const investingTransactions = data.transactions.filter(t => t.type === 'investing' && t.symbol);
-        const earliestTxDate = investingTransactions.length > 0
-          ? investingTransactions.reduce((earliest, t) => {
-              const txDate = new Date(t.date);
-              const earliestDate = new Date(earliest);
-              return txDate < earliestDate ? t.date : earliest;
-            })
-          : '2023-01-01';
-        const period1 = earliestTxDate;
 
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, number> = {};
@@ -303,7 +294,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             try {
               const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
               const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
+              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=1900-01-01`, {
                 headers: { 'Authorization': `Bearer ${supabaseKey}` }
               });
               if (hRes.ok) {
@@ -318,14 +309,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           if (Object.keys(history).length === 0) {
             try {
-              const { data: cached } = await supabase
-                .from('price_history_cache')
-                .select('date, close')
-                .eq('symbol', sym)
-                .order('date', { ascending: true });
+              let allCached: any[] = [];
+              let offset = 0;
+              const pageSize = 1000;
+              let hasMore = true;
 
-              if (cached && cached.length > 0) {
-                cached.forEach((row: { date: string; close: number }) => {
+              while (hasMore) {
+                const { data: cached, error } = await supabase
+                  .from('price_history_cache')
+                  .select('date, close')
+                  .eq('symbol', sym)
+                  .order('date', { ascending: true })
+                  .range(offset, offset + pageSize - 1);
+
+                if (error || !cached || cached.length === 0) {
+                  hasMore = false;
+                } else {
+                  allCached = allCached.concat(cached);
+                  if (cached.length < pageSize) {
+                    hasMore = false;
+                  } else {
+                    offset += pageSize;
+                  }
+                }
+              }
+
+              if (allCached && allCached.length > 0) {
+                allCached.forEach((row: { date: string; close: number }) => {
                   history[row.date] = row.close;
                 });
               }
