@@ -95,7 +95,16 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
     return tx?.currency || 'GBP';
   }, [transactions]);
 
+  const isGbx = nativeCurrency === 'GBX';
   const isUsd = nativeCurrency === 'USD';
+  
+  // Helper to format prices based on currency
+  const formatPrice = (price: number) => {
+    if (isGbx) return `£${(price / 100).toFixed(4)}`; // Convert pence to pounds for display
+    if (isUsd) return `$${price.toFixed(2)}`;
+    return `£${price.toFixed(2)}`;
+  };
+
   const fxRate = (isUsd && gbpUsdRate > 0) ? (1 / gbpUsdRate) : 1;
   const nativeSymbol = isUsd ? '$' : '£';
 
@@ -304,13 +313,26 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
               <span className="text-lg font-mono text-white">{holding.quantity.toFixed(8)}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price ({nativeCurrency})</span>
-              <span className="text-lg font-mono text-white">{nativeSymbol}{holding.avgPrice.toFixed(2)}</span>
+              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-mono text-white">
+                  {formatPrice(holding.avgPrice)}
+                </span>
+              </div>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Current Price ({nativeCurrency})</span>
+              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Current Price</span>
               <div>
-                <span className="text-lg font-mono text-white">{nativeSymbol}{currentPrices[holding.symbol]?.price.toFixed(2)}</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-mono text-white">
+                    {formatPrice(currentPrices[holding.symbol]?.price || 0)}
+                  </span>
+                  {isGbx && (
+                    <span className="text-[10px] font-mono text-iron-dust">
+                      ({currentPrices[holding.symbol]?.price.toFixed(2)}p)
+                    </span>
+                  )}
+                </div>
                 {isUsd && (
                   <span className="text-[10px] font-mono text-iron-dust block">
                     ≈ {currencySymbol}{((currentPrices[holding.symbol]?.price || 0) / gbpUsdRate).toFixed(2)}
@@ -346,10 +368,10 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-bold text-white">
-                      {tx.quantity ? `${tx.quantity.toFixed(8)} shares` : ''} @ {getCurrencySymbol(tx.currency || 'GBP')}{tx.price?.toFixed(2)}
+                      {tx.quantity ? `${tx.quantity.toFixed(8)} shares` : ''} @ {isGbx ? `${tx.price}p` : `${getCurrencySymbol(tx.currency || 'GBP')}${tx.price?.toFixed(2)}`}
                     </p>
                     <p className="text-[10px] font-mono text-iron-dust">
-                      Total: {currencySymbol}{Math.abs(tx.amount).toLocaleString()}
+                      Total: {currencySymbol}{Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </p>
                   </div>
                 </div>
