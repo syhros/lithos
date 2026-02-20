@@ -64,7 +64,6 @@ export const getCurrencySymbol = (currency: string): string => {
     }
 };
 
-// Derive the native currency for a symbol from transaction records.
 const getCurrencyFromTransactions = (
   symbol: string,
   transactions: Transaction[]
@@ -73,12 +72,10 @@ const getCurrencyFromTransactions = (
   return tx?.currency || 'GBP';
 };
 
-// Get the earliest transaction date for a symbol (ISO date string yyyy-MM-dd)
 const getEarliestTxDate = (symbol: string, transactions: Transaction[]): string => {
   const txs = transactions.filter(t => t.symbol === symbol && t.date);
   if (txs.length === 0) return format(subDays(new Date(), 365), 'yyyy-MM-dd');
   const earliest = txs.reduce((min, t) => (t.date < min ? t.date : min), txs[0].date);
-  // Strip time component if present
   return earliest.substring(0, 10);
 };
 
@@ -104,6 +101,17 @@ const generateSyntheticHistory = (currentPrice: number): Record<string, number> 
     return history;
 };
 
+// Helper: get a valid session JWT to authenticate edge function calls.
+// Falls back to the anon key only if no session is available.
+const getAuthToken = async (): Promise<string> => {
+  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session.access_token;
+  } catch (_) {}
+  return supabaseKey;
+};
+
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [data, setData] = useState<MockData>({
     transactions: [],
@@ -122,11 +130,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [rateUpdatedAt, setRateUpdatedAt] = useState<string>('');
 
   const fetchFxRate = async () => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const token = await getAuthToken();
       await fetch(`${supabaseUrl}/functions/v1/fx-rate`, {
-        headers: { 'Authorization': `Bearer ${supabaseKey}` }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
     } catch (e) {
       console.info('FX rate refresh failed');
@@ -289,6 +297,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const fetchMarketData = async (force: boolean = false, txOverride?: Transaction[]) => {
     try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
       const activeTxs = txOverride ?? data.transactions;
 
       const uniqueSymbols = Array.from(new Set(
@@ -299,15 +308,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (uniqueSymbols.length === 0) return;
 
-      // Build symbol -> currency map from transaction records (ground truth)
       const symbolCurrencyMap: Record<string, string> = {};
       uniqueSymbols.forEach(sym => {
         symbolCurrencyMap[sym] = getCurrencyFromTransactions(sym, activeTxs);
       });
 
-      // Build symbol -> earliest transaction date map
-      // Used as the `from` param for price-history fetches so we get
-      // data covering the full holding period, not just the last year.
       const symbolFromDateMap: Record<string, string> = {};
       uniqueSymbols.forEach(sym => {
         symbolFromDateMap[sym] = getEarliestTxDate(sym, activeTxs);
@@ -318,15 +323,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const shouldFetch = force || !lastSync || (now - parseInt(lastSync) > 30 * 60 * 1000);
 
       if (shouldFetch) {
+        // Always get a fresh session token for edge function calls
+        const token = await getAuthToken();
+        const authHeader = { 'Authorization': `Bearer ${token}` };
+
         let fetchedPrices: any = {};
         let liveApiAvailable = false;
 
         try {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-          const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
-            headers: { 'Authorization': `Bearer ${supabaseKey}` }
-          });
+          const res = await fetch(
+            `${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`,
+            { headers: authHeader }
+          );
           if (res.ok) {
             const rawPrices = await res.json();
             uniqueSymbols.forEach(sym => {
@@ -338,8 +346,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               }
             });
             liveApiAvailable = true;
+          } else {
+            console.warn(`live-prices returned ${res.status}`);
           }
         } catch (e) {
+          console.warn('live-prices fetch failed, using fallback prices:', e);
           uniqueSymbols.forEach(sym => {
             const base = fallbackPrices[sym] || 100;
             const jitter = (Math.random() * 4) - 2;
@@ -358,18 +369,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, number> = {};
-
-          // Use the earliest transaction date for this symbol as the
-          // start of the history request — ensures full holding-period coverage.
           const fromDate = symbolFromDateMap[sym];
 
           if (liveApiAvailable) {
             try {
-              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-              const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${fromDate}`, {
-                headers: { 'Authorization': `Bearer ${supabaseKey}` }
-              });
+              const hRes = await fetch(
+                `${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${fromDate}`,
+                { headers: authHeader }
+              );
               if (hRes.ok) {
                 const response = await hRes.json();
                 const rows: { date: string; close: number }[] = response[sym] || [];

@@ -15,13 +15,9 @@ interface InvestmentAccountModalProps {
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
 // Returns a display-friendly price string for a holding.
-// GBX raw prices (pence) are shown as both Xp and £X/100.
-// USD shown as $X. GBP shown as £X.
+// GBX raw prices (pence) are shown as Xp. USD shown as $X. GBP shown as £X.
 const formatHoldingPrice = (rawPrice: number, currency: string): string => {
-  if (currency === 'GBX') {
-    const gbp = rawPrice / 100;
-    return `${rawPrice.toFixed(2)}p (\u00a3${gbp.toFixed(4)})`;
-  }
+  if (currency === 'GBX') return `${rawPrice.toFixed(2)}p (\u00a3${(rawPrice / 100).toFixed(4)})`;
   if (currency === 'USD') return `$${rawPrice.toFixed(2)}`;
   return `\u00a3${rawPrice.toFixed(2)}`;
 };
@@ -77,7 +73,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
           cur.quantity += tx.quantity;
         } else {
           cur.quantity += tx.quantity;
-          cur.totalCost += Math.abs(tx.amount); // tx.amount is always in GBP
+          cur.totalCost += Math.abs(tx.amount);
         }
 
         map.set(tx.symbol, cur);
@@ -90,17 +86,14 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
       const isUsd = h.currency === 'USD';
       const fxRate = (isUsd && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
 
-      // rawNativePrice: price as returned by API (pence for GBX, USD for USD, GBP for GBP)
       const rawNativePrice = marketData?.price || 0;
-      // displayPrice: always in GBP for portfolio value calculations
       const displayPrice = isGbx ? rawNativePrice / 100 : rawNativePrice * fxRate;
-      const currentValue = h.quantity * displayPrice; // GBP
+      const currentValue = h.quantity * displayPrice;
 
-      // profitValue is GBP vs GBP (totalCost is already in GBP)
       const profitValue = currentValue - h.totalCost;
       const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
-      // avgCostGbp: GBP cost per share
+      // Guard against zero quantity to avoid division explosion
       const avgCostGbp = h.quantity > 0 ? h.totalCost / h.quantity : 0;
 
       return {
@@ -353,13 +346,12 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-center mb-1">
                         <span className="text-sm font-bold text-white">{h.symbol}</span>
-                        {/* currentValue is always GBP */}
                         <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        {/* Show native price with correct symbol */}
+                        {/* Use a JS expression for the middle dot to avoid \u00b7 rendering literally in JSX */}
                         <span className="text-[9px] font-mono text-iron-dust">
-                          {h.quantity.toFixed(4)} shares \u00b7 {formatHoldingPrice(h.rawNativePrice, h.currency)}
+                          {h.quantity.toFixed(4)} shares {String.fromCharCode(183)} {formatHoldingPrice(h.rawNativePrice, h.currency)}
                         </span>
                         <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', hp ? 'text-emerald-vein' : 'text-magma')}>
                           {hp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
