@@ -15,7 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing symbol parameter' });
   }
 
-  const period1 = (typeof from === 'string' && from) ? from : '1900-01-01';
+  const period1 = (typeof from === 'string' && from) ? from : '2023-01-01';
 
   try {
     // 1. Check Supabase cache first

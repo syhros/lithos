@@ -1,28 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFinance } from '../context/FinanceContext';
-import { Download, Upload, Trash2, AlertCircle, Check, LogOut, RefreshCw } from 'lucide-react';
+import { Download, Upload, Trash2, AlertCircle, Check, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../lib/supabase';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const { data, refreshHistoricalPrices, loading } = useFinance();
+  const { data } = useFinance();
   const [deleteType, setDeleteType] = useState<string>('none');
   const [monthsToDelete, setMonthsToDelete] = useState<number>(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
-  const [priceUpdateSuccess, setPriceUpdateSuccess] = useState(false);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/login');
-  };
-
-  const handleUpdatePrices = async () => {
-    await refreshHistoricalPrices();
-    setPriceUpdateSuccess(true);
-    setTimeout(() => setPriceUpdateSuccess(false), 3000);
   };
 
   const stats = useMemo(() => {
@@ -212,25 +205,6 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
-        <div className="border border-white/5 rounded-sm p-8 bg-[#161618]">
-          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-            <RefreshCw size={18} />
-            Market Data
-          </h3>
-
-          <div>
-            <p className="text-sm text-iron-dust mb-4">Refresh all historical price data for your investments. This may take a moment to complete.</p>
-            <button
-              onClick={handleUpdatePrices}
-              disabled={loading}
-              className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              Update Historical Price Data
-            </button>
-          </div>
-        </div>
-
         <div className="border border-red-900/30 rounded-sm p-8 bg-red-900/5">
           <h3 className="text-lg font-bold text-red-400 mb-6 flex items-center gap-2">
             <Trash2 size={18} />
@@ -327,15 +301,6 @@ export const Settings: React.FC = () => {
             <Check size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-emerald-400">
               Data deleted successfully
-            </div>
-          </div>
-        )}
-
-        {priceUpdateSuccess && (
-          <div className="bg-emerald-900/10 border border-emerald-900/30 rounded-sm p-4 flex gap-3 animate-in fade-in">
-            <Check size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-emerald-400">
-              Historical price data updated successfully
             </div>
           </div>
         )}

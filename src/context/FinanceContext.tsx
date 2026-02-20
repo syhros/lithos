@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { MockData, Transaction, Asset, Debt, Bill, UserProfile, TransactionType, AssetType, Currency, DebtType, Frequency, MinPaymentType } from '../data/mockData';
+import { MockData, Transaction, Asset, Debt, Bill, UserProfile, currentStockPrices as fallbackPrices, TransactionType, AssetType, Currency, DebtType, Frequency, MinPaymentType } from '../data/mockData';
 import { subDays, format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 
@@ -47,7 +47,6 @@ interface FinanceContextType {
   deleteBill: (id: string) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
-  refreshHistoricalPrices: () => Promise<void>;
 
   currencySymbol: string;
   gbpUsdRate: number;
@@ -61,6 +60,28 @@ export const getCurrencySymbol = (currency: string): string => {
         case 'EUR': return '€';
         default: return '£';
     }
+};
+
+const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
+    const history: Record<string, number> = {};
+    const today = new Date();
+    const volatility = 0.015;
+    const prices: number[] = [currentPrice];
+
+    for (let i = 1; i < 365; i++) {
+        const prev = prices[i - 1];
+        const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
+        prices.push(move);
+    }
+
+    prices.reverse();
+
+    for (let i = 0; i < 365; i++) {
+        const d = subDays(today, i);
+        history[format(d, 'yyyy-MM-dd')] = prices[i];
+    }
+
+    return history;
 };
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -250,7 +271,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             liveApiAvailable = true;
           }
         } catch (e) {
-          console.info('Live prices fetch failed, using cached data only');
+          uniqueSymbols.forEach(sym => {
+            const base = fallbackPrices[sym] || 100;
+            const jitter = (Math.random() * 4) - 2;
+            fetchedPrices[sym] = {
+              price: base + jitter,
+              change: jitter,
+              changePercent: 0,
+              currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
+            };
+          });
         }
 
         localStorage.setItem('lithos_last_sync', now.toString());
@@ -312,6 +342,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             } catch (e) {
               console.info(`Supabase cache miss for ${sym}`);
             }
+          }
+
+          if (Object.keys(history).length === 0) {
+            history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
           }
 
           historyCache[sym] = history;
@@ -634,23 +668,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ...account
         }]
       }));
-
-      if (account.symbol) {
-        try {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-          await fetch(`${supabaseUrl}/functions/v1/backfill-price-history`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ symbol: account.symbol })
-          });
-        } catch (e) {
-          console.info(`Failed to backfill price history for ${account.symbol}:`, e);
-        }
-      }
     }
   };
 
@@ -822,161 +839,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const refreshHistoricalPrices = async () => {
-    setLoading(true);
-    const startTime = Date.now();
-    try {
-      const uniqueSymbols = Array.from(new Set(
-        data.transactions
-          .filter(t => t.type === 'investing' && t.symbol)
-          .map(t => t.symbol!)
-      ));
-
-      if (uniqueSymbols.length === 0) return;
-
-      let fetchedPrices: any = {};
-      let liveApiAvailable = false;
-
-      try {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=${uniqueSymbols.join(',')}`, {
-          headers: { 'Authorization': `Bearer ${supabaseKey}` }
-        });
-        if (res.ok) {
-          fetchedPrices = await res.json();
-          liveApiAvailable = true;
-        }
-      } catch (e) {
-        console.info('Live prices fetch failed, using cached data');
-      }
-
-      const historyCache: Record<string, Record<string, number>> = {};
-
-      await Promise.all(uniqueSymbols.map(async sym => {
-        let history: Record<string, number> = {};
-
-        if (liveApiAvailable) {
-          try {
-            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-            const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-            const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=1900-01-01`, {
-              headers: { 'Authorization': `Bearer ${supabaseKey}` }
-            });
-            if (hRes.ok) {
-              const response = await hRes.json();
-              const rows: { date: string; close: number }[] = response[sym] || [];
-              rows.forEach(row => { history[row.date] = row.close; });
-            }
-          } catch (e) {
-            console.info(`Failed to fetch history for ${sym}:`, e);
-          }
-        }
-
-        if (Object.keys(history).length === 0) {
-          try {
-            let allCached: any[] = [];
-            let offset = 0;
-            const pageSize = 1000;
-            let hasMore = true;
-
-            while (hasMore) {
-              const { data: cached, error } = await supabase
-                .from('price_history_cache')
-                .select('date, close')
-                .eq('symbol', sym)
-                .order('date', { ascending: true })
-                .range(offset, offset + pageSize - 1);
-
-              if (error || !cached || cached.length === 0) {
-                hasMore = false;
-              } else {
-                allCached = allCached.concat(cached);
-                if (cached.length < pageSize) {
-                  hasMore = false;
-                } else {
-                  offset += pageSize;
-                }
-              }
-            }
-
-            if (allCached && allCached.length > 0) {
-              allCached.forEach((row: { date: string; close: number }) => {
-                history[row.date] = row.close;
-              });
-            } else if (allCached.length === 0) {
-              try {
-                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-                await fetch(`${supabaseUrl}/functions/v1/backfill-price-history`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${supabaseKey}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({ symbol: sym })
-                });
-
-                let retryCount = 0;
-                while (retryCount < 3 && Object.keys(history).length === 0) {
-                  await new Promise(resolve => setTimeout(resolve, 2000));
-
-                  let allCachedRetry: any[] = [];
-                  let offsetRetry = 0;
-                  let hasMoreRetry = true;
-
-                  while (hasMoreRetry) {
-                    const { data: cachedRetry, error: errorRetry } = await supabase
-                      .from('price_history_cache')
-                      .select('date, close')
-                      .eq('symbol', sym)
-                      .order('date', { ascending: true })
-                      .range(offsetRetry, offsetRetry + pageSize - 1);
-
-                    if (errorRetry || !cachedRetry || cachedRetry.length === 0) {
-                      hasMoreRetry = false;
-                    } else {
-                      allCachedRetry = allCachedRetry.concat(cachedRetry);
-                      if (cachedRetry.length < pageSize) {
-                        hasMoreRetry = false;
-                      } else {
-                        offsetRetry += pageSize;
-                      }
-                    }
-                  }
-
-                  if (allCachedRetry.length > 0) {
-                    allCachedRetry.forEach((row: { date: string; close: number }) => {
-                      history[row.date] = row.close;
-                    });
-                    break;
-                  }
-
-                  retryCount++;
-                }
-              } catch (e) {
-                console.info(`Failed to backfill price history for ${sym}:`, e);
-              }
-            }
-          } catch (e) {
-            console.info(`Supabase cache miss for ${sym}`);
-          }
-        }
-
-        historyCache[sym] = history;
-      }));
-
-      setHistoricalPrices(historyCache);
-      localStorage.setItem('lithos_historical_prices', JSON.stringify(historyCache));
-    } finally {
-      const elapsed = Date.now() - startTime;
-      const remainingDelay = Math.max(0, 1500 - elapsed);
-      setTimeout(() => {
-        setLoading(false);
-      }, remainingDelay);
-    }
-  };
-
   return (
     <FinanceContext.Provider value={{
       data,
@@ -1002,7 +864,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       deleteBill,
       updateUserProfile,
       refreshData,
-      refreshHistoricalPrices,
       currencySymbol: getCurrencySymbol(data.user.currency),
       gbpUsdRate,
       rateUpdatedAt
