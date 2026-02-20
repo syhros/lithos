@@ -669,6 +669,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ...account
         }]
       }));
+
+      if (account.symbol) {
+        try {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+          await fetch(`${supabaseUrl}/functions/v1/backfill-price-history`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ symbol: account.symbol })
+          });
+        } catch (e) {
+          console.info(`Failed to backfill price history for ${account.symbol}:`, e);
+        }
+      }
     }
   };
 
@@ -922,6 +939,59 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               allCached.forEach((row: { date: string; close: number }) => {
                 history[row.date] = row.close;
               });
+            } else if (allCached.length === 0) {
+              try {
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+                await fetch(`${supabaseUrl}/functions/v1/backfill-price-history`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ symbol: sym })
+                });
+
+                let retryCount = 0;
+                while (retryCount < 3 && Object.keys(history).length === 0) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+
+                  let allCachedRetry: any[] = [];
+                  let offsetRetry = 0;
+                  let hasMoreRetry = true;
+
+                  while (hasMoreRetry) {
+                    const { data: cachedRetry, error: errorRetry } = await supabase
+                      .from('price_history_cache')
+                      .select('date, close')
+                      .eq('symbol', sym)
+                      .order('date', { ascending: true })
+                      .range(offsetRetry, offsetRetry + pageSize - 1);
+
+                    if (errorRetry || !cachedRetry || cachedRetry.length === 0) {
+                      hasMoreRetry = false;
+                    } else {
+                      allCachedRetry = allCachedRetry.concat(cachedRetry);
+                      if (cachedRetry.length < pageSize) {
+                        hasMoreRetry = false;
+                      } else {
+                        offsetRetry += pageSize;
+                      }
+                    }
+                  }
+
+                  if (allCachedRetry.length > 0) {
+                    allCachedRetry.forEach((row: { date: string; close: number }) => {
+                      history[row.date] = row.close;
+                    });
+                    break;
+                  }
+
+                  retryCount++;
+                }
+              } catch (e) {
+                console.info(`Failed to backfill price history for ${sym}:`, e);
+              }
             }
           } catch (e) {
             console.info(`Supabase cache miss for ${sym}`);
