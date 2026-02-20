@@ -38,6 +38,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const [assetType, setAssetType] = useState('Stock');
   const [investCurrency, setInvestCurrency] = useState<Currency>('GBP');
 
+  // Validation
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
   // -- Derived Data for Autocomplete --
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
   const uniqueMerchants = useMemo(() => Array.from(new Set(data.transactions.filter(t => t.type !== 'investing').map(t => t.description))).sort(), [data.transactions]);
@@ -140,8 +143,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       if (d) return d.name;
       return 'Unknown Account';
   };
-
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const validate = () => {
     const errors: string[] = [];
