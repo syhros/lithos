@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
-import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, Database, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes, subDays } from 'date-fns';
@@ -8,16 +8,6 @@ import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
-import { supabase } from '../lib/supabase';
-
-type LogLine = {
-    id: number;
-    symbol: string;
-    status: 'pending' | 'pulling' | 'done' | 'error';
-    rows?: number;
-    message?: string;
-    fromDate?: string;
-};
 
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
@@ -25,14 +15,6 @@ export const Investments: React.FC = () => {
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
-
-    // Historic pull state
-    const [isPulling, setIsPulling] = useState(false);
-    const [showLog, setShowLog] = useState(false);
-    const [logLines, setLogLines] = useState<LogLine[]>([]);
-    const [pullComplete, setPullComplete] = useState(false);
-    const logRef = useRef<HTMLDivElement>(null);
-    const logIdRef = useRef(0);
 
     const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
     const isStale = minsSinceUpdate > 5;
@@ -112,90 +94,6 @@ export const Investments: React.FC = () => {
             };
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
-
-    // Auto-scroll log to bottom
-    useEffect(() => {
-        if (logRef.current) {
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    }, [logLines]);
-
-    const updateLine = (id: number, update: Partial<LogLine>) => {
-        setLogLines(prev => prev.map(l => l.id === id ? { ...l, ...update } : l));
-    };
-
-    const handlePullHistoricData = async () => {
-        if (isPulling) return;
-
-        const transactions = data?.transactions || [];
-
-        // Build a map of symbol -> earliest transaction date
-        const firstTxDate = new Map<string, string>();
-        transactions
-            .filter(t => t.type === 'investing' && t.symbol && t.date)
-            .forEach(t => {
-                const existing = firstTxDate.get(t.symbol!);
-                if (!existing || t.date < existing) {
-                    firstTxDate.set(t.symbol!, t.date);
-                }
-            });
-
-        const symbols = Array.from(firstTxDate.keys());
-        if (symbols.length === 0) return;
-
-        setIsPulling(true);
-        setPullComplete(false);
-        setShowLog(true);
-
-        // Build initial log lines — all pending, show from date
-        const initialLines: LogLine[] = symbols.map(sym => ({
-            id: ++logIdRef.current,
-            symbol: sym,
-            status: 'pending',
-            fromDate: firstTxDate.get(sym),
-        }));
-        setLogLines(initialLines);
-
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-        // Process one symbol at a time so we can show live progress
-        for (let i = 0; i < symbols.length; i++) {
-            const symbol = symbols[i];
-            const lineId = initialLines[i].id;
-            const fromDate = firstTxDate.get(symbol)!;
-
-            updateLine(lineId, { status: 'pulling' });
-
-            try {
-                const res = await fetch(
-                    `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(symbol)}&from=${fromDate}`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-
-                if (!res.ok) {
-                    updateLine(lineId, { status: 'error', message: `HTTP ${res.status}` });
-                } else {
-                    const json = await res.json();
-                    const result = json?.summary?.[symbol];
-                    if (result?.error) {
-                        updateLine(lineId, { status: 'error', message: result.error });
-                    } else {
-                        updateLine(lineId, { status: 'done', rows: result?.rows ?? 0 });
-                    }
-                }
-            } catch (e: any) {
-                updateLine(lineId, { status: 'error', message: e.message || 'Network error' });
-            }
-        }
-
-        setIsPulling(false);
-        setPullComplete(true);
-
-        // Refresh market data after backfill
-        await refreshData();
-    };
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -277,10 +175,6 @@ export const Investments: React.FC = () => {
         return result;
     }, [holdings, historicalPrices, gbpUsdRate]);
 
-    const doneCount = logLines.filter(l => l.status === 'done').length;
-    const errorCount = logLines.filter(l => l.status === 'error').length;
-    const totalCount = logLines.length;
-
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
@@ -303,8 +197,6 @@ export const Investments: React.FC = () => {
                             <Plus size={14} />
                             Add Account
                         </button>
-
-                        {/* Actions Group */}
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
                                <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")}></div>
@@ -323,107 +215,9 @@ export const Investments: React.FC = () => {
                                 <RefreshCw size={12} />
                             </button>
                         </div>
-
-                        {/* Pull Historic Data button */}
-                        <button
-                            onClick={handlePullHistoricData}
-                            disabled={isPulling}
-                            className={clsx(
-                                'flex items-center gap-2 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider border transition-all',
-                                isPulling
-                                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed'
-                                    : pullComplete
-                                    ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
-                                    : 'bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20'
-                            )}
-                        >
-                            {isPulling
-                                ? <Loader2 size={12} className="animate-spin" />
-                                : pullComplete
-                                ? <CheckCircle2 size={12} />
-                                : <Database size={12} />}
-                            {isPulling ? 'Pulling...' : pullComplete ? 'Pull Complete' : 'Pull Historic Data'}
-                        </button>
                     </div>
                 </div>
             </div>
-
-            {/* Historic Pull Log Panel */}
-            {showLog && (
-                <div className="mb-8 bg-[#0d0f10] border border-white/10 rounded-sm overflow-hidden">
-                    {/* Log header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-[#131517]">
-                        <div className="flex items-center gap-3">
-                            <Database size={13} className="text-blue-400" />
-                            <span className="text-[11px] font-bold text-white uppercase tracking-[2px]">Historic Price Pull</span>
-                            {totalCount > 0 && (
-                                <span className="text-[10px] font-mono text-iron-dust">
-                                    {doneCount + errorCount} / {totalCount} tickers
-                                </span>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            {pullComplete && (
-                                <span className="text-[10px] font-mono text-emerald-vein">
-                                    {doneCount} succeeded {errorCount > 0 ? `· ${errorCount} failed` : ''}
-                                </span>
-                            )}
-                            <button
-                                onClick={() => setShowLog(false)}
-                                className="text-iron-dust hover:text-white text-xs transition-colors"
-                            >✕</button>
-                        </div>
-                    </div>
-
-                    {/* Progress bar */}
-                    {totalCount > 0 && (
-                        <div className="h-0.5 bg-white/5">
-                            <div
-                                className="h-full transition-all duration-500"
-                                style={{
-                                    width: `${((doneCount + errorCount) / totalCount) * 100}%`,
-                                    backgroundColor: pullComplete ? (errorCount === 0 ? '#00f2ad' : '#f97316') : '#3b82f6'
-                                }}
-                            />
-                        </div>
-                    )}
-
-                    {/* Scrollable log */}
-                    <div
-                        ref={logRef}
-                        className="max-h-[220px] overflow-y-auto custom-scrollbar p-4 space-y-1 font-mono text-[11px]"
-                    >
-                        {logLines.map(line => (
-                            <div key={line.id} className={clsx(
-                                'flex items-center gap-3 py-0.5 transition-all',
-                                line.status === 'pulling' && 'text-blue-400',
-                                line.status === 'done' && 'text-emerald-vein',
-                                line.status === 'error' && 'text-magma',
-                                line.status === 'pending' && 'text-iron-dust/40',
-                            )}>
-                                <span className="w-4 flex-shrink-0">
-                                    {line.status === 'pending' && <span className="opacity-30">·</span>}
-                                    {line.status === 'pulling' && <Loader2 size={11} className="animate-spin" />}
-                                    {line.status === 'done' && <CheckCircle2 size={11} />}
-                                    {line.status === 'error' && <XCircle size={11} />}
-                                </span>
-                                <span className="w-24 flex-shrink-0 font-bold tracking-wider">{line.symbol}</span>
-                                <span className="text-current opacity-80">
-                                    {line.status === 'pending' && `Waiting... (from ${line.fromDate})`}
-                                    {line.status === 'pulling' && `Pulling from ${line.fromDate}…`}
-                                    {line.status === 'done' && `Complete — ${line.rows?.toLocaleString()} rows cached`}
-                                    {line.status === 'error' && `Failed — ${line.message}`}
-                                </span>
-                            </div>
-                        ))}
-                        {pullComplete && (
-                            <div className="pt-2 border-t border-white/5 mt-2 text-emerald-vein">
-                                ✓ All tickers processed. Refreshing data...
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
 
             {/* Section 1: Accounts */}
             <div className="mb-12">
@@ -459,7 +253,6 @@ export const Investments: React.FC = () => {
                                 style={{ minHeight: 160 }}
                             >
                                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
-
                                 <div
                                     className="absolute bottom-0 right-0 pointer-events-none"
                                     style={{ width: '75%', height: '70%', opacity: 0.75, maskImage: 'linear-gradient(to right, transparent 0%, black 40%)', WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)' }}
@@ -473,27 +266,14 @@ export const Investments: React.FC = () => {
                                                 </linearGradient>
                                             </defs>
                                             <YAxis domain={[acctMin, 'auto']} hide={true} />
-                                            <Area
-                                                type="monotone"
-                                                dataKey="value"
-                                                stroke={acctColor}
-                                                strokeWidth={1.5}
-                                                fill={`url(#acctGrad-${asset.id})`}
-                                                dot={false}
-                                                isAnimationActive={false}
-                                            />
+                                            <Area type="monotone" dataKey="value" stroke={acctColor} strokeWidth={1.5} fill={`url(#acctGrad-${asset.id})`} dot={false} isAnimationActive={false} />
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 </div>
-
                                 <div className="relative z-10 p-8">
                                     <div className="flex justify-between items-start mb-6">
-                                        <div className="p-3 bg-white/5 rounded-sm text-white">
-                                            <LineChartIcon size={20} />
-                                        </div>
-                                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">
-                                            {asset.institution}
-                                        </span>
+                                        <div className="p-3 bg-white/5 rounded-sm text-white"><LineChartIcon size={20} /></div>
+                                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">{asset.institution}</span>
                                     </div>
                                     <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
                                     <p className="text-xs text-iron-dust font-mono mb-4">{asset.currency}</p>
@@ -516,7 +296,6 @@ export const Investments: React.FC = () => {
                     <TrendingUp size={16} className="text-emerald-vein" />
                     Portfolio Holdings
                 </h2>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                     {holdings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
@@ -553,7 +332,6 @@ export const Investments: React.FC = () => {
                                         {stock.avgPrice === 0 ? '+∞' : stock.profitPercent.toFixed(1)}%
                                     </div>
                                 </div>
-
                                 <div className="mb-2">
                                     <div className="text-2xl font-bold text-white tracking-tight">
                                         {currencySymbol}{Math.floor(stock.currentValue).toLocaleString()}<span className="text-base font-light opacity-40">.{stock.currentValue.toFixed(2).split('.')[1]}</span>
@@ -565,8 +343,6 @@ export const Investments: React.FC = () => {
                                         </span>
                                     </div>
                                 </div>
-
-                                {/* Sparkline 7-day */}
                                 <div className="h-[40px] w-full my-2">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <LineChart data={sparkline} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
@@ -575,7 +351,6 @@ export const Investments: React.FC = () => {
                                         </LineChart>
                                     </ResponsiveContainer>
                                 </div>
-
                                 <div className="grid grid-cols-2 gap-y-2 gap-x-4 border-t border-white/5 pt-3 mt-auto">
                                     <div>
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Shares</span>
@@ -606,23 +381,9 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            <AddAccountModal
-                isOpen={isAddAccountModalOpen}
-                onClose={() => setIsAddAccountModalOpen(false)}
-                defaultType="investment"
-            />
-
-            <HoldingDetailModal
-                isOpen={!!selectedHolding}
-                onClose={() => setSelectedHolding(null)}
-                holding={selectedHolding}
-            />
-
-            <InvestmentAccountModal
-                isOpen={!!selectedAccount}
-                onClose={() => setSelectedAccount(null)}
-                account={selectedAccount}
-            />
+            <AddAccountModal isOpen={isAddAccountModalOpen} onClose={() => setIsAddAccountModalOpen(false)} defaultType="investment" />
+            <HoldingDetailModal isOpen={!!selectedHolding} onClose={() => setSelectedHolding(null)} holding={selectedHolding} />
+            <InvestmentAccountModal isOpen={!!selectedAccount} onClose={() => setSelectedAccount(null)} account={selectedAccount} />
         </div>
     );
 };

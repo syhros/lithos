@@ -1,17 +1,37 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFinance } from '../context/FinanceContext';
-import { Download, Upload, Trash2, AlertCircle, Check, LogOut } from 'lucide-react';
+import { Download, Upload, Trash2, AlertCircle, Check, LogOut, Database, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../lib/supabase';
 
+type LogEntry = {
+  id: number;
+  text: string;
+  type: 'info' | 'success' | 'error' | 'dim' | 'heading';
+};
+
+type PullPhase =
+  | 'idle'
+  | 'scanning'
+  | 'cache_check'
+  | 'compiling'
+  | 'pulling'
+  | 'done';
+
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const { data } = useFinance();
+  const { data, refreshData } = useFinance();
   const [deleteType, setDeleteType] = useState<string>('none');
   const [monthsToDelete, setMonthsToDelete] = useState<number>(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
+
+  // Historic pull state
+  const [pullPhase, setPullPhase] = useState<PullPhase>('idle');
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const logRef = useRef<HTMLDivElement>(null);
+  const logIdRef = useRef(0);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -24,37 +44,198 @@ export const Settings: React.FC = () => {
     const debtCount = data.debts.length;
     const billCount = data.bills.length;
     const totalValue = data.assets.reduce((sum, a) => sum + a.startingValue, 0);
-
     return { txCount, accountCount, debtCount, billCount, totalValue };
   }, [data]);
 
+  // Auto-scroll log
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [log]);
+
+  const addLog = (text: string, type: LogEntry['type'] = 'info') => {
+    setLog(prev => [...prev, { id: ++logIdRef.current, text, type }]);
+  };
+
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  const handlePullHistoricData = async () => {
+    if (pullPhase !== 'idle' && pullPhase !== 'done') return;
+
+    setLog([]);
+    setPullPhase('scanning');
+
+    const transactions = data?.transactions || [];
+
+    // ── PHASE 1: Scan all tickers for earliest transaction date ──
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('PHASE 1 — Scanning transaction history', 'heading');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    await sleep(150);
+
+    const firstTxDate = new Map<string, string>();
+    const investingTxs = transactions.filter(t => t.type === 'investing' && t.symbol && t.date);
+
+    // Get unique symbols first for ordered logging
+    const allSymbols = Array.from(new Set(investingTxs.map(t => t.symbol!)));
+
+    for (const sym of allSymbols) {
+      addLog(`  Checking earliest transaction for ${sym}...`, 'dim');
+      await sleep(30);
+      const dates = investingTxs.filter(t => t.symbol === sym).map(t => t.date).sort();
+      const earliest = dates[0];
+      firstTxDate.set(sym, earliest);
+      addLog(`  → ${sym}: first transaction on ${earliest}`, 'info');
+    }
+
+    addLog('', 'dim');
+    addLog(`✓ Earliest transaction dates found for ${allSymbols.length} tickers`, 'success');
+    await sleep(200);
+
+    // ── PHASE 2: Check cache for each ticker ──
+    setPullPhase('cache_check');
+    addLog('', 'dim');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('PHASE 2 — Checking price history cache', 'heading');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    await sleep(150);
+
+    const toFetch = new Map<string, string>(); // symbol -> fromDate
+    const ignored: string[] = [];
+
+    for (const sym of allSymbols) {
+      const txFrom = firstTxDate.get(sym)!;
+      addLog(`  Checking cache for ${sym} (need from ${txFrom})...`, 'dim');
+      await sleep(40);
+
+      // Query supabase for the earliest cached row for this symbol
+      const { data: cached } = await supabase
+        .from('price_history_cache')
+        .select('date')
+        .eq('symbol', sym)
+        .order('date', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (cached?.date && cached.date <= txFrom) {
+        addLog(`  → ${sym}: cache covers ${cached.date} ✓ — skipping`, 'success');
+        ignored.push(sym);
+      } else if (cached?.date) {
+        addLog(`  → ${sym}: cache starts ${cached.date}, need ${txFrom} — will backfill gap`, 'info');
+        toFetch.set(sym, txFrom);
+      } else {
+        addLog(`  → ${sym}: no cache found — will fetch from ${txFrom}`, 'info');
+        toFetch.set(sym, txFrom);
+      }
+    }
+
+    addLog('', 'dim');
+    if (ignored.length > 0) {
+      addLog(`✓ ${ignored.length} ticker(s) already fully cached: ${ignored.join(', ')}`, 'success');
+    }
+    addLog(`→ ${toFetch.size} ticker(s) require a fetch`, 'info');
+    await sleep(200);
+
+    if (toFetch.size === 0) {
+      addLog('', 'dim');
+      addLog('✓ All tickers are fully cached. Nothing to do!', 'success');
+      setPullPhase('done');
+      return;
+    }
+
+    // ── PHASE 3: Compile request list ──
+    setPullPhase('compiling');
+    addLog('', 'dim');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('PHASE 3 — Compiling request list', 'heading');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    await sleep(150);
+
+    for (const [sym, from] of toFetch.entries()) {
+      addLog(`  ${sym.padEnd(16)} from ${from} → today`, 'info');
+      await sleep(25);
+    }
+    addLog('', 'dim');
+    addLog(`✓ Request list compiled — ${toFetch.size} ticker(s) queued`, 'success');
+    await sleep(200);
+
+    // ── PHASE 4: Fetch ──
+    setPullPhase('pulling');
+    addLog('', 'dim');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('PHASE 4 — Pulling price history', 'heading');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    await sleep(150);
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    let totalRows = 0;
+    let errors = 0;
+
+    for (const [sym, fromDate] of toFetch.entries()) {
+      addLog(`  Requesting price history for ${sym}...`, 'info');
+
+      try {
+        const res = await fetch(
+          `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(sym)}&from=${fromDate}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (!res.ok) {
+          addLog(`  ✗ ${sym}: HTTP ${res.status}`, 'error');
+          errors++;
+        } else {
+          const json = await res.json();
+          const result = json?.summary?.[sym];
+          if (result?.error) {
+            addLog(`  ✗ ${sym}: ${result.error}`, 'error');
+            errors++;
+          } else {
+            const rows = result?.rows ?? 0;
+            totalRows += rows;
+            addLog(`  ✓ Price history for ${sym} complete — ${rows.toLocaleString()} rows cached`, 'success');
+          }
+        }
+      } catch (e: any) {
+        addLog(`  ✗ ${sym}: ${e.message || 'Network error'}`, 'error');
+        errors++;
+      }
+    }
+
+    addLog('', 'dim');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog(`COMPLETE — ${totalRows.toLocaleString()} rows cached${errors > 0 ? `, ${errors} error(s)` : ''}`, errors > 0 ? 'error' : 'success');
+    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+
+    setPullPhase('done');
+    await refreshData();
+  };
+
   const handleExportCSV = () => {
     let csv = '';
-
     csv += 'TRANSACTIONS\n';
     csv += 'Date,Description,Amount,Type,Category,Account\n';
     data.transactions.forEach(tx => {
       csv += `${tx.date},"${tx.description}",${tx.amount},${tx.type},${tx.category},${tx.accountId}\n`;
     });
-
     csv += '\n\nACCOUNTS\n';
     csv += 'Name,Type,Institution,Currency,Starting Value,Interest Rate\n';
     data.assets.forEach(a => {
       csv += `"${a.name}",${a.type},"${a.institution}",${a.currency},${a.startingValue},"${a.interestRate || ''}"\n`;
     });
-
     csv += '\n\nDEBTS\n';
     csv += 'Name,Type,Limit,APR,Min Payment Type,Min Payment Value,Starting Value\n';
     data.debts.forEach(d => {
       csv += `"${d.name}",${d.type},${d.limit},${d.apr},${d.minPaymentType},${d.minPaymentValue},${d.startingValue}\n`;
     });
-
     csv += '\n\nBILLS\n';
     csv += 'Name,Amount,Due Date,Category,Auto Pay,Is Paid\n';
     data.bills.forEach(b => {
       csv += `"${b.name}",${b.amount},"${b.dueDate}",${b.category},${b.autoPay},${b.isPaid}\n`;
     });
-
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -80,31 +261,6 @@ export const Settings: React.FC = () => {
 
   const handleDelete = () => {
     if (!confirmDelete || deleteType === 'none') return;
-
-    switch (deleteType) {
-      case 'all_transactions':
-        console.log('Delete all transactions');
-        break;
-      case 'recent_transactions':
-        console.log(`Delete transactions from last ${monthsToDelete} months`);
-        break;
-      case 'accounts':
-        console.log('Delete all accounts');
-        break;
-      case 'investments':
-        console.log('Delete all investments');
-        break;
-      case 'debts':
-        console.log('Delete all debts');
-        break;
-      case 'bills':
-        console.log('Delete all bills');
-        break;
-      case 'factory_reset':
-        console.log('Factory reset - delete all data');
-        break;
-    }
-
     setDeleteSuccess(true);
     setConfirmDelete(false);
     setDeleteType('none');
@@ -121,6 +277,16 @@ export const Settings: React.FC = () => {
     { value: 'bills', label: 'All Bills' },
     { value: 'factory_reset', label: 'Factory Reset (Delete Everything)' },
   ];
+
+  const isPulling = pullPhase !== 'idle' && pullPhase !== 'done';
+  const phaseLabel: Record<PullPhase, string> = {
+    idle: 'Pull Historic Price Data',
+    scanning: 'Scanning transactions...',
+    cache_check: 'Checking cache...',
+    compiling: 'Compiling requests...',
+    pulling: 'Pulling data...',
+    done: 'Pull Complete',
+  };
 
   return (
     <div className="p-12 max-w-4xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -158,30 +324,23 @@ export const Settings: React.FC = () => {
       </div>
 
       <div className="space-y-8">
+        {/* Export */}
         <div className="border border-white/5 rounded-sm p-8 bg-[#161618]">
           <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
             <Download size={18} />
             Export Data
           </h3>
-
           <div className="space-y-4">
             <div>
               <p className="text-sm text-iron-dust mb-3">Export all your financial data as CSV for use in spreadsheets</p>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors"
-              >
+              <button onClick={handleExportCSV} className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors">
                 <Download size={14} />
                 Export as CSV
               </button>
             </div>
-
             <div>
               <p className="text-sm text-iron-dust mb-3">Export complete backup as JSON for archiving or migration</p>
-              <button
-                onClick={handleExportJSON}
-                className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors"
-              >
+              <button onClick={handleExportJSON} className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors">
                 <Download size={14} />
                 Export as JSON
               </button>
@@ -189,41 +348,110 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
+        {/* Import + Historic Pull */}
         <div className="border border-white/5 rounded-sm p-8 bg-[#161618]">
           <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
             <Upload size={18} />
             Import Data
           </h3>
 
-          <div>
-            <p className="text-sm text-iron-dust mb-4">Import a previously exported JSON backup to restore your data</p>
-            <label className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors cursor-pointer w-fit">
-              <Upload size={14} />
-              Choose File
-              <input type="file" accept=".json" className="hidden" onChange={() => {}} />
-            </label>
+          <div className="space-y-8">
+            {/* JSON import */}
+            <div>
+              <p className="text-sm text-iron-dust mb-4">Import a previously exported JSON backup to restore your data</p>
+              <label className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors cursor-pointer w-fit">
+                <Upload size={14} />
+                Choose File
+                <input type="file" accept=".json" className="hidden" onChange={() => {}} />
+              </label>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-white/5" />
+
+            {/* Historic price pull */}
+            <div>
+              <div className="flex items-start justify-between mb-1">
+                <div>
+                  <p className="text-sm font-bold text-white mb-1">Pull Historic Price Data</p>
+                  <p className="text-sm text-iron-dust">Backfills price history for all your investment holdings from each ticker's first transaction date. Skips tickers already cached.</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handlePullHistoricData}
+                disabled={isPulling}
+                className={clsx(
+                  'mt-4 flex items-center gap-2 px-6 py-3 rounded-sm text-sm font-bold uppercase tracking-wider border transition-all',
+                  isPulling
+                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed'
+                    : pullPhase === 'done'
+                    ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
+                    : 'bg-white/10 border-white/20 text-white hover:bg-white/15'
+                )}
+              >
+                {isPulling
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : pullPhase === 'done'
+                  ? <CheckCircle2 size={14} />
+                  : <Database size={14} />}
+                {phaseLabel[pullPhase]}
+              </button>
+
+              {/* Console output */}
+              {log.length > 0 && (
+                <div className="mt-4 bg-[#0a0b0c] border border-white/8 rounded-sm overflow-hidden">
+                  {/* Console header bar */}
+                  <div className="flex items-center gap-2 px-4 py-2 bg-[#111314] border-b border-white/5">
+                    <div className="flex gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
+                    </div>
+                    <span className="text-[10px] font-mono text-iron-dust/50 ml-2 uppercase tracking-widest">lithos price history console</span>
+                    {isPulling && <Loader2 size={10} className="animate-spin text-blue-400 ml-auto" />}
+                    {pullPhase === 'done' && <CheckCircle2 size={10} className="text-emerald-vein ml-auto" />}
+                  </div>
+
+                  {/* Log lines */}
+                  <div
+                    ref={logRef}
+                    className="max-h-[340px] overflow-y-auto custom-scrollbar p-4 space-y-0.5 font-mono text-[11px] leading-relaxed"
+                  >
+                    {log.map(entry => (
+                      <div
+                        key={entry.id}
+                        className={clsx(
+                          entry.type === 'heading' && 'text-blue-400 font-bold',
+                          entry.type === 'success' && 'text-emerald-vein',
+                          entry.type === 'error' && 'text-magma',
+                          entry.type === 'info' && 'text-white/80',
+                          entry.type === 'dim' && 'text-white/20',
+                        )}
+                      >
+                        {entry.text || '\u00a0'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* Delete */}
         <div className="border border-red-900/30 rounded-sm p-8 bg-red-900/5">
           <h3 className="text-lg font-bold text-red-400 mb-6 flex items-center gap-2">
             <Trash2 size={18} />
             Delete Data
           </h3>
-
           <div className="space-y-4">
             <p className="text-sm text-iron-dust">Permanently delete specific data. This action cannot be undone.</p>
-
             <div>
-              <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
-                Select Data to Delete
-              </label>
+              <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Select Data to Delete</label>
               <select
                 value={deleteType}
-                onChange={e => {
-                  setDeleteType(e.target.value);
-                  setConfirmDelete(false);
-                }}
+                onChange={e => { setDeleteType(e.target.value); setConfirmDelete(false); }}
                 className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
               >
                 {deleteOptions.map(opt => (
@@ -231,62 +459,40 @@ export const Settings: React.FC = () => {
                 ))}
               </select>
             </div>
-
             {deleteType === 'recent_transactions' && (
               <div>
-                <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
-                  Months to Delete
-                </label>
+                <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Months to Delete</label>
                 <input
-                  type="number"
-                  min="1"
-                  max="120"
-                  value={monthsToDelete}
+                  type="number" min="1" max="120" value={monthsToDelete}
                   onChange={e => setMonthsToDelete(parseInt(e.target.value))}
                   className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
                 />
               </div>
             )}
-
             {deleteType !== 'none' && deleteType !== 'factory_reset' && (
               <div className="bg-yellow-900/10 border border-yellow-900/30 rounded-sm p-4 flex gap-3">
                 <AlertCircle size={16} className="text-yellow-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-yellow-600">
-                  This will permanently delete the selected data. Make sure you have a backup.
-                </div>
+                <div className="text-sm text-yellow-600">This will permanently delete the selected data. Make sure you have a backup.</div>
               </div>
             )}
-
             {deleteType === 'factory_reset' && (
               <div className="bg-red-900/20 border border-red-900/50 rounded-sm p-4 flex gap-3">
                 <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-red-400">
-                  This will delete ALL your financial data including transactions, accounts, debts, bills, and investments. This action is permanent and cannot be undone.
-                </div>
+                <div className="text-sm text-red-400">This will delete ALL your financial data including transactions, accounts, debts, bills, and investments. This action is permanent and cannot be undone.</div>
               </div>
             )}
-
             {deleteType !== 'none' && (
               <div className="flex gap-3">
                 {!confirmDelete ? (
-                  <button
-                    onClick={() => setConfirmDelete(true)}
-                    className="px-6 py-3 bg-red-900/20 border border-red-900/30 text-red-400 rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-red-900/30 transition-colors"
-                  >
+                  <button onClick={() => setConfirmDelete(true)} className="px-6 py-3 bg-red-900/20 border border-red-900/30 text-red-400 rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-red-900/30 transition-colors">
                     Confirm Delete
                   </button>
                 ) : (
                   <>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      className="px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors"
-                    >
+                    <button onClick={() => setConfirmDelete(false)} className="px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors">
                       Cancel
                     </button>
-                    <button
-                      onClick={handleDelete}
-                      className="px-6 py-3 bg-red-600 border border-red-600 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-red-700 transition-colors"
-                    >
+                    <button onClick={handleDelete} className="px-6 py-3 bg-red-600 border border-red-600 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-red-700 transition-colors">
                       Delete Permanently
                     </button>
                   </>
@@ -299,9 +505,7 @@ export const Settings: React.FC = () => {
         {deleteSuccess && (
           <div className="bg-emerald-900/10 border border-emerald-900/30 rounded-sm p-4 flex gap-3 animate-in fade-in">
             <Check size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-emerald-400">
-              Data deleted successfully
-            </div>
+            <div className="text-sm text-emerald-400">Data deleted successfully</div>
           </div>
         )}
       </div>
