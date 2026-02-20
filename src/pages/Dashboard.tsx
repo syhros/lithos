@@ -70,8 +70,20 @@ const GridBox: React.FC<{
     );
 };
 
-const ActivityItem: React.FC<{ title: string; subtitle: string; amount: number; currencySymbol: string }> = ({ title, subtitle, amount, currencySymbol }) => {
-    const isPositive = amount > 0;
+const ActivityItem: React.FC<{ title: string; subtitle: string; amount: number; type: string; category: string; currencySymbol: string }> = ({ title, subtitle, amount, type, category, currencySymbol }) => {
+    // Determine display sign identical to Transactions page rules
+    const abs = Math.abs(amount);
+    let prefix = '';
+    let isPositive = false;
+    if (type === 'income') { prefix = '+'; isPositive = true; }
+    else if (type === 'expense') { prefix = '-'; isPositive = false; }
+    else if (type === 'investing') {
+        const cat = (category || '').toLowerCase();
+        if (cat === 'sell' || cat === 'dividend') { prefix = '+'; isPositive = true; }
+        else { prefix = ''; isPositive = false; }
+    } else if (type === 'debt_payment') { prefix = '-'; isPositive = false; }
+    else { prefix = amount > 0 ? '+' : '-'; isPositive = amount > 0; }
+
     const truncatedTitle = title.length > 24 ? title.substring(0, 24) + '...' : title;
     return (
         <div className="flex justify-between items-center py-4 border-b border-white/5 last:border-0 group cursor-pointer hover:bg-white/[0.02] px-2 -mx-2 rounded-sm transition-colors">
@@ -85,7 +97,7 @@ const ActivityItem: React.FC<{ title: string; subtitle: string; amount: number; 
                 </div>
             </div>
             <div className={`font-mono text-xs font-bold ${isPositive ? 'text-emerald-vein' : 'text-white'}`}>
-                {amount > 0 ? '+' : ''}{currencySymbol}{Math.abs(amount).toFixed(2)}
+                {prefix}{currencySymbol}{abs.toFixed(2)}
             </div>
         </div>
     );
@@ -137,6 +149,7 @@ export const Dashboard: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
   const [visibleSeries, setVisibleSeries] = useState({ netWorth: true, assets: false, debts: false });
 
+  // Use getTotalNetWorth() which is the same calculation the chart uses (assets - debts via currentBalances)
   const currentNetWorth = getTotalNetWorth();
 
   const { displayValue, isPulsing } = useSyncedCounter(currentNetWorth, loading, 'lithos_net_worth');
@@ -184,8 +197,14 @@ export const Dashboard: React.FC = () => {
     });
   }, [data.transactions, currentPrices, data.user.currency, gbpUsdRate]);
 
-  const totalInvestmentBalance  = useMemo(() => holdings.reduce((sum, h) => sum + h.currentValue, 0), [holdings]);
-  const totalLiabilitiesBalance = useMemo(() => data.debts.reduce((sum, d) => sum + d.startingValue, 0), [data.debts]);
+  const totalInvestmentBalance = useMemo(() => holdings.reduce((sum, h) => sum + h.currentValue, 0), [holdings]);
+
+  // Liabilities: use currentBalances (includes transaction adjustments) so it matches getTotalNetWorth()
+  const debtIdSet = useMemo(() => new Set(data.debts.map(d => d.id)), [data.debts]);
+  const totalLiabilitiesBalance = useMemo(() =>
+    data.debts.reduce((sum, d) => sum + (currentBalances[d.id] ?? d.startingValue), 0),
+    [data.debts, currentBalances]
+  );
 
   const accountsPL = useMemo(() => {
     const totalStarting = [...checkingAccounts, ...savingsAccounts].reduce((s, a) => s + a.startingValue, 0);
@@ -216,6 +235,14 @@ export const Dashboard: React.FC = () => {
       .slice(0, 6)
       .map(({ bill }) => <BillItem key={bill.id} name={bill.name} date={getNextBillDueDate(bill)} amount={bill.amount} currencySymbol={currencySymbol} />)
   , [data.bills, currencySymbol]);
+
+  // Activity log: sort by transaction date descending, take most recent 6
+  const recentTransactions = useMemo(() =>
+    [...data.transactions]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 6),
+    [data.transactions]
+  );
 
   const isLoading = loading && data.assets.length === 0 && data.transactions.length === 0;
   const isEmpty   = data.assets.length === 0;
@@ -271,7 +298,7 @@ export const Dashboard: React.FC = () => {
                     "text-[6.5rem] font-black leading-none tracking-[-4px] text-white",
                     isPulsing && "animate-pulse-opacity"
                 )}>
-                    {currencySymbol}{parseInt(nwInt.replace(/,/g, '')).toLocaleString()}
+                    {currentNetWorth < 0 ? '-' : ''}{currencySymbol}{Math.abs(parseInt(nwInt.replace(/[^0-9]/g, ''))).toLocaleString()}
                     <span className="font-light opacity-30 text-[4rem] tracking-normal">.{nwDec}</span>
                 </h1>
             </div>
@@ -334,8 +361,16 @@ export const Dashboard: React.FC = () => {
                     <Link to="/transactions" className="text-[10px] font-bold uppercase tracking-wider text-magma hover:text-white transition-colors">View All</Link>
                 </div>
                 <div className="space-y-1">
-                    {data.transactions.slice(0, 6).map(tx => (
-                        <ActivityItem key={tx.id} title={tx.description.split('-')[0].trim()} subtitle={tx.category} amount={tx.amount} currencySymbol={currencySymbol} />
+                    {recentTransactions.map(tx => (
+                        <ActivityItem
+                            key={tx.id}
+                            title={tx.description.split('-')[0].trim()}
+                            subtitle={tx.category}
+                            amount={tx.amount}
+                            type={tx.type}
+                            category={tx.category}
+                            currencySymbol={currencySymbol}
+                        />
                     ))}
                 </div>
             </div>

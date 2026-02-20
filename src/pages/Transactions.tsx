@@ -10,10 +10,6 @@ import { Transaction } from '../data/mockData';
 
 type SortOption = 'newest' | 'oldest' | 'amount-high' | 'amount-low';
 
-// For investing rows, 'category' in the DB stores Buy/Sell/Dividend.
-// We display that as the Category badge and show a separate 'Type' pill
-// (Stock/ETF/Crypto etc) — but since assetType isn't stored separately in
-// the DB, we fall back to showing the transaction type label instead.
 const TYPE_LABELS: Record<string, string> = {
   income: 'Income',
   expense: 'Expense',
@@ -28,6 +24,53 @@ const TYPE_COLORS: Record<string, string> = {
   investing: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
   transfer: 'text-iron-dust bg-white/5 border-white/10',
   debt_payment: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
+};
+
+/**
+ * Returns the signed display amount and colour class for the Amount column.
+ *
+ * Rules:
+ *   income          → always positive  (+)  emerald
+ *   expense         → always negative  (-)  white (cost)
+ *   investing buy   → neutral (no sign)     white
+ *   investing sell  → positive (+)          emerald
+ *   debt_payment    → negative (-)          white (money leaving)
+ *   transfer        → use raw sign          emerald if positive, white if negative
+ */
+const getDisplayAmount = (
+  tx: Transaction
+): { value: number; prefix: string; colorClass: string } => {
+  const abs = Math.abs(tx.amount);
+
+  switch (tx.type) {
+    case 'income':
+      return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
+
+    case 'expense':
+      return { value: abs, prefix: '-', colorClass: 'text-white' };
+
+    case 'investing': {
+      // category stores 'Buy' / 'Sell' / 'Dividend'
+      const cat = (tx.category || '').toLowerCase();
+      if (cat === 'sell' || cat === 'dividend') {
+        return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
+      }
+      // Buy — neutral, no sign
+      return { value: abs, prefix: '', colorClass: 'text-white' };
+    }
+
+    case 'debt_payment':
+      return { value: abs, prefix: '-', colorClass: 'text-white' };
+
+    case 'transfer':
+      // Transfer rows are stored with the sign that reflects the account impact
+      if (tx.amount > 0) return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
+      return { value: abs, prefix: '-', colorClass: 'text-white' };
+
+    default:
+      if (tx.amount > 0) return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
+      return { value: abs, prefix: '-', colorClass: 'text-white' };
+  }
 };
 
 export const Transactions: React.FC = () => {
@@ -56,7 +99,7 @@ export const Transactions: React.FC = () => {
       return matchesSearch && matchesType;
     });
 
-    const sorted = [...filtered].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'newest':
           return new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -70,8 +113,6 @@ export const Transactions: React.FC = () => {
           return 0;
       }
     });
-
-    return sorted;
   }, [data.transactions, search, filterType, sortBy]);
 
   const allSelected = filteredTransactions.length > 0 && filteredTransactions.every(tx => selectedIds.has(tx.id));
@@ -231,6 +272,7 @@ export const Transactions: React.FC = () => {
                 const isSelected = selectedIds.has(tx.id);
                 const typeLabel = TYPE_LABELS[tx.type] ?? tx.type;
                 const typeColor = TYPE_COLORS[tx.type] ?? 'text-iron-dust bg-white/5 border-white/10';
+                const { value, prefix, colorClass } = getDisplayAmount(tx);
                 return (
                   <tr
                     key={tx.id}
@@ -258,23 +300,18 @@ export const Transactions: React.FC = () => {
                            {accountMap[tx.accountId] || 'Unknown'}
                        </span>
                     </td>
-                    {/* Type column — coloured pill showing transaction type */}
                     <td className="py-4 px-6">
                       <span className={clsx('inline-flex items-center px-2 py-1 rounded-sm text-[10px] font-mono font-bold border uppercase', typeColor)}>
                         {typeLabel}
                       </span>
                     </td>
-                    {/* Category column — for investing rows shows Buy/Sell/Dividend */}
                     <td className="py-4 px-6">
                       <span className="inline-flex items-center px-2 py-1 rounded-sm text-[10px] font-mono bg-white/5 text-iron-dust border border-white/5 uppercase">
                         {tx.category}
                       </span>
                     </td>
-                    <td className={clsx(
-                      'py-4 px-6 text-sm font-mono font-bold text-right',
-                      tx.amount > 0 ? 'text-emerald-vein' : 'text-white'
-                    )}>
-                      {tx.amount > 0 ? '+' : ''}{currencySymbol}{Math.abs(tx.amount).toFixed(2)}
+                    <td className={clsx('py-4 px-6 text-sm font-mono font-bold text-right', colorClass)}>
+                      {prefix}{currencySymbol}{value.toFixed(2)}
                     </td>
                     <td className="py-4 px-6 text-right">
                       {!selectMode && (
