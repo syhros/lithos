@@ -3,7 +3,7 @@ import { X, TrendingUp, TrendingDown, Pencil, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance } from '../context/FinanceContext';
 import { Asset, Currency } from '../data/mockData';
 
 interface InvestmentAccountModalProps {
@@ -13,6 +13,18 @@ interface InvestmentAccountModalProps {
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
+
+// Returns a display-friendly price string for a holding.
+// GBX raw prices (pence) are shown as both Xp and £X/100.
+// USD shown as $X. GBP shown as £X.
+const formatHoldingPrice = (rawPrice: number, currency: string): string => {
+  if (currency === 'GBX') {
+    const gbp = rawPrice / 100;
+    return `${rawPrice.toFixed(2)}p (\u00a3${gbp.toFixed(4)})`;
+  }
+  if (currency === 'USD') return `$${rawPrice.toFixed(2)}`;
+  return `\u00a3${rawPrice.toFixed(2)}`;
+};
 
 export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ isOpen, onClose, account }) => {
   const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol, gbpUsdRate } = useFinance();
@@ -65,7 +77,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
           cur.quantity += tx.quantity;
         } else {
           cur.quantity += tx.quantity;
-          cur.totalCost += Math.abs(tx.amount);
+          cur.totalCost += Math.abs(tx.amount); // tx.amount is always in GBP
         }
 
         map.set(tx.symbol, cur);
@@ -74,26 +86,37 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
+      const isGbx = h.currency === 'GBX';
       const isUsd = h.currency === 'USD';
       const fxRate = (isUsd && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
-      const nativePrice = marketData?.price || 0;
-      const displayPrice = nativePrice * fxRate;
-      const currentValue = h.quantity * displayPrice;
+
+      // rawNativePrice: price as returned by API (pence for GBX, USD for USD, GBP for GBP)
+      const rawNativePrice = marketData?.price || 0;
+      // displayPrice: always in GBP for portfolio value calculations
+      const displayPrice = isGbx ? rawNativePrice / 100 : rawNativePrice * fxRate;
+      const currentValue = h.quantity * displayPrice; // GBP
+
+      // profitValue is GBP vs GBP (totalCost is already in GBP)
       const profitValue = currentValue - h.totalCost;
       const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
+      // avgCostGbp: GBP cost per share
+      const avgCostGbp = h.quantity > 0 ? h.totalCost / h.quantity : 0;
+
       return {
         ...h,
-        nativePrice,
+        rawNativePrice,
         displayPrice,
         currentValue,
         profitValue,
         profitPercent,
         marketData,
-        nativeSymbol: getCurrencySymbol(h.currency),
+        avgCostGbp,
+        isGbx,
+        isUsd,
       };
     }).sort((a, b) => b.currentValue - a.currentValue);
-  }, [account, data.transactions, currentPrices]);
+  }, [account, data.transactions, currentPrices, gbpUsdRate]);
 
   const totalCost = holdings.reduce((s, h) => s + h.totalCost, 0);
   const totalValue = holdings.reduce((s, h) => s + h.currentValue, 0);
@@ -130,9 +153,11 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
       Object.entries(holdingQtys).forEach(([sym, qty]) => {
         const hist = historicalPrices[sym] || {};
         const dateStr = format(date, 'yyyy-MM-dd');
-        const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
+        let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
         const isUsd = symbolCurrencies[sym] === 'USD';
+        const isGbx = symbolCurrencies[sym] === 'GBX';
         const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+        if (isGbx) price = price / 100;
         val += qty * price * fxRate;
       });
 
@@ -143,7 +168,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
         value: val > 0 ? parseFloat(val.toFixed(2)) : lastKnownValue,
       };
     });
-  }, [account, data.transactions, historicalPrices, currentPrices, balance]);
+  }, [account, data.transactions, historicalPrices, currentPrices, balance, gbpUsdRate]);
 
   const firstVal = chartData[0]?.value ?? 0;
   const lastVal = chartData[chartData.length - 1]?.value ?? 0;
@@ -170,15 +195,15 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
           </div>
           <div className="flex items-center gap-6">
             <div className="text-right">
-              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Account Value</span>
+              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Account Value (GBP)</span>
               <span className="text-2xl font-bold text-white tracking-tight">
                 {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
             <div className="text-right">
-              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Total Return</span>
+              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Total Return (GBP)</span>
               <span className={clsx('text-xl font-bold font-mono', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                {isProfit ? '+' : ''}{currencySymbol}{totalProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                {isProfit ? '+' : ''}{currencySymbol}{totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
             <button
@@ -221,9 +246,9 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                   <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Currency</label>
                   <select value={editCurrency} onChange={e => setEditCurrency(e.target.value as Currency)}
                     className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                    <option value="GBP">GBP (£)</option>
+                    <option value="GBP">GBP (\u00a3)</option>
                     <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
+                    <option value="EUR">EUR (\u20ac)</option>
                   </select>
                 </div>
                 <div>
@@ -276,11 +301,11 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                   tickLine={false}
                   axisLine={false}
                   domain={[chartMin, 'auto']}
-                  tickFormatter={val => `${currencySymbol}${(val / 1000).toFixed(0)}k`}
+                  tickFormatter={val => `${currencySymbol}${(val / 1000).toFixed(1)}k`}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1a1c1e', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '11px', fontFamily: 'JetBrains Mono' }}
-                  formatter={(val: number) => [`${currencySymbol}${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, 'Value']}
+                  formatter={(val: number) => [`${currencySymbol}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Value (GBP)']}
                 />
                 <Area type="monotone" dataKey="value" stroke={chartColor} strokeWidth={2} fill="url(#invAcctGrad)" dot={false} />
               </AreaChart>
@@ -293,12 +318,12 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
               <span className="text-lg font-bold text-white">{holdings.length}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Total Invested</span>
-              <span className="text-sm font-mono text-white">{currencySymbol}{totalCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Total Invested (GBP)</span>
+              <span className="text-sm font-mono text-white">{currencySymbol}{totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Market Value</span>
-              <span className="text-sm font-mono text-white">{currencySymbol}{totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Market Value (GBP)</span>
+              <span className="text-sm font-mono text-white">{currencySymbol}{totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <div className={clsx('p-4 rounded-sm border', isProfit ? 'bg-emerald-vein/5 border-emerald-vein/20' : 'bg-magma/5 border-magma/20')}>
               <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Return %</span>
@@ -328,10 +353,14 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-center mb-1">
                         <span className="text-sm font-bold text-white">{h.symbol}</span>
-                        <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        {/* currentValue is always GBP */}
+                        <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-[9px] font-mono text-iron-dust">{h.quantity.toFixed(8)} shares · {h.nativeSymbol}{h.nativePrice.toFixed(2)} {h.currency}</span>
+                        {/* Show native price with correct symbol */}
+                        <span className="text-[9px] font-mono text-iron-dust">
+                          {h.quantity.toFixed(4)} shares \u00b7 {formatHoldingPrice(h.rawNativePrice, h.currency)}
+                        </span>
                         <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', hp ? 'text-emerald-vein' : 'text-magma')}>
                           {hp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
                           {hp ? '+' : ''}{h.profitPercent.toFixed(2)}%

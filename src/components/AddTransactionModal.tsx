@@ -276,8 +276,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             accountId: accountId
         });
         // 2. Reduction of Debt (Debt Account)
-        // In this system, Debt accounts have positive balances (Liability).
-        // A payment reduces the liability, so it is a NEGATIVE transaction on the Debt account.
         addTransaction({
             date: fullDate,
             description: `Payment from ${getAccountName(accountId)}`,
@@ -292,14 +290,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         addTransaction({
             date: fullDate,
             description: assetName,
-            amount: amountNum, // stored in GBP
+            amount: amountNum, // stored in GBP (auto-calculated from price, including /100 for GBX)
             type: 'investing',
             category: assetType,
             accountId: accountId,
             symbol: ticker.toUpperCase(),
             quantity: parseFloat(shares),
-            price: nativePrice,        // native currency price
-            currency: investCurrency,  // native currency of the asset
+            price: nativePrice,        // native currency price (pence for GBX)
+            currency: investCurrency,  // 'GBX', 'USD', 'GBP', etc.
         });
 
     } else {
@@ -326,6 +324,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const isInvesting = type === 'investing';
   const isTransfer = type === 'transfer';
   const isDebtPayment = type === 'debt_payment';
+  const isGbxInvest = investCurrency === 'GBX';
+
+  // Price symbol for Price/Share input (native to the stock)
+  const priceSymbol = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
+
+  // Computed native total (before GBP conversion) for display in hint
+  const nativeTotal = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -349,7 +354,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             <div className="bg-magma/10 border border-magma/50 rounded-sm p-3">
               <ul className="text-xs text-magma space-y-1">
                 {validationErrors.map((error, i) => (
-                  <li key={i}>• {error}</li>
+                  <li key={i}>\u2022 {error}</li>
                 ))}
               </ul>
             </div>
@@ -443,17 +448,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                             onChange={e => setInvestCurrency(e.target.value as Currency)}
                             className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
                         >
-                            <option value="GBP">GBP (£)</option>
+                            <option value="GBP">GBP (\u00a3)</option>
                             <option value="USD">USD ($)</option>
-                            <option value="EUR">EUR (€)</option>
+                            <option value="EUR">EUR (\u20ac)</option>
                             <option value="GBX">GBX (p)</option>
                         </select>
                     </div>
                     <div className="col-span-12 md:col-span-3">
-                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
+                         <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share {isGbxInvest ? '(pence)' : ''}</label>
                          <div className="relative">
                             <span className="absolute left-3 top-3 text-iron-dust text-xs">
-                                {investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : investCurrency === 'GBX' ? 'p' : '£'}
+                                {priceSymbol}
                             </span>
                             <input
                                 type="number"
@@ -669,20 +674,21 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           {isInvesting && (
              <div className="bg-white/5 p-4 rounded-sm border border-white/10 flex justify-between items-center">
                 <div>
-                    <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost</span>
+                    <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost (GBP)</span>
                     {investCurrency === 'USD' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{(gbpUsdRate > 0 ? (1 / gbpUsdRate).toFixed(4) : '0.0000')}
+                            ${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}
                         </span>
                     )}
-                    {investCurrency === 'GBX' && shares && pricePerShare && (
+                    {isGbxInvest && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
-                            {(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(0)}p = {currencySymbol}{(parseFloat(shares) * parseFloat(pricePerShare) / 100 || 0).toFixed(2)}
+                            {nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}
                         </span>
                     )}
                 </div>
                 <div className="flex items-center gap-2">
                      <Calculator size={14} className="text-magma" />
+                     {/* Amount is always in GBP */}
                      <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
                 </div>
             </div>
