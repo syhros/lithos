@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
@@ -51,6 +50,7 @@ export const Investments: React.FC = () => {
             const marketData = currentPrices[h.symbol];
             const nativeCurrency = marketData?.currency || data.transactions.find(t => t.symbol === h.symbol && t.currency)?.currency || 'GBP';
             const stockIsUsd = nativeCurrency === 'USD';
+            const stockIsGbx = nativeCurrency === 'GBX';
             const userIsUsd = userCurrency === 'USD';
 
             let fxRate = 1;
@@ -59,15 +59,20 @@ export const Investments: React.FC = () => {
               if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
             }
 
+            // nativePrice: raw price from API (pence for GBX, USD for USD, GBP for GBP)
             let nativePrice = marketData ? marketData.price : 0;
-            if (nativeCurrency === 'GBX') {
-              nativePrice = nativePrice / 100;
+            
+            // displayPrice: always in GBP for portfolio value calculations
+            let displayPrice = nativePrice;
+            if (stockIsGbx) {
+              displayPrice = nativePrice / 100;
+            } else {
+              displayPrice = nativePrice * fxRate;
             }
-            const displayPrice = nativePrice * fxRate;
-            const currentValue = h.quantity * displayPrice;
-            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-            const avgPrice = (gbpUsdRate > 0 && stockIsUsd && !userIsUsd) ? avgPriceCost * fxRate : (stockIsUsd === userIsUsd ? avgPriceCost : (gbpUsdRate > 0 ? avgPriceCost / fxRate : avgPriceCost));
-            const profitValue = currentValue - h.totalCost;
+
+            const currentValue = h.quantity * displayPrice; // GBP
+            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0; // GBP per share
+            const profitValue = currentValue - h.totalCost; // GBP
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
 
@@ -78,9 +83,22 @@ export const Investments: React.FC = () => {
             const todayPrice = history[today] || nativePrice;
             const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
 
-            return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate, dailyChangePercent };
+            return {
+                ...h,
+                nativeCurrency,
+                nativePrice,       // raw native price (pence for GBX)
+                displayPrice,      // GBP-converted price
+                currentValue,      // GBP
+                avgPrice: avgPriceCost, // GBP per share
+                profitValue,       // GBP
+                profitPercent,
+                isZeroCost,
+                marketData,
+                fxRate,
+                dailyChangePercent
+            };
         }).sort((a, b) => b.currentValue - a.currentValue);
-    }, [data.transactions, currentPrices, gbpUsdRate]);
+    }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -368,7 +386,7 @@ export const Investments: React.FC = () => {
                                     <div className="text-right">
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>
                                         <span className="font-mono text-[10px] text-white">
-                                          {stock.nativeCurrency === 'GBX' ? `${(stock.nativePrice * 100).toFixed(0)}p` : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
+                                          {stock.nativeCurrency === 'GBX' ? `${stock.nativePrice.toFixed(2)}p` : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
                                         </span>
                                     </div>
                                     <div>
