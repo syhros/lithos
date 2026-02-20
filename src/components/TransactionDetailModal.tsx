@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, TrendingUp, TrendingDown, ArrowLeftRight, CreditCard, Landmark, BarChart2, Trash2, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance } from '../context/FinanceContext';
+import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { Transaction } from '../data/mockData';
 import { AddTransactionModal } from './AddTransactionModal';
 
@@ -41,6 +41,20 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
 
   const fmtMoney = (n: number, sym = currencySymbol) =>
     `${sym}${Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Format price/share correctly in native currency.
+  // GBX: show as "Xp" (no £ prefix, pence suffix)
+  // USD: "$X"
+  // EUR: "€X"
+  // GBP: "£X"
+  const formatNativePrice = (price: number, currency: string | undefined): string => {
+    const cur = currency || 'GBP';
+    if (cur === 'GBX') {
+      return `${price.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}p`;
+    }
+    const sym = getCurrencySymbol(cur);
+    return `${sym}${price.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   const handleDelete = () => {
     onDelete?.(transaction.id);
@@ -101,7 +115,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
               {transaction.price !== undefined && (
                 <DetailRow
                   label="Price / Share"
-                  value={fmtMoney(transaction.price, transaction.currency === 'USD' ? '$' : transaction.currency === 'EUR' ? '€' : '£')}
+                  value={formatNativePrice(transaction.price, transaction.currency)}
                   mono
                 />
               )}

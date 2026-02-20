@@ -58,21 +58,28 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 export const getCurrencySymbol = (currency: string): string => {
     switch (currency) {
         case 'USD': return '$';
-        case 'EUR': return '€';
+        case 'EUR': return '\u20ac';
         case 'GBX': return 'p';
-        default: return '£';
+        default: return '\u00a3';
     }
 };
 
 // Derive the native currency for a symbol from transaction records.
-// This is the ground truth — the live API may return 'GBP' for GBX
-// stocks, so we always prefer the value stored on the transaction.
 const getCurrencyFromTransactions = (
   symbol: string,
   transactions: Transaction[]
 ): string => {
   const tx = transactions.find(t => t.symbol === symbol && t.currency);
   return tx?.currency || 'GBP';
+};
+
+// Get the earliest transaction date for a symbol (ISO date string yyyy-MM-dd)
+const getEarliestTxDate = (symbol: string, transactions: Transaction[]): string => {
+  const txs = transactions.filter(t => t.symbol === symbol && t.date);
+  if (txs.length === 0) return format(subDays(new Date(), 365), 'yyyy-MM-dd');
+  const earliest = txs.reduce((min, t) => (t.date < min ? t.date : min), txs[0].date);
+  // Strip time component if present
+  return earliest.substring(0, 10);
 };
 
 const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
@@ -264,7 +271,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
 
       setLastUpdated(new Date());
-      // Pass mappedTransactions directly to avoid stale-closure race on first load
       await fetchMarketData(false, mappedTransactions);
 
       if (isInitialLoad) {
@@ -283,8 +289,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const fetchMarketData = async (force: boolean = false, txOverride?: Transaction[]) => {
     try {
-      // Use the passed transactions (from loadUserData before state settles)
-      // or fall back to state — this avoids stale-closure issues on first load.
       const activeTxs = txOverride ?? data.transactions;
 
       const uniqueSymbols = Array.from(new Set(
@@ -295,12 +299,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (uniqueSymbols.length === 0) return;
 
-      // Build a map of symbol → currency from transaction records.
-      // This is the source of truth — it correctly captures GBX for UK
-      // stocks that some APIs report as GBP.
+      // Build symbol -> currency map from transaction records (ground truth)
       const symbolCurrencyMap: Record<string, string> = {};
       uniqueSymbols.forEach(sym => {
         symbolCurrencyMap[sym] = getCurrencyFromTransactions(sym, activeTxs);
+      });
+
+      // Build symbol -> earliest transaction date map
+      // Used as the `from` param for price-history fetches so we get
+      // data covering the full holding period, not just the last year.
+      const symbolFromDateMap: Record<string, string> = {};
+      uniqueSymbols.forEach(sym => {
+        symbolFromDateMap[sym] = getEarliestTxDate(sym, activeTxs);
       });
 
       const lastSync = localStorage.getItem('lithos_last_sync');
@@ -319,8 +329,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
           if (res.ok) {
             const rawPrices = await res.json();
-            // Override the currency from the API with our transaction-derived
-            // truth so GBX stocks are never misclassified as GBP.
             uniqueSymbols.forEach(sym => {
               if (rawPrices[sym]) {
                 fetchedPrices[sym] = {
@@ -332,7 +340,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             liveApiAvailable = true;
           }
         } catch (e) {
-          // Fallback: use local reference prices, but use transaction-derived currency.
           uniqueSymbols.forEach(sym => {
             const base = fallbackPrices[sym] || 100;
             const jitter = (Math.random() * 4) - 2;
@@ -352,11 +359,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, number> = {};
 
+          // Use the earliest transaction date for this symbol as the
+          // start of the history request — ensures full holding-period coverage.
+          const fromDate = symbolFromDateMap[sym];
+
           if (liveApiAvailable) {
             try {
               const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
               const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=1900-01-01`, {
+              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${fromDate}`, {
                 headers: { 'Authorization': `Bearer ${supabaseKey}` }
               });
               if (hRes.ok) {
@@ -381,6 +392,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   .from('price_history_cache')
                   .select('date, close')
                   .eq('symbol', sym)
+                  .gte('date', fromDate)
                   .order('date', { ascending: true })
                   .range(offset, offset + pageSize - 1);
 
@@ -439,8 +451,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   useEffect(() => {
-    // Restore cached prices — but on next load these will be overwritten
-    // by fetchMarketData with correctly-patched currencies.
     const cachedPrices = localStorage.getItem('lithos_current_prices');
     if (cachedPrices) {
       try {
@@ -491,14 +501,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const h = map.get(t.symbol)!;
         h.quantity += t.quantity || 0;
         h.totalCost += (t.amount || 0);
-        // Always keep the most recently seen currency for this symbol
         if (t.currency) h.currency = t.currency;
       });
 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
-      // Prefer transaction-derived currency over API-reported currency.
-      // The API may report 'GBP' for GBX stocks; transactions are ground truth.
       const nativeCurrency = h.currency || marketData?.currency || 'GBP';
       const stockIsUsd = nativeCurrency === 'USD';
       const stockIsGbx = nativeCurrency === 'GBX';
@@ -580,13 +587,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               holdings.set(t.symbol!, {
                 symbol: t.symbol,
                 quantity: 0,
-                // Use transaction currency as ground truth
                 currency: t.currency || 'GBP'
               });
             }
             const h = holdings.get(t.symbol!)!;
             h.quantity += t.quantity || 0;
-            // Keep updating currency in case later txs have it set
             if (t.currency) h.currency = t.currency;
           });
 
@@ -601,7 +606,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
 
             if (priceOnDate) {
-              // Prefer transaction currency over API currency
               const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
               const stockIsGbx = nativeCurrency === 'GBX';
