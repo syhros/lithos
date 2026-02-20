@@ -64,6 +64,17 @@ export const getCurrencySymbol = (currency: string): string => {
     }
 };
 
+// Derive the native currency for a symbol from transaction records.
+// This is the ground truth — the live API may return 'GBP' for GBX
+// stocks, so we always prefer the value stored on the transaction.
+const getCurrencyFromTransactions = (
+  symbol: string,
+  transactions: Transaction[]
+): string => {
+  const tx = transactions.find(t => t.symbol === symbol && t.currency);
+  return tx?.currency || 'GBP';
+};
+
 const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
     const history: Record<string, number> = {};
     const today = new Date();
@@ -253,7 +264,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
 
       setLastUpdated(new Date());
-      await fetchMarketData();
+      // Pass mappedTransactions directly to avoid stale-closure race on first load
+      await fetchMarketData(false, mappedTransactions);
 
       if (isInitialLoad) {
         const elapsed = Date.now() - startTime;
@@ -269,15 +281,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const fetchMarketData = async (force: boolean = false) => {
+  const fetchMarketData = async (force: boolean = false, txOverride?: Transaction[]) => {
     try {
+      // Use the passed transactions (from loadUserData before state settles)
+      // or fall back to state — this avoids stale-closure issues on first load.
+      const activeTxs = txOverride ?? data.transactions;
+
       const uniqueSymbols = Array.from(new Set(
-        data.transactions
+        activeTxs
           .filter(t => t.type === 'investing' && t.symbol)
           .map(t => t.symbol!)
       ));
 
       if (uniqueSymbols.length === 0) return;
+
+      // Build a map of symbol → currency from transaction records.
+      // This is the source of truth — it correctly captures GBX for UK
+      // stocks that some APIs report as GBP.
+      const symbolCurrencyMap: Record<string, string> = {};
+      uniqueSymbols.forEach(sym => {
+        symbolCurrencyMap[sym] = getCurrencyFromTransactions(sym, activeTxs);
+      });
 
       const lastSync = localStorage.getItem('lithos_last_sync');
       const now = Date.now();
@@ -294,10 +318,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             headers: { 'Authorization': `Bearer ${supabaseKey}` }
           });
           if (res.ok) {
-            fetchedPrices = await res.json();
+            const rawPrices = await res.json();
+            // Override the currency from the API with our transaction-derived
+            // truth so GBX stocks are never misclassified as GBP.
+            uniqueSymbols.forEach(sym => {
+              if (rawPrices[sym]) {
+                fetchedPrices[sym] = {
+                  ...rawPrices[sym],
+                  currency: symbolCurrencyMap[sym] || rawPrices[sym].currency || 'GBP',
+                };
+              }
+            });
             liveApiAvailable = true;
           }
         } catch (e) {
+          // Fallback: use local reference prices, but use transaction-derived currency.
           uniqueSymbols.forEach(sym => {
             const base = fallbackPrices[sym] || 100;
             const jitter = (Math.random() * 4) - 2;
@@ -305,7 +340,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               price: base + jitter,
               change: jitter,
               changePercent: 0,
-              currency: sym === 'TSLA' || sym === 'AAPL' || sym === 'NVDA' || sym === 'SPY' || sym === 'BTC-USD' ? 'USD' : 'GBP'
+              currency: symbolCurrencyMap[sym] || 'GBP',
             };
           });
         }
@@ -404,6 +439,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   useEffect(() => {
+    // Restore cached prices — but on next load these will be overwritten
+    // by fetchMarketData with correctly-patched currencies.
     const cachedPrices = localStorage.getItem('lithos_current_prices');
     if (cachedPrices) {
       try {
@@ -454,12 +491,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const h = map.get(t.symbol)!;
         h.quantity += t.quantity || 0;
         h.totalCost += (t.amount || 0);
+        // Always keep the most recently seen currency for this symbol
         if (t.currency) h.currency = t.currency;
       });
 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
-      const nativeCurrency = marketData?.currency || h.currency || 'GBP';
+      // Prefer transaction-derived currency over API-reported currency.
+      // The API may report 'GBP' for GBX stocks; transactions are ground truth.
+      const nativeCurrency = h.currency || marketData?.currency || 'GBP';
       const stockIsUsd = nativeCurrency === 'USD';
       const stockIsGbx = nativeCurrency === 'GBX';
       const userIsUsd = userCurrency === 'USD';
@@ -470,17 +510,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
-      // nativePrice: keep in native currency (pence for GBX, USD for USD, GBP for GBP)
-      let nativePrice = marketData ? marketData.price : 0;
-      
-      // displayPrice: convert to GBP for value calculations
+      const nativePrice = marketData ? marketData.price : 0;
+
       let displayPrice = nativePrice;
       if (stockIsGbx) {
-        displayPrice = nativePrice / 100; // Convert pence to pounds
+        displayPrice = nativePrice / 100;
       } else {
-        displayPrice = nativePrice * fxRate; // Apply FX rate for USD
+        displayPrice = nativePrice * fxRate;
       }
-      
+
       const currentValue = h.quantity * displayPrice;
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
@@ -542,11 +580,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               holdings.set(t.symbol!, {
                 symbol: t.symbol,
                 quantity: 0,
+                // Use transaction currency as ground truth
                 currency: t.currency || 'GBP'
               });
             }
             const h = holdings.get(t.symbol!)!;
             h.quantity += t.quantity || 0;
+            // Keep updating currency in case later txs have it set
+            if (t.currency) h.currency = t.currency;
           });
 
           Array.from(holdings.values()).forEach(h => {
@@ -560,8 +601,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
 
             if (priceOnDate) {
-              const marketData = currentPrices[h.symbol];
-              const nativeCurrency = marketData?.currency || h.currency || 'GBP';
+              // Prefer transaction currency over API currency
+              const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
               const stockIsGbx = nativeCurrency === 'GBX';
               const userIsUsd = userCurrency === 'USD';
@@ -574,9 +615,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
               let adjustedPrice = priceOnDate;
               if (stockIsGbx) {
-                adjustedPrice = priceOnDate / 100; // Convert pence to pounds
+                adjustedPrice = priceOnDate / 100;
               } else {
-                adjustedPrice = priceOnDate * fxRate; // Apply FX rate for USD
+                adjustedPrice = priceOnDate * fxRate;
               }
               investing += h.quantity * adjustedPrice;
             }

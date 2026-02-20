@@ -22,25 +22,25 @@ export const Investments: React.FC = () => {
     const investmentAssets = data?.assets?.filter(a => a.type === 'investment') || [];
 
     const holdings = useMemo(() => {
-        const map = new Map<string, { symbol: string; quantity: number; totalCost: number }>();
+        const map = new Map<string, { symbol: string; quantity: number; totalCost: number; currency: string }>();
 
         (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0 };
+                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, currency: tx.currency || 'GBP' };
                 const isSell = tx.category === 'Sell';
 
                 if (isSell) {
-                  // For sells, reduce both quantity and cost proportionally
                   if (current.quantity > 0) {
                     const costPerShare = current.totalCost / current.quantity;
                     current.totalCost -= tx.quantity * costPerShare;
                   }
-                  current.quantity += tx.quantity; // quantity is negative for sells
+                  current.quantity += tx.quantity;
                 } else {
-                  // For buys and dividend reinvestments, add both quantity and cost (use absolute value)
                   current.quantity += tx.quantity;
                   current.totalCost += Math.abs(tx.amount);
                 }
+                // Always update currency from the latest transaction record
+                if (tx.currency) current.currency = tx.currency;
 
                 map.set(tx.symbol, current);
             }
@@ -48,7 +48,9 @@ export const Investments: React.FC = () => {
 
         return Array.from(map.values()).map(h => {
             const marketData = currentPrices[h.symbol];
-            const nativeCurrency = marketData?.currency || data.transactions.find(t => t.symbol === h.symbol && t.currency)?.currency || 'GBP';
+            // Use transaction-derived currency as the source of truth.
+            // The API may report 'GBP' for UK stocks that actually trade in GBX (pence).
+            const nativeCurrency = h.currency || marketData?.currency || 'GBP';
             const stockIsUsd = nativeCurrency === 'USD';
             const stockIsGbx = nativeCurrency === 'GBX';
             const userIsUsd = userCurrency === 'USD';
@@ -61,18 +63,18 @@ export const Investments: React.FC = () => {
 
             // nativePrice: raw price from API (pence for GBX, USD for USD, GBP for GBP)
             let nativePrice = marketData ? marketData.price : 0;
-            
+
             // displayPrice: always in GBP for portfolio value calculations
             let displayPrice = nativePrice;
             if (stockIsGbx) {
-              displayPrice = nativePrice / 100;
+              displayPrice = nativePrice / 100; // pence → pounds
             } else {
               displayPrice = nativePrice * fxRate;
             }
 
-            const currentValue = h.quantity * displayPrice; // GBP
-            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0; // GBP per share
-            const profitValue = currentValue - h.totalCost; // GBP
+            const currentValue = h.quantity * displayPrice;
+            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
+            const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
 
@@ -86,11 +88,11 @@ export const Investments: React.FC = () => {
             return {
                 ...h,
                 nativeCurrency,
-                nativePrice,       // raw native price (pence for GBX)
-                displayPrice,      // GBP-converted price
-                currentValue,      // GBP
-                avgPrice: avgPriceCost, // GBP per share
-                profitValue,       // GBP
+                nativePrice,
+                displayPrice,
+                currentValue,
+                avgPrice: avgPriceCost,
+                profitValue,
                 profitPercent,
                 isZeroCost,
                 marketData,
@@ -122,6 +124,7 @@ export const Investments: React.FC = () => {
                 .filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === asset.id)
                 .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+            // Build symbol→currency map from transactions (ground truth)
             const symbolCurrencies: Record<string, string> = {};
             sortedTxs.forEach(t => { if (t.symbol && t.currency) symbolCurrencies[t.symbol] = t.currency; });
 
@@ -141,8 +144,10 @@ export const Investments: React.FC = () => {
                     const hist = historicalPrices[sym] || {};
                     const dateStr = format(date, 'yyyy-MM-dd');
                     let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
-                    const isUsd = symbolCurrencies[sym] === 'USD';
-                    const isGbx = symbolCurrencies[sym] === 'GBX';
+                    // Use transaction-derived currency as ground truth
+                    const symCurrency = symbolCurrencies[sym] || currentPrices[sym]?.currency || 'GBP';
+                    const isUsd = symCurrency === 'USD';
+                    const isGbx = symCurrency === 'GBX';
                     let fxRate = 1;
                     if (isUsd && gbpUsdRate > 0) fxRate = 1 / gbpUsdRate;
                     if (isGbx) price = price / 100;
@@ -224,8 +229,7 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            {/* Section 1: Accounts — 2 wide with 1M chart */}
-
+            {/* Section 1: Accounts */}
             <div className="mb-12">
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-sm font-bold text-white uppercase tracking-[2px] flex items-center gap-2">
@@ -260,7 +264,6 @@ export const Investments: React.FC = () => {
                             >
                                 <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: asset.color }} />
 
-                                {/* Background chart — full tile, fades in left-to-right via CSS mask */}
                                 <div
                                     className="absolute bottom-0 right-0 pointer-events-none"
                                     style={{ width: '75%', height: '70%', opacity: 0.75, maskImage: 'linear-gradient(to right, transparent 0%, black 40%)', WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)' }}
@@ -287,7 +290,6 @@ export const Investments: React.FC = () => {
                                     </ResponsiveContainer>
                                 </div>
 
-                                {/* Content */}
                                 <div className="relative z-10 p-8">
                                     <div className="flex justify-between items-start mb-6">
                                         <div className="p-3 bg-white/5 rounded-sm text-white">
@@ -312,7 +314,7 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            {/* Section 2: Holdings — 4 wide with sparklines */}
+            {/* Section 2: Portfolio Holdings */}
             <div>
                 <h2 className="text-sm font-bold text-white uppercase tracking-[2px] mb-6 flex items-center gap-2">
                     <TrendingUp size={16} className="text-emerald-vein" />
@@ -386,7 +388,9 @@ export const Investments: React.FC = () => {
                                     <div className="text-right">
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>
                                         <span className="font-mono text-[10px] text-white">
-                                          {stock.nativeCurrency === 'GBX' ? `${stock.nativePrice.toFixed(2)}p` : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
+                                          {stock.nativeCurrency === 'GBX'
+                                            ? `${stock.nativePrice.toFixed(2)}p`
+                                            : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
                                         </span>
                                     </div>
                                     <div>
