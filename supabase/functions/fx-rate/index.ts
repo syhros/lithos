@@ -15,10 +15,15 @@ Deno.serve(async (req: Request) => {
   try {
     const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/GBP%3DX?interval=1d&range=1d`;
     const res = await fetch(yahooUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; finance-app/1.0)" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://finance.yahoo.com/",
+        "Accept": "application/json",
+      },
     });
 
     if (!res.ok) {
+      console.error(`Yahoo returned ${res.status}`);
       return new Response(JSON.stringify({ error: `Yahoo returned ${res.status}` }), {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -29,6 +34,7 @@ Deno.serve(async (req: Request) => {
     const meta = json?.chart?.result?.[0]?.meta;
 
     if (!meta) {
+      console.error("No meta data from Yahoo");
       return new Response(JSON.stringify({ error: "No data from Yahoo" }), {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -38,6 +44,7 @@ Deno.serve(async (req: Request) => {
     const gbpUsdRate = meta.regularMarketPrice ?? meta.previousClose;
 
     if (!gbpUsdRate || gbpUsdRate <= 1) {
+      console.error(`Invalid rate: ${gbpUsdRate}`);
       return new Response(JSON.stringify({ error: "Invalid rate received", rate: gbpUsdRate }), {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -57,6 +64,7 @@ Deno.serve(async (req: Request) => {
       );
 
     if (upsertError) {
+      console.error(`Upsert failed: ${upsertError.message}`);
       return new Response(JSON.stringify({ error: "Failed to save rate", detail: upsertError.message }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -68,7 +76,8 @@ Deno.serve(async (req: Request) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
+    console.error(`Exception: ${err}`);
+    return new Response(JSON.stringify({ error: "Internal server error", detail: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

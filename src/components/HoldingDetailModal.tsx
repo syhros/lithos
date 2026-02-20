@@ -46,7 +46,7 @@ const getDateFormat = (range: TimeRange): string => {
   }
 };
 
-const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, nativeSymbol }: any) => {
+const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, nativeSymbol, usdToGbp }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
     const isUsd = nativeCurrency === 'USD';
@@ -266,7 +266,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                           : `${nativeSymbol}${val.toFixed(0)}`
                       }
                     />
-                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} nativeSymbol={nativeSymbol} />} />
+                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} nativeSymbol={nativeSymbol} usdToGbp={usdToGbp} />} />
                     <Area
                       key={chartMode}
                       type="monotone"
