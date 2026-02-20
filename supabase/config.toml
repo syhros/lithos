@@ -1,0 +1,17 @@
+[project]
+id = "eildlbjkeurmpdlqojic"
+
+[functions.live-prices]
+verify_jwt = false
+
+[functions.price-history]
+verify_jwt = false
+
+[functions.fx-rate]
+verify_jwt = false
+
+[functions.backfill-price-history]
+verify_jwt = false
+
+[functions.fetch-exchange-rate]
+verify_jwt = false
