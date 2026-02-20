@@ -71,11 +71,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         const p = parseFloat(pricePerShare) || 0;
         if (s > 0 && p >= 0) {
             const nativeTotal = s * p;
-            const gbpTotal = investCurrency === 'USD' ? nativeTotal * usdToGbp : nativeTotal;
+            const gbpTotal = investCurrency === 'USD' && gbpUsdRate > 0 ? nativeTotal / gbpUsdRate : nativeTotal;
             setAmount(gbpTotal.toFixed(2));
         }
     }
-  }, [shares, pricePerShare, type, investCurrency]);
+  }, [shares, pricePerShare, type, investCurrency, gbpUsdRate]);
 
   const resetForm = () => {
       setMerchant('');
