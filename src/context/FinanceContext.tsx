@@ -286,7 +286,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         localStorage.setItem('lithos_last_sync', now.toString());
 
         const historyCache: Record<string, Record<string, number>> = {};
-        const period1 = '2023-01-01';
+        const investingTransactions = data.transactions.filter(t => t.type === 'investing' && t.symbol);
+        const earliestTxDate = investingTransactions.length > 0
+          ? investingTransactions.reduce((earliest, t) => {
+              const txDate = new Date(t.date);
+              const earliestDate = new Date(earliest);
+              return txDate < earliestDate ? t.date : earliest;
+            })
+          : '2023-01-01';
+        const period1 = earliestTxDate;
 
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, number> = {};

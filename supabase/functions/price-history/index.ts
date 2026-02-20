@@ -54,29 +54,48 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { data, error } = await supabase
-      .from("price_history_cache")
-      .select("date, close")
-      .eq("symbol", symbol)
-      .gte("date", from)
-      .order("date", { ascending: true });
+    let allData: Array<{ date: string; close: number }> = [];
+    let offset = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-    if (error) {
-      console.error("Supabase error:", error);
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch price history" }),
-        {
-          status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("price_history_cache")
+        .select("date, close")
+        .eq("symbol", symbol)
+        .gte("date", from)
+        .order("date", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        console.error("Supabase error:", error);
+        return new Response(
+          JSON.stringify({ error: "Failed to fetch price history" }),
+          {
+            status: 500,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        allData = allData.concat(data);
+        if (data.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
         }
-      );
+      }
     }
 
     const response: PriceHistoryResponse = {
-      [symbol]: data || [],
+      [symbol]: allData,
     };
 
     return new Response(JSON.stringify(response), {
