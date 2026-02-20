@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Calendar, Check, AlertCircle, Plus } from 'lucide-react';
-import { format, parseISO, isPast, isToday, isThisMonth, startOfMonth, endOfMonth } from 'date-fns';
+import { format, parseISO, isPast, isToday, isThisMonth } from 'date-fns';
 import { clsx } from 'clsx';
 import { Bill } from '../data/mockData';
 import { AddBillModal } from '../components/AddBillModal';
@@ -86,29 +86,29 @@ export const Bills: React.FC = () => {
             : format(dueDate, 'MMM dd');
 
         return (
-            <div onClick={() => setBillToEdit(bill)} className="bg-[#161618] border border-white/5 p-5 rounded-sm flex items-center justify-between group hover:border-white/10 transition-all cursor-pointer">
-                <div className="flex items-center gap-4 flex-1">
+            <div
+                onClick={() => setBillToEdit(bill)}
+                className="bg-[#161618] border border-white/5 p-5 rounded-sm flex flex-col gap-3 group hover:border-white/10 transition-all cursor-pointer"
+            >
+                <div className="flex items-start gap-3">
                     <div className={clsx(
-                        'w-10 h-10 rounded-full flex items-center justify-center border',
+                        'w-8 h-8 rounded-full flex items-center justify-center border flex-shrink-0 mt-0.5',
                         bill.isPaid ? 'border-emerald-vein/20 text-emerald-vein bg-emerald-vein/5' :
                             isDue ? 'border-magma/20 text-magma bg-magma/5' :
                                 'border-white/10 text-white/60'
                     )}>
-                        {bill.isPaid ? <Check size={16} /> : <Calendar size={16} />}
+                        {bill.isPaid ? <Check size={14} /> : <Calendar size={14} />}
                     </div>
-                    <div className="flex-1">
-                        <h4 className="text-sm font-bold text-white mb-1">{bill.name}</h4>
-                        <div className="flex items-center gap-3 text-[10px] font-mono text-iron-dust">
+                    <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-bold text-white mb-1 truncate">{bill.name}</h4>
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-iron-dust">
                             <span>{bill.category}</span>
                             {bill.isRecurring && <span className="px-1.5 py-0.5 bg-white/5 rounded capitalize">{bill.frequency}</span>}
                             {bill.autoPay && <span className="px-1.5 py-0.5 bg-white/5 rounded">Auto-pay</span>}
                         </div>
                     </div>
                 </div>
-                <div className="text-right">
-                    <div className="text-lg font-bold text-white mb-1">
-                        {currencySymbol}{bill.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
+                <div className="flex items-end justify-between pt-2 border-t border-white/5">
                     <div className={clsx(
                         'text-[10px] font-mono font-bold uppercase',
                         bill.isPaid ? 'text-emerald-vein' :
@@ -117,17 +117,20 @@ export const Bills: React.FC = () => {
                         {bill.isPaid ? 'Paid' : dueDateLabel}
                         {!bill.isPaid && daysUntilDue >= 0 && <span className="ml-1">({daysUntilDue}d)</span>}
                     </div>
+                    <div className="text-lg font-bold text-white">
+                        {currencySymbol}{bill.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
                 </div>
             </div>
         );
     };
 
     return (
-        <div className="p-12 max-w-4xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
+        <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             <div className="flex items-end justify-between mb-12">
                 <div>
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
-                    <h1 className="text-4xl font-bold text-white tracking-tight">Bills & Payments</h1>
+                    <h1 className="text-4xl font-bold text-white tracking-tight">Bills &amp; Payments</h1>
                 </div>
                 <button
                     onClick={() => setShowAddModal(true)}
@@ -198,13 +201,13 @@ export const Bills: React.FC = () => {
             </div>
 
             {/* Content */}
-            <div className="space-y-3 flex-1">
+            <div className="flex-1">
                 {showUpcoming ? (
                     <>
                         {overdue.length > 0 && (
-                            <div>
-                                <h3 className="text-xs font-bold text-magma uppercase tracking-[2px] mb-3">Overdue</h3>
-                                <div className="space-y-3 mb-8">
+                            <div className="mb-8">
+                                <h3 className="text-xs font-bold text-magma uppercase tracking-[2px] mb-4">Overdue</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                                     {overdue.map(bill => (
                                         <BillCard key={bill.id} bill={bill} isDue={true} />
                                     ))}
@@ -213,8 +216,8 @@ export const Bills: React.FC = () => {
                         )}
                         {upcoming.length > 0 ? (
                             <div>
-                                <h3 className="text-xs font-bold text-white uppercase tracking-[2px] mb-3">Coming Up</h3>
-                                <div className="space-y-3">
+                                <h3 className="text-xs font-bold text-white uppercase tracking-[2px] mb-4">Coming Up</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                                     {upcoming.map(bill => (
                                         <BillCard key={bill.id} bill={bill} />
                                     ))}
@@ -229,7 +232,7 @@ export const Bills: React.FC = () => {
                 ) : (
                     <>
                         {paid.length > 0 ? (
-                            <div className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                                 {paid.map(bill => (
                                     <BillCard key={bill.id} bill={bill} />
                                 ))}

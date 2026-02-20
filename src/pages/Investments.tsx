@@ -51,20 +51,47 @@ export const Investments: React.FC = () => {
     }, [data?.transactions]);
 
     const holdings = useMemo(() => {
-        const map = new Map<string, { symbol: string; quantity: number; totalCost: number; buyQty: number; buyTotalCost: number; currency: string }>();
+        const map = new Map<string, {
+            symbol: string;
+            quantity: number;
+            totalCost: number;     // total cost basis (buys only)
+            feeCost: number;       // accumulated fee costs (treated as losses)
+            buyQty: number;
+            buyTotalCost: number;
+            currency: string;
+        }>();
 
         (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, buyQty: 0, buyTotalCost: 0, currency: tx.currency || 'GBP' };
+                const current = map.get(tx.symbol) || {
+                    symbol: tx.symbol,
+                    quantity: 0,
+                    totalCost: 0,
+                    feeCost: 0,
+                    buyQty: 0,
+                    buyTotalCost: 0,
+                    currency: tx.currency || 'GBP',
+                };
+
                 const isSell = tx.category === 'Sell';
-                if (isSell) {
-                    current.quantity += tx.quantity;
-                } else {
-                    current.quantity += tx.quantity;
+                const isFee  = tx.category === 'Fee';
+
+                // All categories adjust quantity (buy adds, sell/fee subtract)
+                current.quantity += tx.quantity;
+
+                if (isFee) {
+                    // Fee: shares removed from holding (already done above via tx.quantity which should be negative)
+                    // Cost is a loss — add to feeCost (stored as positive number)
+                    current.feeCost += Math.abs(tx.amount);
+                    // Also add to totalCost so the cost basis includes fees (reduces P/L)
+                    current.totalCost += Math.abs(tx.amount);
+                } else if (!isSell) {
+                    // Buy or Dividend: add to cost basis normally
                     current.totalCost += Math.abs(tx.amount);
                     current.buyQty += tx.quantity;
                     current.buyTotalCost += Math.abs(tx.amount);
                 }
+
                 if (tx.currency) current.currency = tx.currency;
                 map.set(tx.symbol, current);
             }
@@ -87,6 +114,8 @@ export const Investments: React.FC = () => {
             const displayPrice = stockIsGbx ? nativePrice / 100 : nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
+
+            // P/L: currentValue minus total cost (which now includes fees as losses)
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 

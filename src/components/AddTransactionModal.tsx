@@ -74,9 +74,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     else if (type !== 'investing') setCategory('');
   }, [type]);
 
-  // ---------------------------------------------------------------
-  // Populate form when editing
-  // ---------------------------------------------------------------
   useEffect(() => {
     if (!editTransaction || !isOpen) { if (!editTransaction) resetForm(); return; }
 
@@ -97,8 +94,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setAssetType('Stock');
       setInvestCurrency(tx.currency || 'GBP');
     } else if (tx.type === 'transfer') {
-      // accountId = source account (already set above)
-      // Find the paired inflow transaction to get the destination account
       const paired = data.transactions.find(t =>
         t.type === 'transfer' &&
         t.id !== tx.id &&
@@ -109,12 +104,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setAccountToId(paired?.accountId || '');
       setMerchant(tx.description || '');
     } else if (tx.type === 'debt_payment') {
-      // Two rows are created: source (negative, asset account) and debt (negative, debt account)
-      // Determine which side this is:
       const debtIds = new Set(data.debts.map(d => d.id));
       const isDebtSide = debtIds.has(tx.accountId || '');
       if (isDebtSide) {
-        // Editing the debt-side row: accountId = debt, find paired source row
         setAccountToId(tx.accountId || '');
         const paired = data.transactions.find(t =>
           t.type === 'debt_payment' &&
@@ -125,7 +117,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         );
         setAccountId(paired?.accountId || '');
       } else {
-        // Editing the source-side row: accountId = source asset, find paired debt row
         setAccountId(tx.accountId || '');
         const paired = data.transactions.find(t =>
           t.type === 'debt_payment' &&
@@ -138,10 +129,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       }
       setCategory(tx.category || 'Debt Payment');
     } else {
-      // expense / income — accountId might be a debt account
       setMerchant(tx.description || '');
       setCategory(tx.category || '');
-      // accountId is already set above
     }
   }, [editTransaction, isOpen]);
 
@@ -195,14 +184,15 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         if (paired) await updateTransaction(paired.id, { date: fullDate, description: isDebtSide ? `Payment to ${getAccountName(debtId)}` : `Payment from ${getAccountName(sourceId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: paired.accountId! });
 
       } else if (editTransaction.type === 'investing') {
-        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: amountNum, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
+        // Fee: stored as negative amount (cost/loss)
+        const isFee = investCategory === 'Fee';
+        const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
+        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: savedAmount, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
 
       } else {
-        // expense / income — account might be a debt
         const isDebtAccount = debtIds.has(accountId);
         let finalAmount: number;
         if (isDebtAccount) {
-          // expense on debt = positive (charge), income on debt = negative (credit)
           finalAmount = editTransaction.type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
         } else {
           finalAmount = editTransaction.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
@@ -218,21 +208,20 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId });
 
     } else if (type === 'debt_payment') {
-      // Source account: money leaves (negative)
       addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId });
-      // Debt account: balance reduced (negative)
       addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId });
 
     } else if (type === 'investing') {
-      addTransaction({ date: fullDate, description: assetName, amount: amountNum, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
+      // Fee transactions: stored as negative amount so P/L treats them as a cost/loss
+      // Shares are still subtracted from total holdings (the fund sells shares to pay the fee)
+      const isFee = investCategory === 'Fee';
+      const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
+      addTransaction({ date: fullDate, description: assetName, amount: savedAmount, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
 
     } else {
-      // expense / income on an asset OR debt account
       const isDebtAccount = debtIds.has(accountId);
       let finalAmount: number;
       if (isDebtAccount) {
-        // expense on credit card = +amount (you owe more)
-        // income/refund on debt  = -amount (you owe less)
         finalAmount = type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
       } else {
         finalAmount = type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
@@ -246,6 +235,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const isInvesting   = type === 'investing';
   const isTransfer    = type === 'transfer';
   const isDebtPayment = type === 'debt_payment';
+  const isFeeCategory = isInvesting && investCategory === 'Fee';
   const priceSymbol   = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
   const nativeTotal   = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
 
@@ -339,12 +329,26 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
                   <div className="flex gap-1.5 h-[42px]">
-                    {['Buy','Sell','Dividend'].map(cat => (
-                      <button key={cat} type="button" onClick={() => setInvestCategory(cat)} className={clsx('flex-1 px-3 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors', investCategory === cat ? 'bg-magma text-white border border-magma' : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20')}>{cat}</button>
+                    {['Buy', 'Sell', 'Dividend', 'Fee'].map(cat => (
+                      <button key={cat} type="button" onClick={() => setInvestCategory(cat)} className={clsx(
+                        'flex-1 px-2 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
+                        investCategory === cat
+                          ? cat === 'Fee'
+                            ? 'bg-amber-500 text-white border border-amber-500'
+                            : 'bg-magma text-white border border-magma'
+                          : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'
+                      )}>{cat}</button>
                     ))}
                   </div>
                 </div>
               </div>
+              {/* Fee info banner */}
+              {isFeeCategory && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-sm p-3 text-xs font-mono text-amber-400">
+                  <span className="font-bold uppercase tracking-wider block mb-1">Management Fee</span>
+                  Shares will be subtracted from your holding. The cost will be recorded as a <span className="text-white font-bold">loss</span> in P&amp;L — not a gain.
+                </div>
+              )}
             </>
           )}
 
@@ -422,15 +426,24 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
           {/* Investing estimated total */}
           {isInvesting && (
-            <div className="bg-white/5 p-4 rounded-sm border border-white/10 flex justify-between items-center">
+            <div className={clsx(
+              'p-4 rounded-sm border flex justify-between items-center',
+              isFeeCategory
+                ? 'bg-amber-500/5 border-amber-500/20'
+                : 'bg-white/5 border-white/10'
+            )}>
               <div>
-                <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">Estimated Cost (GBP)</span>
+                <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">
+                  {isFeeCategory ? 'Fee Cost (GBP) — recorded as loss' : 'Estimated Cost (GBP)'}
+                </span>
                 {investCurrency === 'USD' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}</span>}
                 {investCurrency === 'GBX' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">{nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}</span>}
               </div>
               <div className="flex items-center gap-2">
-                <Calculator size={14} className="text-magma" />
-                <span className="text-xl font-bold text-white font-mono">{currencySymbol}{amount || '0.00'}</span>
+                <Calculator size={14} className={isFeeCategory ? 'text-amber-500' : 'text-magma'} />
+                <span className={clsx('text-xl font-bold font-mono', isFeeCategory ? 'text-amber-400' : 'text-white')}>
+                  {isFeeCategory ? '-' : ''}{currencySymbol}{amount || '0.00'}
+                </span>
               </div>
             </div>
           )}
