@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { FinanceProvider } from './src/context/FinanceContext';
+import { FinanceProvider, useFinance } from './src/context/FinanceContext';
 import { Sidebar } from './src/components/Sidebar';
 import { LoadingAnimation } from './src/components/LoadingAnimation';
 import { Dashboard } from './src/pages/Dashboard';
@@ -43,8 +43,8 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
 );
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { loading: dataLoading } = useFinance();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [showLoading, setShowLoading] = useState(false);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
   useEffect(() => {
@@ -52,7 +52,6 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
       const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
       if (session && isFirstLoad) {
-        setShowLoading(true);
         setIsFirstLoad(false);
       }
     };
@@ -85,7 +84,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   return (
     <>
-      <LoadingAnimation isVisible={showLoading} onComplete={() => setShowLoading(false)} />
+      <LoadingAnimation isVisible={dataLoading && !isFirstLoad} onComplete={() => {}} />
       {children}
     </>
   );
