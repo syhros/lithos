@@ -59,7 +59,10 @@ export const Investments: React.FC = () => {
               if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
             }
 
-            const nativePrice = marketData ? marketData.price : 0;
+            let nativePrice = marketData ? marketData.price : 0;
+            if (nativeCurrency === 'GBX') {
+              nativePrice = nativePrice / 100;
+            }
             const displayPrice = nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
@@ -119,9 +122,12 @@ export const Investments: React.FC = () => {
                 Object.entries(holdingQtys).forEach(([sym, qty]) => {
                     const hist = historicalPrices[sym] || {};
                     const dateStr = format(date, 'yyyy-MM-dd');
-                    const price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
+                    let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
                     const isUsd = symbolCurrencies[sym] === 'USD';
-                    const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+                    const isGbx = symbolCurrencies[sym] === 'GBX';
+                    let fxRate = 1;
+                    if (isUsd && gbpUsdRate > 0) fxRate = 1 / gbpUsdRate;
+                    if (isGbx) price = price / 100;
                     val += qty * price * fxRate;
                 });
 
@@ -141,11 +147,14 @@ export const Investments: React.FC = () => {
             const dates = eachDayOfInterval({ start, end: today }).slice(-7);
             const hist = historicalPrices[h.symbol] || {};
             const isUsd = h.nativeCurrency === 'USD';
-            const fx = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+            const isGbx = h.nativeCurrency === 'GBX';
+            let fx = 1;
+            if (isUsd && gbpUsdRate > 0) fx = 1 / gbpUsdRate;
 
             result[h.symbol] = dates.map(date => {
                 const dateStr = format(date, 'yyyy-MM-dd');
-                const price = hist[dateStr] ?? h.nativePrice;
+                let price = hist[dateStr] ?? h.nativePrice;
+                if (isGbx) price = price / 100;
                 return { date: format(date, 'dd'), value: parseFloat((h.quantity * price * fx).toFixed(2)) };
             });
         });
@@ -358,7 +367,9 @@ export const Investments: React.FC = () => {
                                     </div>
                                     <div className="text-right">
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>
-                                        <span className="font-mono text-[10px] text-white">{nativeSymbol}{stock.nativePrice.toFixed(2)}</span>
+                                        <span className="font-mono text-[10px] text-white">
+                                          {stock.nativeCurrency === 'GBX' ? `${(stock.nativePrice * 100).toFixed(0)}p` : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
+                                        </span>
                                     </div>
                                     <div>
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Avg Cost</span>
