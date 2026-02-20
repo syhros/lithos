@@ -330,7 +330,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                         <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-[9px] font-mono text-iron-dust">{h.quantity.toFixed(4)} shares · {h.nativeSymbol}{h.nativePrice.toFixed(2)} {h.currency}</span>
+                        <span className="text-[9px] font-mono text-iron-dust">{h.quantity.toFixed(8)} shares · {h.nativeSymbol}{h.nativePrice.toFixed(2)} {h.currency}</span>
                         <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', hp ? 'text-emerald-vein' : 'text-magma')}>
                           {hp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
                           {hp ? '+' : ''}{h.profitPercent.toFixed(2)}%

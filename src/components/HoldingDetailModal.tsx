@@ -286,7 +286,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
           <div className="grid grid-cols-4 gap-4 mb-10">
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
               <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Shares Owned</span>
-              <span className="text-lg font-mono text-white">{holding.quantity.toFixed(4)}</span>
+              <span className="text-lg font-mono text-white">{holding.quantity.toFixed(8)}</span>
             </div>
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
               <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price ({nativeCurrency})</span>
@@ -331,7 +331,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-bold text-white">
-                      {tx.quantity ? `${tx.quantity.toFixed(2)} shares` : ''} @ {getCurrencySymbol(tx.currency || 'GBP')}{tx.price?.toFixed(2)}
+                      {tx.quantity ? `${tx.quantity.toFixed(8)} shares` : ''} @ {getCurrencySymbol(tx.currency || 'GBP')}{tx.price?.toFixed(2)}
                     </p>
                     <p className="text-[10px] font-mono text-iron-dust">
                       Total: {currencySymbol}{Math.abs(tx.amount).toLocaleString()}

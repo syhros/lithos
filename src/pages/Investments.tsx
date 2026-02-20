@@ -351,7 +351,7 @@ export const Investments: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-y-2 gap-x-4 border-t border-white/5 pt-3 mt-auto">
                                     <div>
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Shares</span>
-                                        <span className="font-mono text-[10px] text-white">{stock.quantity.toFixed(3)}</span>
+                                        <span className="font-mono text-[10px] text-white">{stock.quantity.toFixed(8)}</span>
                                     </div>
                                     <div className="text-right">
                                         <span className="block text-[8px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>

@@ -111,7 +111,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (res.ok) {
         const json = await res.json();
         const gbpXRate = json['GBP=X']?.price;
-        if (gbpXRate && gbpXRate > 0) {
+        if (gbpXRate && gbpXRate > 1) {
           const usdToGbp = 1 / gbpXRate;
           setLiveUsdToGbp(usdToGbp);
           localStorage.setItem('lithos_usd_to_gbp', JSON.stringify({ rate: usdToGbp, ts: Date.now() }));
@@ -364,7 +364,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (cachedFx) {
       try {
         const { rate, ts } = JSON.parse(cachedFx);
-        if (rate > 0 && Date.now() - ts < 2 * 60 * 60 * 1000) {
+        if (rate > 0 && rate < 1 && Date.now() - ts < 2 * 60 * 60 * 1000) {
           setLiveUsdToGbp(rate);
         }
       } catch (e) {

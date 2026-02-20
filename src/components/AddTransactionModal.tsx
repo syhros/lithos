@@ -424,7 +424,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                         <label className="block text-xs font-mono text-iron-dust mb-2">Shares</label>
                         <input
                             type="number"
-                            placeholder="0.00"
+                            placeholder="0.00000000"
                             step="any"
                             value={shares}
                             onChange={e => setShares(e.target.value)}
