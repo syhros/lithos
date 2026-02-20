@@ -16,6 +16,7 @@ type LogLine = {
     status: 'pending' | 'pulling' | 'done' | 'error';
     rows?: number;
     message?: string;
+    fromDate?: string;
 };
 
 export const Investments: React.FC = () => {
@@ -126,35 +127,44 @@ export const Investments: React.FC = () => {
     const handlePullHistoricData = async () => {
         if (isPulling) return;
 
-        const symbols = Array.from(new Set(
-            (data?.transactions || [])
-                .filter(t => t.type === 'investing' && t.symbol)
-                .map(t => t.symbol!)
-        ));
+        const transactions = data?.transactions || [];
 
+        // Build a map of symbol -> earliest transaction date
+        const firstTxDate = new Map<string, string>();
+        transactions
+            .filter(t => t.type === 'investing' && t.symbol && t.date)
+            .forEach(t => {
+                const existing = firstTxDate.get(t.symbol!);
+                if (!existing || t.date < existing) {
+                    firstTxDate.set(t.symbol!, t.date);
+                }
+            });
+
+        const symbols = Array.from(firstTxDate.keys());
         if (symbols.length === 0) return;
 
         setIsPulling(true);
         setPullComplete(false);
         setShowLog(true);
 
-        // Build initial log lines — all pending
+        // Build initial log lines — all pending, show from date
         const initialLines: LogLine[] = symbols.map(sym => ({
             id: ++logIdRef.current,
             symbol: sym,
             status: 'pending',
+            fromDate: firstTxDate.get(sym),
         }));
         setLogLines(initialLines);
 
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
-        const fromDate = '2023-01-01';
 
         // Process one symbol at a time so we can show live progress
         for (let i = 0; i < symbols.length; i++) {
             const symbol = symbols[i];
             const lineId = initialLines[i].id;
+            const fromDate = firstTxDate.get(symbol)!;
 
             updateLine(lineId, { status: 'pulling' });
 
@@ -369,9 +379,11 @@ export const Investments: React.FC = () => {
                     {totalCount > 0 && (
                         <div className="h-0.5 bg-white/5">
                             <div
-                                className="h-full bg-blue-500 transition-all duration-500"
-                                style={{ width: `${((doneCount + errorCount) / totalCount) * 100}%`,
-                                         backgroundColor: pullComplete ? (errorCount === 0 ? '#00f2ad' : '#f97316') : '#3b82f6' }}
+                                className="h-full transition-all duration-500"
+                                style={{
+                                    width: `${((doneCount + errorCount) / totalCount) * 100}%`,
+                                    backgroundColor: pullComplete ? (errorCount === 0 ? '#00f2ad' : '#f97316') : '#3b82f6'
+                                }}
                             />
                         </div>
                     )}
@@ -397,8 +409,8 @@ export const Investments: React.FC = () => {
                                 </span>
                                 <span className="w-24 flex-shrink-0 font-bold tracking-wider">{line.symbol}</span>
                                 <span className="text-current opacity-80">
-                                    {line.status === 'pending' && 'Waiting...'}
-                                    {line.status === 'pulling' && 'Pulling historic prices...'}
+                                    {line.status === 'pending' && `Waiting... (from ${line.fromDate})`}
+                                    {line.status === 'pulling' && `Pulling from ${line.fromDate}…`}
                                     {line.status === 'done' && `Complete — ${line.rows?.toLocaleString()} rows cached`}
                                     {line.status === 'error' && `Failed — ${line.message}`}
                                 </span>
