@@ -275,74 +275,75 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
 
         localStorage.setItem('lithos_last_sync', now.toString());
-        setCurrentPrices(fetchedPrices);
 
+        const historyCache: Record<string, Record<string, number>> = {};
         const period1 = '2023-01-01';
 
-        uniqueSymbols.forEach(sym => {
-          (async () => {
+        await Promise.all(uniqueSymbols.map(async sym => {
+          let history: Record<string, number> = {};
+
+          if (liveApiAvailable) {
             try {
-              let history: Record<string, number> = {};
-
-              if (liveApiAvailable) {
-                try {
-                  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-                  const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
-                    headers: { 'Authorization': `Bearer ${supabaseKey}` }
-                  });
-                  if (hRes.ok) {
-                    const response = await hRes.json();
-                    const rows: { date: string; close: number }[] = response[sym] || [];
-                    rows.forEach(row => { history[row.date] = row.close; });
-                  }
-                } catch (e) {
-                  console.info(`Failed to fetch history for ${sym}:`, e);
-                }
-              }
-
-              if (Object.keys(history).length === 0) {
-                try {
-                  const { data: cached } = await supabase
-                    .from('price_history_cache')
-                    .select('date, close')
-                    .eq('symbol', sym)
-                    .order('date', { ascending: true })
-                    .limit(-1);
-
-                  if (cached && cached.length > 0) {
-                    cached.forEach((row: { date: string; close: number }) => {
-                      history[row.date] = row.close;
-                    });
-                  }
-                } catch (e) {
-                  console.info(`Supabase cache miss for ${sym}`);
-                }
-              }
-
-              if (Object.keys(history).length === 0) {
-                history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
-              }
-
-              setHistoricalPrices(prev => ({ ...prev, [sym]: history }));
-              localStorage.setItem('lithos_historical_prices', JSON.stringify({ ...JSON.parse(localStorage.getItem('lithos_historical_prices') || '{}'), [sym]: history }));
-
-              const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-              const hist = history;
-              const currentPrice = fetchedPrices[sym]?.price;
-              if (hist && currentPrice) {
-                const prevClose = hist[yesterday];
-                if (prevClose && prevClose > 0) {
-                  const chg = currentPrice - prevClose;
-                  const chgPct = (chg / prevClose) * 100;
-                  setCurrentPrices(prev => ({ ...prev, [sym]: { ...prev[sym], change: chg, changePercent: chgPct } }));
-                }
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+              const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+              const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${period1}`, {
+                headers: { 'Authorization': `Bearer ${supabaseKey}` }
+              });
+              if (hRes.ok) {
+                const response = await hRes.json();
+                const rows: { date: string; close: number }[] = response[sym] || [];
+                rows.forEach(row => { history[row.date] = row.close; });
               }
             } catch (e) {
-              console.error(`Failed to load history for ${sym}:`, e);
+              console.info(`Failed to fetch history for ${sym}:`, e);
             }
-          })();
+          }
+
+          if (Object.keys(history).length === 0) {
+            try {
+              const { data: cached } = await supabase
+                .from('price_history_cache')
+                .select('date, close')
+                .eq('symbol', sym)
+                .order('date', { ascending: true })
+                .limit(-1);
+
+              if (cached && cached.length > 0) {
+                cached.forEach((row: { date: string; close: number }) => {
+                  history[row.date] = row.close;
+                });
+              }
+            } catch (e) {
+              console.info(`Supabase cache miss for ${sym}`);
+            }
+          }
+
+          if (Object.keys(history).length === 0) {
+            history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+          }
+
+          historyCache[sym] = history;
+        }));
+
+        setHistoricalPrices(historyCache);
+        localStorage.setItem('lithos_historical_prices', JSON.stringify(historyCache));
+
+        const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+        const updatedPrices = { ...fetchedPrices };
+        uniqueSymbols.forEach(sym => {
+          const hist = historyCache[sym];
+          const currentPrice = updatedPrices[sym]?.price;
+          if (hist && currentPrice) {
+            const prevClose = hist[yesterday];
+            if (prevClose && prevClose > 0) {
+              const chg = currentPrice - prevClose;
+              const chgPct = (chg / prevClose) * 100;
+              updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: chgPct };
+            }
+          }
         });
+        setCurrentPrices(updatedPrices);
+        localStorage.setItem('lithos_current_prices', JSON.stringify(updatedPrices));
       }
     } catch (error) {
       console.error('Market data sync failed:', error);
@@ -366,19 +367,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.info('Failed to load cached historical prices');
       }
     }
-
-    const initializeApp = async () => {
-      await Promise.all([
-        fetchFxRate(),
-        loadUserData(),
-        fetchMarketData(true)
-      ]);
-    };
-
-    initializeApp().catch(error => {
-      console.error('Failed to initialize app:', error);
-      setLoading(false);
-    });
+    fetchFxRate();
+    loadUserData();
 
     const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
     const firstTimeout = setTimeout(() => {

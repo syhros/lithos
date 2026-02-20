@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { FinanceProvider, useFinance } from './src/context/FinanceContext';
+import { FinanceProvider } from './src/context/FinanceContext';
 import { Sidebar } from './src/components/Sidebar';
-import { LoadingAnimation } from './src/components/LoadingAnimation';
 import { Dashboard } from './src/pages/Dashboard';
 import { Transactions } from './src/pages/Transactions';
 import { Accounts } from './src/pages/Accounts';
@@ -43,19 +42,12 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
 );
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { loading: dataLoading } = useFinance();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [hasInitialized, setHasInitialized] = useState(false);
-  const [showLoading, setShowLoading] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
-      if (session && !hasInitialized) {
-        setShowLoading(true);
-        setHasInitialized(true);
-      }
     };
 
     checkAuth();
@@ -67,13 +59,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [hasInitialized]);
-
-  useEffect(() => {
-    if (!dataLoading && showLoading) {
-      setShowLoading(false);
-    }
-  }, [dataLoading, showLoading]);
+  }, []);
 
   if (isAuthenticated === null) {
     return (
@@ -90,12 +76,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" replace />;
   }
 
-  return (
-    <>
-      <LoadingAnimation isVisible={showLoading} onComplete={() => {}} />
-      {children}
-    </>
-  );
+  return <>{children}</>;
 };
 
 const App: React.FC = () => {
