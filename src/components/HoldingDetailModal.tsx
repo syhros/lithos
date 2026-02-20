@@ -106,14 +106,8 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
   const isGbx = nativeCurrency === 'GBX';
   const isUsd = nativeCurrency === 'USD';
 
-  // Raw native price from market data (still in pence for GBX)
   const rawNativePrice = holding?.nativePrice ?? 0;
 
-  // holding.avgPrice is always stored in GBP (cost basis / quantity).
-  // To display it in the native currency of the stock:
-  //   GBX: multiply GBP by 100 to get pence
-  //   USD: multiply GBP by gbpUsdRate to get USD
-  //   GBP: use as-is
   const displayAvgPrice = isGbx
     ? (holding?.avgPrice ?? 0) * 100
     : isUsd && gbpUsdRate > 0
@@ -121,7 +115,6 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
       : (holding?.avgPrice ?? 0);
   const avgPriceSymbol = isGbx ? 'p' : isUsd ? '$' : '\u00a3';
 
-  // Current price in native currency
   const displayCurrentPrice = rawNativePrice;
   const currentPriceSymbol = isGbx ? 'p' : isUsd ? '$' : '\u00a3';
 
@@ -161,7 +154,6 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
       const rawPrice = history[dateStr] !== undefined ? history[dateStr] : lastKnownPrice;
       if (history[dateStr] !== undefined) lastKnownPrice = history[dateStr];
 
-      // Convert to GBP for value chart
       const gbpPrice = isGbx ? rawPrice / 100 : rawPrice * fxRate;
       const marketValueGbp = currentQty * gbpPrice;
 
@@ -169,7 +161,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
         date,
         dateStr,
         value: marketValueGbp,
-        price: rawPrice, // native price (pence for GBX, USD for USD, GBP for GBP)
+        price: rawPrice,
         qty: currentQty,
       };
     });
@@ -331,7 +323,6 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
               <span className="text-lg font-mono text-white">{holding.quantity.toFixed(8)}</span>
             </div>
 
-            {/* Avg Buy Price — displayed in native currency */}
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
               <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price ({nativeCurrency})</span>
               <span className="text-lg font-mono text-white">
@@ -339,26 +330,13 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
               </span>
             </div>
 
-            {/* Current Price — raw native price */}
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
               <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">
                 Current Price ({nativeCurrency})
               </span>
-              <div>
-                <span className="text-lg font-mono text-white">
-                  {currentPriceSymbol}{displayCurrentPrice.toFixed(2)}
-                </span>
-                {isUsd && (
-                  <span className="text-[10px] font-mono text-iron-dust block mt-0.5">
-                    \u2248 {currencySymbol}{(rawNativePrice / gbpUsdRate).toFixed(2)} GBP
-                  </span>
-                )}
-                {isGbx && (
-                  <span className="text-[10px] font-mono text-iron-dust block mt-0.5">
-                    \u2248 \u00a3{(rawNativePrice / 100).toFixed(4)} GBP
-                  </span>
-                )}
-              </div>
+              <span className="text-lg font-mono text-white">
+                {currentPriceSymbol}{displayCurrentPrice.toFixed(2)}
+              </span>
             </div>
 
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
