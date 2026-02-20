@@ -70,8 +70,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         const s = parseFloat(shares) || 0;
         const p = parseFloat(pricePerShare) || 0;
         if (s > 0 && p >= 0) {
-            const nativeTotal = s * p;
-            const gbpTotal = investCurrency === 'USD' && gbpUsdRate > 0 ? nativeTotal / gbpUsdRate : nativeTotal;
+            let nativeTotal = s * p;
+            let gbpTotal = nativeTotal;
+            if (investCurrency === 'USD' && gbpUsdRate > 0) {
+              gbpTotal = nativeTotal / gbpUsdRate;
+            } else if (investCurrency === 'GBX') {
+              gbpTotal = nativeTotal / 100;
+            }
             setAmount(gbpTotal.toFixed(2));
         }
     }
@@ -441,13 +446,14 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                             <option value="GBP">GBP (£)</option>
                             <option value="USD">USD ($)</option>
                             <option value="EUR">EUR (€)</option>
+                            <option value="GBX">GBX (p)</option>
                         </select>
                     </div>
                     <div className="col-span-12 md:col-span-3">
                          <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
                          <div className="relative">
                             <span className="absolute left-3 top-3 text-iron-dust text-xs">
-                                {investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : '£'}
+                                {investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : investCurrency === 'GBX' ? 'p' : '£'}
                             </span>
                             <input
                                 type="number"
@@ -667,6 +673,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     {investCurrency === 'USD' && shares && pricePerShare && (
                         <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
                             ${(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(2)} USD @ $1 = {currencySymbol}{(gbpUsdRate > 0 ? (1 / gbpUsdRate).toFixed(4) : '0.0000')}
+                        </span>
+                    )}
+                    {investCurrency === 'GBX' && shares && pricePerShare && (
+                        <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">
+                            {(parseFloat(shares) * parseFloat(pricePerShare) || 0).toFixed(0)}p = {currencySymbol}{(parseFloat(shares) * parseFloat(pricePerShare) / 100 || 0).toFixed(2)}
                         </span>
                     )}
                 </div>

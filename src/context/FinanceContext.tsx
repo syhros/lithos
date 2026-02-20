@@ -58,6 +58,7 @@ export const getCurrencySymbol = (currency: string): string => {
     switch (currency) {
         case 'USD': return '$';
         case 'EUR': return '€';
+        case 'GBX': return 'p';
         default: return '£';
     }
 };
@@ -442,7 +443,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
-      const nativePrice = marketData ? marketData.price : 0;
+      let nativePrice = marketData ? marketData.price : 0;
+      if (h.currency === 'GBX') {
+        nativePrice = nativePrice / 100;
+      }
       const displayPrice = nativePrice * fxRate;
       const currentValue = h.quantity * displayPrice;
 
@@ -534,7 +538,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
               }
 
-              const displayPrice = priceOnDate * fxRate;
+              let adjustedPrice = priceOnDate;
+              if (h.currency === 'GBX') {
+                adjustedPrice = priceOnDate / 100;
+              }
+              const displayPrice = adjustedPrice * fxRate;
               investing += h.quantity * displayPrice;
             }
           });

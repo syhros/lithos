@@ -38,7 +38,7 @@ const INVESTMENT_FIELDS: FieldDef[] = [
   { key: 'quantity',    label: 'Shares / Qty', required: true,  description: 'For buy/sell: shares purchased. For dividends: number of shares held that received dividend. Rows without qty are skipped' },
   { key: 'price',       label: 'Price / Unit', required: true,  description: 'For buy/sell: price per share. For dividends: dividend per share. Total dividend = qty × price' },
   { key: 'tradeType',   label: 'Type',         required: false, description: 'buy, sell, or dividend — required to identify dividends (defaults to buy)' },
-  { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR' },
+  { key: 'currency',    label: 'Currency',     required: false, description: 'GBP, USD, EUR, GBX' },
   { key: 'description', label: 'Asset Name',   required: false, description: 'e.g. Apple Inc.' },
   { key: 'time',        label: 'Time',         required: false, description: 'HH:MM — map to same column as Date to extract time from datetime' },
 ];
@@ -486,13 +486,18 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const resolvedTime = sameCol ? timePart : (rawTimeCol.trim() || timePart);
           const txDate = parseDate(rawDate, resolvedTime);
 
-          const validCurrency: Currency = (['GBP', 'USD', 'EUR'] as const).includes(rawCurrency as Currency)
+          const validCurrency: Currency = (['GBP', 'USD', 'EUR', 'GBX'] as const).includes(rawCurrency as Currency)
             ? rawCurrency as Currency : 'GBP';
 
           if (tradeType === 'dividend') {
             // Dividend value = qty * price (qty = shares owned, price = dividend per share)
             const dividendNative = qty * price;
-            const fxRate = (validCurrency === 'USD' && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
+            let fxRate = 1;
+            if (validCurrency === 'USD' && gbpUsdRate > 0) {
+              fxRate = 1 / gbpUsdRate;
+            } else if (validCurrency === 'GBX') {
+              fxRate = 1 / 100;
+            }
             const dividendGbp = dividendNative * fxRate;
 
             // Always reinvest dividends: look up historical price on that day to calculate fractional shares
@@ -537,7 +542,12 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           } else {
             // buy or sell
             const signedQty = tradeType === 'sell' ? -Math.abs(qty) : Math.abs(qty);
-            const fxRate = (validCurrency === 'USD' && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
+            let fxRate = 1;
+            if (validCurrency === 'USD' && gbpUsdRate > 0) {
+              fxRate = 1 / gbpUsdRate;
+            } else if (validCurrency === 'GBX') {
+              fxRate = 1 / 100;
+            }
             const gbpAmount = Math.abs(qty) * price * fxRate;
             const signedAmount = tradeType === 'sell' ? gbpAmount : -gbpAmount;
             totalInvestments += gbpAmount;

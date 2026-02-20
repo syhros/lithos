@@ -6,7 +6,7 @@ export type InvestmentCategory = 'Buy' | 'Sell' | 'Dividend';
 export type AssetType = 'checking' | 'savings' | 'investment';
 export type DebtType = 'credit_card' | 'loan';
 export type Frequency = 'weekly' | 'monthly' | 'yearly';
-export type Currency = 'GBP' | 'USD' | 'EUR';
+export type Currency = 'GBP' | 'USD' | 'EUR' | 'GBX';
 
 export interface Transaction {
   id: string;
