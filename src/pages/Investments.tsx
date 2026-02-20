@@ -28,6 +28,12 @@ const truncateName = (name: string, max = 40): string => {
   return result || name.substring(0, max);
 };
 
+// Converts any string to Title Case (handles ALL-CAPS inputs too).
+const toTitleCase = (str: string): string =>
+  str
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase());
+
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
     const userCurrency = data?.user?.currency || 'GBP';
@@ -118,8 +124,10 @@ export const Investments: React.FC = () => {
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
 
-    const activeHoldings = holdings.filter(h => h.quantity > 0);
-    const closedHoldings = holdings.filter(h => h.quantity <= 0);
+    // Use a small epsilon to guard against floating-point residuals from sells
+    const EPSILON = 0.000001;
+    const activeHoldings = holdings.filter(h => h.quantity > EPSILON);
+    const closedHoldings = holdings.filter(h => h.quantity <= EPSILON);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -331,7 +339,7 @@ export const Investments: React.FC = () => {
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
-                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctTotalCost === 0 ? '+\u221e' : acctProfitPercent.toFixed(2)}%)
+                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctTotalCost === 0 ? '+∞' : acctProfitPercent.toFixed(2)}%)
                                     </div>
                                 </div>
                             </div>
@@ -359,8 +367,7 @@ export const Investments: React.FC = () => {
                         const sparkColor = sparkUp ? '#00f2ad' : '#8e8e93';
                         const sparkMin = sparkline.length > 0 ? Math.min(...sparkline.map(d => d.value)) * 0.98 : 'auto';
                         const abbrev = tickerAbbrev(stock.symbol);
-                        const displayName = truncateName(stock.tickerName);
-                        const isUsd = stock.nativeCurrency === 'USD';
+                        const displayName = toTitleCase(truncateName(stock.tickerName));
 
                         return (
                             <div
@@ -370,25 +377,25 @@ export const Investments: React.FC = () => {
                             >
                                 {/* Header row */}
                                 <div className="flex justify-between items-start mb-4">
-                                    <div className="flex items-end gap-3">
-                                        {/* Ticker square */}
-                                        <div className="flex flex-col items-center gap-1">
-                                            <div
-                                                className="w-12 h-10 flex items-center justify-center rounded-sm font-bold tracking-wider text-[11px] text-black border border-white/5"
-                                                style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
-                                            >
+                                    <div className="flex items-start gap-3">
+                                        {/* Ticker rect + currency tag — fused with a divider line */}
+                                        <div className="flex flex-col" style={{ minWidth: 44 }}>
+                                            {/* Ticker rectangle */}
+                                            <div className="flex items-center justify-center bg-white/10 rounded-t-sm font-bold tracking-wider text-[11px] text-white px-2 py-2 leading-none">
                                                 {abbrev}
                                             </div>
-                                            <span
-                                                className="px-1.5 py-0.5 rounded text-[7px] font-mono font-bold text-black uppercase tracking-wider"
-                                                style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
-                                            >
-                                                {stock.nativeCurrency}
-                                            </span>
+                                            {/* Thin divider */}
+                                            <div className="h-px bg-white/20 w-full" />
+                                            {/* Currency tag — orange, no gap */}
+                                            <div className="flex items-center justify-center bg-magma rounded-b-sm px-2 py-1 leading-none">
+                                                <span className="text-[7px] font-mono font-bold text-white uppercase tracking-wider">
+                                                    {stock.nativeCurrency}
+                                                </span>
+                                            </div>
                                         </div>
-                                        {/* Name */}
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-xs font-bold text-white leading-snug line-clamp-2 break-words" style={{ wordBreak: 'break-word', overflowWrap: 'break-word', hyphens: 'none' }}>
+                                        {/* Name — aligned to top of ticker block */}
+                                        <div className="flex-1 min-w-0 pt-0.5">
+                                            <h3 className="text-xs font-bold text-white leading-snug line-clamp-2" style={{ wordBreak: 'break-word', overflowWrap: 'break-word', hyphens: 'none' }}>
                                                 {displayName}
                                             </h3>
                                         </div>
@@ -396,7 +403,7 @@ export const Investments: React.FC = () => {
                                     {/* P/L badge */}
                                     <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5 shrink-0 ml-2', isProfit ? 'text-emerald-vein' : 'text-magma')}>
                                         {isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {stock.avgPrice === 0 ? '+\u221e' : stock.profitPercent.toFixed(1)}%
+                                        {stock.avgPrice === 0 ? '+∞' : stock.profitPercent.toFixed(1)}%
                                     </div>
                                 </div>
 
@@ -474,7 +481,7 @@ export const Investments: React.FC = () => {
                                 const sparkColor = sparkUp ? '#00f2ad' : '#8e8e93';
                                 const sparkMin = sparkline.length > 0 ? Math.min(...sparkline.map(d => d.value)) * 0.98 : 'auto';
                                 const abbrev = tickerAbbrev(stock.symbol);
-                                const isUsd = stock.nativeCurrency === 'USD';
+                                const displayName = toTitleCase(truncateName(stock.tickerName));
 
                                 return (
                                     <div
@@ -485,25 +492,25 @@ export const Investments: React.FC = () => {
                                         {/* Header */}
                                         <div className="flex justify-between items-center mb-3">
                                             <div className="flex items-center gap-2">
-                                                <div
-                                                    className="w-10 h-8 flex items-center justify-center rounded-sm font-bold tracking-wider text-[10px] text-black"
-                                                    style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
-                                                >
-                                                    {abbrev}
+                                                {/* Fused ticker + currency */}
+                                                <div className="flex flex-col" style={{ minWidth: 38 }}>
+                                                    <div className="flex items-center justify-center bg-white/10 rounded-t-sm font-bold tracking-wider text-[10px] text-white px-2 py-1.5 leading-none">
+                                                        {abbrev}
+                                                    </div>
+                                                    <div className="h-px bg-white/20 w-full" />
+                                                    <div className="flex items-center justify-center bg-magma rounded-b-sm px-2 py-0.5 leading-none">
+                                                        <span className="text-[7px] font-mono font-bold text-white uppercase tracking-wider">
+                                                            {stock.nativeCurrency}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <div>
-                                                    <span className="text-xs font-bold text-white block leading-none">{stock.symbol}</span>
-                                                    <span
-                                                        className="inline-block mt-0.5 px-1 py-0.5 rounded text-[7px] font-mono font-bold text-black uppercase tracking-wider"
-                                                        style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
-                                                    >
-                                                        {stock.nativeCurrency}
-                                                    </span>
+                                                    <span className="text-xs font-bold text-white block leading-none">{displayName}</span>
                                                 </div>
                                             </div>
                                             <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5', isProfit ? 'text-emerald-vein' : 'text-magma')}>
                                                 {isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                                {stock.avgPrice === 0 ? '+\u221e' : stock.profitPercent.toFixed(1)}%
+                                                {stock.avgPrice === 0 ? '+∞' : stock.profitPercent.toFixed(1)}%
                                             </div>
                                         </div>
 
