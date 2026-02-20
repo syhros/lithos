@@ -294,6 +294,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }));
 
         setHistoricalPrices(historyCache);
+        localStorage.setItem('lithos_historical_prices', JSON.stringify(historyCache));
 
         const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
         const updatedPrices = { ...fetchedPrices };
@@ -310,6 +311,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         });
         setCurrentPrices(updatedPrices);
+        localStorage.setItem('lithos_current_prices', JSON.stringify(updatedPrices));
       }
     } catch (error) {
       console.error('Market data sync failed:', error);
@@ -317,6 +319,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   useEffect(() => {
+    const cachedPrices = localStorage.getItem('lithos_current_prices');
+    if (cachedPrices) {
+      try {
+        setCurrentPrices(JSON.parse(cachedPrices));
+      } catch (e) {
+        console.info('Failed to load cached prices');
+      }
+    }
+    const cachedHistory = localStorage.getItem('lithos_historical_prices');
+    if (cachedHistory) {
+      try {
+        setHistoricalPrices(JSON.parse(cachedHistory));
+      } catch (e) {
+        console.info('Failed to load cached historical prices');
+      }
+    }
     loadUserData();
   }, []);
 
@@ -425,8 +443,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           Array.from(holdings.values()).forEach(h => {
             const historicalData = historicalPrices[h.symbol] || {};
-            const priceOnDate = historicalData[dateStr];
-            if (priceOnDate !== undefined) {
+            let priceOnDate = historicalData[dateStr];
+
+            if (priceOnDate === undefined) {
+              const dates = Object.keys(historicalData).sort();
+              const latestBeforeDate = dates.filter(date => date <= dateStr).pop();
+              priceOnDate = latestBeforeDate ? historicalData[latestBeforeDate] : currentPrices[h.symbol]?.price || 0;
+            }
+
+            if (priceOnDate) {
               const marketData = currentPrices[h.symbol];
               const nativeCurrency = marketData?.currency || h.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';

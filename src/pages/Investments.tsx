@@ -201,14 +201,13 @@ export const Investments: React.FC = () => {
                           return holdingTx !== undefined;
                         });
                         const balance = acctHoldings.reduce((sum, h) => sum + h.currentValue, 0);
+                        const acctTotalCost = acctHoldings.reduce((sum, h) => sum + h.totalCost, 0);
+                        const acctTotalProfit = balance - acctTotalCost;
+                        const acctProfitPercent = acctTotalCost > 0 ? (acctTotalProfit / acctTotalCost) * 100 : 0;
+                        const acctUp = acctTotalProfit >= 0;
                         const acctChart = accountChartData[asset.id] || [];
-                        const acctFirst = acctChart[0]?.value ?? 0;
-                        const acctLast = acctChart[acctChart.length - 1]?.value ?? 0;
-                        const acctUp = acctLast >= acctFirst;
                         const acctColor = '#3b82f6';
                         const acctMin = acctChart.length > 0 ? Math.min(...acctChart.map(d => d.value)) * 0.97 : 'auto';
-                        const acctChange = acctLast - acctFirst;
-                        const acctChangePercent = acctFirst > 0 ? (acctChange / acctFirst) * 100 : 0;
 
                         const whole = Math.floor(balance).toLocaleString();
                         const pence = balance.toFixed(2).split('.')[1];
@@ -265,7 +264,7 @@ export const Investments: React.FC = () => {
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
-                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctChange).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctChangePercent.toFixed(2)}%)
+                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctProfitPercent.toFixed(2)}%)
                                     </div>
                                 </div>
                             </div>
