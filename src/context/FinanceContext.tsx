@@ -375,8 +375,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.info('Failed to load cached historical prices');
       }
     }
-    fetchFxRate();
-    loadUserData(true);
+
+    (async () => {
+      await fetchFxRate();
+      await loadUserData(true);
+    })();
 
     const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
     const firstTimeout = setTimeout(() => {
