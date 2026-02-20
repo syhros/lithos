@@ -42,11 +42,6 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
   const fmtMoney = (n: number, sym = currencySymbol) =>
     `${sym}${Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  // Format price/share correctly in native currency.
-  // GBX: show as "Xp" (no £ prefix, pence suffix)
-  // USD: "$X"
-  // EUR: "€X"
-  // GBP: "£X"
   const formatNativePrice = (price: number, currency: string | undefined): string => {
     const cur = currency || 'GBP';
     if (cur === 'GBX') {
@@ -129,6 +124,16 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
             <span className="text-[10px] font-mono text-iron-dust/60 break-all">{transaction.id}</span>
           } />
         </div>
+
+        {/* Notes / Description — only shown if present */}
+        {transaction.notes && (
+          <div className="px-5 pb-4">
+            <div className="bg-black/20 border border-white/5 rounded-sm p-4">
+              <p className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Description</p>
+              <p className="text-xs text-white/80 leading-relaxed whitespace-pre-wrap">{transaction.notes}</p>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-white/5 bg-[#131517] flex justify-between items-center gap-2">

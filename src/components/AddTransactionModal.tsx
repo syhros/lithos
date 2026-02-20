@@ -18,6 +18,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
   const [merchant, setMerchant] = useState('');
   const [category, setCategory] = useState('');
+  const [notes, setNotes] = useState('');
   const [amount, setAmount] = useState('');
   const [accountId, setAccountId] = useState('');
   const [accountToId, setAccountToId] = useState('');
@@ -60,7 +61,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   }, [shares, pricePerShare, type, investCurrency, gbpUsdRate]);
 
   const resetForm = () => {
-    setMerchant(''); setCategory(''); setAmount(''); setAccountId(''); setAccountToId('');
+    setMerchant(''); setCategory(''); setNotes(''); setAmount(''); setAccountId(''); setAccountToId('');
     setTicker(''); setAssetName(''); setShares(''); setPricePerShare('');
     setAssetType('Stock'); setInvestCategory('Buy'); setInvestCurrency('GBP');
     setType('expense');
@@ -84,6 +85,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     setTime(timePart?.substring(0, 5) || '00:00');
     setAmount(Math.abs(tx.amount).toFixed(2));
     setAccountId(tx.accountId || '');
+    setNotes(tx.notes || '');
 
     if (tx.type === 'investing') {
       setTicker(tx.symbol || '');
@@ -160,6 +162,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     const fullDate = new Date(`${date}T${time}:00`).toISOString();
     const amountNum = parseFloat(amount);
     const debtIds = new Set(data.debts.map(d => d.id));
+    const trimmedNotes = notes.trim() || undefined;
 
     // ── EDIT PATH ──────────────────────────────────────────────────
     if (editTransaction) {
@@ -169,8 +172,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           t.type === 'transfer' && t.id !== outflowTx.id &&
           Math.abs(new Date(t.date).getTime() - new Date(outflowTx.date).getTime()) < 5000
         );
-        await updateTransaction(outflowTx.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId });
-        if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId });
+        await updateTransaction(outflowTx.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId, notes: trimmedNotes });
+        if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
 
       } else if (editTransaction.type === 'debt_payment') {
         const isDebtSide = debtIds.has(editTransaction.accountId || '');
@@ -180,14 +183,13 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           t.type === 'debt_payment' && t.id !== editTransaction.id &&
           Math.abs(new Date(t.date).getTime() - new Date(editTransaction.date).getTime()) < 5000
         );
-        await updateTransaction(editTransaction.id, { date: fullDate, description: isDebtSide ? `Payment from ${getAccountName(sourceId)}` : `Payment to ${getAccountName(debtId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: editTransaction.accountId! });
-        if (paired) await updateTransaction(paired.id, { date: fullDate, description: isDebtSide ? `Payment to ${getAccountName(debtId)}` : `Payment from ${getAccountName(sourceId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: paired.accountId! });
+        await updateTransaction(editTransaction.id, { date: fullDate, description: isDebtSide ? `Payment from ${getAccountName(sourceId)}` : `Payment to ${getAccountName(debtId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: editTransaction.accountId!, notes: trimmedNotes });
+        if (paired) await updateTransaction(paired.id, { date: fullDate, description: isDebtSide ? `Payment to ${getAccountName(debtId)}` : `Payment from ${getAccountName(sourceId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: paired.accountId!, notes: trimmedNotes });
 
       } else if (editTransaction.type === 'investing') {
-        // Fee: stored as negative amount (cost/loss)
         const isFee = investCategory === 'Fee';
         const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
-        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: savedAmount, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
+        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: savedAmount, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
 
       } else {
         const isDebtAccount = debtIds.has(accountId);
@@ -197,26 +199,24 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         } else {
           finalAmount = editTransaction.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
         }
-        await updateTransaction(editTransaction.id, { date: fullDate, description: merchant, amount: finalAmount, category, accountId });
+        await updateTransaction(editTransaction.id, { date: fullDate, description: merchant, amount: finalAmount, category, accountId, notes: trimmedNotes });
       }
       resetForm(); onClose(); return;
     }
 
     // ── CREATE PATH ────────────────────────────────────────────────
     if (type === 'transfer') {
-      addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId });
-      addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId });
+      addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId, notes: trimmedNotes });
+      addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
 
     } else if (type === 'debt_payment') {
-      addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId });
-      addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId });
+      addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId, notes: trimmedNotes });
+      addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId, notes: trimmedNotes });
 
     } else if (type === 'investing') {
-      // Fee transactions: stored as negative amount so P/L treats them as a cost/loss
-      // Shares are still subtracted from total holdings (the fund sells shares to pay the fee)
       const isFee = investCategory === 'Fee';
       const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
-      addTransaction({ date: fullDate, description: assetName, amount: savedAmount, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency });
+      addTransaction({ date: fullDate, description: assetName, amount: savedAmount, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
 
     } else {
       const isDebtAccount = debtIds.has(accountId);
@@ -226,7 +226,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       } else {
         finalAmount = type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
       }
-      addTransaction({ date: fullDate, description: merchant, amount: finalAmount, type, category: category || 'General', accountId });
+      addTransaction({ date: fullDate, description: merchant, amount: finalAmount, type, category: category || 'General', accountId, notes: trimmedNotes });
     }
 
     resetForm(); onClose();
@@ -342,7 +342,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                   </div>
                 </div>
               </div>
-              {/* Fee info banner */}
               {isFeeCategory && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-sm p-3 text-xs font-mono text-amber-400">
                   <span className="font-bold uppercase tracking-wider block mb-1">Management Fee</span>
@@ -422,6 +421,22 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </select>
               </div>
             </>
+          )}
+
+          {/* Description (Notes) — shown for all non-investing types, after Merchant/Category/Account */}
+          {!isInvesting && (
+            <div>
+              <label className="block text-xs font-mono text-iron-dust mb-2">
+                Description <span className="text-iron-dust/40 normal-case font-sans">(optional)</span>
+              </label>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Add any extra details about this transaction..."
+                rows={2}
+                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none resize-none placeholder:text-iron-dust/40"
+              />
+            </div>
           )}
 
           {/* Investing estimated total */}
