@@ -1,10 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2.97.0";
-import { QueryHistorical } from "npm:yahoo-finance2@2.11.0";
+import yahooFinance from "npm:yahoo-finance2@2.11.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, apikey",
 };
 
 interface BackfillRequest {
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const historical = await QueryHistorical.historical(symbol, {
+    const historical = await yahooFinance.historical(symbol, {
       period1: new Date("1980-01-01"),
       period2: new Date(),
     });
