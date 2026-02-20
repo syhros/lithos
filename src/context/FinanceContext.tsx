@@ -128,8 +128,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const loadUserData = async () => {
+  const loadUserData = async (isInitialLoad: boolean = false) => {
     setLoading(true);
+    const startTime = Date.now();
     try {
       const { data: { session } } = await supabase.auth.getSession();
 
@@ -226,6 +227,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       setLastUpdated(new Date());
       await fetchMarketData();
+
+      if (isInitialLoad) {
+        const elapsed = Date.now() - startTime;
+        const remainingDelay = Math.max(0, 2000 - elapsed);
+        if (remainingDelay > 0) {
+          await new Promise(resolve => setTimeout(resolve, remainingDelay));
+        }
+      }
     } catch (error) {
       console.error('Failed to load user data:', error);
     } finally {
@@ -368,7 +377,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
     fetchFxRate();
-    loadUserData();
+    loadUserData(true);
 
     const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
     const firstTimeout = setTimeout(() => {
@@ -803,7 +812,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await fetchMarketData(true);
     } finally {
       const elapsed = Date.now() - startTime;
-      const remainingDelay = Math.max(0, 1000 - elapsed);
+      const remainingDelay = Math.max(0, 1500 - elapsed);
       setTimeout(() => {
         setLoading(false);
       }, remainingDelay);
