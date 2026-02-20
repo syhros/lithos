@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { NotificationModal } from './NotificationModal';
 import { ProfileModal } from './ProfileModal';
