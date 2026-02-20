@@ -40,10 +40,9 @@ Deno.serve(async (req: Request) => {
         .from("price_history_cache")
         .select("date, close")
         .eq("symbol", symbol)
-        .gte("date", from)
         .order("date", { ascending: true });
 
-      if (!cacheErr && cached && cached.length > 50) {
+      if (!cacheErr && cached && cached.length > 0) {
         result[symbol] = cached;
         continue;
       }
