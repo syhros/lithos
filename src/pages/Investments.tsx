@@ -60,7 +60,8 @@ export const Investments: React.FC = () => {
             const nativePrice = marketData ? marketData.price : 0;
             const displayPrice = nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
-            const avgPrice = h.quantity > 0 ? h.totalCost / h.quantity : 0;
+            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
+            const avgPrice = stockIsUsd && !userIsUsd ? avgPriceCost / USD_TO_GBP : (stockIsUsd === userIsUsd ? avgPriceCost : avgPriceCost * USD_TO_GBP);
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
