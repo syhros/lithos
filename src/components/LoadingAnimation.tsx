@@ -17,38 +17,39 @@ export const LoadingAnimation: React.FC<LoadingAnimationProps> = ({ isVisible, o
 
     const animateProgress = () => {
       setProgress(prev => {
-        if (prev >= 100) {
-          setIsTransitioning(true);
-          setTimeout(() => {
-            onComplete?.();
-          }, 1500);
-          return 100;
+        if (prev >= 95) {
+          return 95;
         }
 
-        const increment = Math.random() * 2.5;
-        return Math.min(prev + increment, 99.9);
+        const increment = Math.random() * 3.5;
+        return Math.min(prev + increment, 95);
       });
     };
 
-    const interval = setInterval(animateProgress, 40 + Math.random() * 60);
+    const interval = setInterval(animateProgress, 30 + Math.random() * 40);
+
     return () => clearInterval(interval);
-  }, [isVisible, onComplete]);
+  }, [isVisible]);
 
   useEffect(() => {
-    if (isTransitioning) {
+    if (isVisible && progress >= 95) {
       const timer = setTimeout(() => {
         setProgress(100);
-      }, 50);
+        setIsTransitioning(true);
+        setTimeout(() => {
+          onComplete?.();
+        }, 1200);
+      }, 600);
       return () => clearTimeout(timer);
     }
-  }, [isTransitioning]);
+  }, [isVisible, progress, onComplete]);
 
   const displayProgress = Math.floor(progress);
   const decimalPart = (progress % 1).toFixed(2).substring(2);
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-[#0a0a0b] transition-opacity duration-1500 ${
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-[#0a0a0b] transition-opacity duration-1200 ${
         isTransitioning ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
@@ -60,24 +61,22 @@ export const LoadingAnimation: React.FC<LoadingAnimationProps> = ({ isVisible, o
       </svg>
 
       <div className="relative z-10 flex flex-col items-center">
-        <div className="mb-12 relative">
-          <div className="flex items-baseline">
-            <div className="relative">
-              <span
-                className="text-8xl font-black tracking-tighter bg-gradient-to-b from-white via-yellow-100 to-amber-500 bg-clip-text text-transparent transition-all duration-100"
-                style={{
-                  filter: `drop-shadow(0 0 ${15 + progress * 0.3}px rgba(255, 193, 7, ${0.3 + progress / 300}))`,
-                }}
-              >
-                {displayProgress.toString().padStart(2, '0')}
-              </span>
-            </div>
+        <div className="mb-12 relative px-8">
+          <div className="flex items-baseline gap-1">
+            <span
+              className="text-8xl font-black tracking-tighter bg-gradient-to-b from-white via-yellow-100 to-amber-500 bg-clip-text text-transparent transition-all duration-100"
+              style={{
+                filter: `drop-shadow(0 0 ${15 + progress * 0.3}px rgba(255, 193, 7, ${0.3 + progress / 300}))`,
+              }}
+            >
+              {displayProgress.toString().padStart(2, '0')}
+            </span>
 
-            <div className="ml-2 flex flex-col items-start">
-              <span className="text-sm font-mono text-amber-600 font-light opacity-60">
-                {decimalPart}
+            <div className="flex items-baseline gap-0.5">
+              <span className="text-2xl font-mono text-amber-600 font-light opacity-60 leading-none">
+                .{decimalPart}
               </span>
-              <span className="text-xs font-mono text-amber-700/50 uppercase tracking-widest mt-1">
+              <span className="text-xs font-mono text-amber-700/60 uppercase tracking-widest leading-none">
                 %
               </span>
             </div>
