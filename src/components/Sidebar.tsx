@@ -1,10 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { NotificationModal } from './NotificationModal';
 import { ProfileModal } from './ProfileModal';
-import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import {
     LayoutDashboard,
     ArrowRightLeft,
@@ -18,14 +16,14 @@ import {
     Settings,
     Bell,
     User,
-    LineChart as LineChartIcon
+    LineChart
 } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/transactions', label: 'Transactions', icon: ArrowRightLeft },
   { path: '/accounts', label: 'Accounts', icon: Wallet },
-  { path: '/investments', label: 'Investments', icon: LineChartIcon },
+  { path: '/investments', label: 'Investments', icon: LineChart },
   { path: '/debts', label: 'Debts', icon: CreditCard },
   { path: '/goals', label: 'Goals', icon: Target },
   { path: '/bills', label: 'Bills', icon: Receipt },
@@ -38,24 +36,6 @@ export const Sidebar: React.FC = () => {
   const { data, gbpUsdRate, rateUpdatedAt } = useFinance();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-
-  const fxChartData = useMemo(() => {
-    const data = [];
-    for (let i = 0; i < 20; i++) {
-      const variance = (Math.random() - 0.5) * 0.02;
-      data.push({
-        value: gbpUsdRate * (1 + variance)
-      });
-    }
-    return data;
-  }, [gbpUsdRate]);
-
-  const dailyChange = useMemo(() => {
-    if (fxChartData.length < 2) return 0;
-    const first = fxChartData[0].value;
-    const last = fxChartData[fxChartData.length - 1].value;
-    return ((last - first) / first) * 100;
-  }, [fxChartData]);
 
   const formatUpdateTime = (updatedAt: string) => {
     if (!updatedAt) return '';
@@ -102,63 +82,15 @@ export const Sidebar: React.FC = () => {
         {/* Exchange Rate Display */}
         {gbpUsdRate > 0 && (
           <div className="mt-6 pb-6 px-4 border-b border-white/5">
-            <div className="bg-[#161618] border border-white/5 rounded-sm p-4 relative overflow-hidden group hover:border-white/10 transition-colors">
-              {/* Gradient background accent */}
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
-              {/* Header */}
-              <div className="relative z-10 mb-3">
-                <div className="text-[8px] text-iron-dust uppercase tracking-[2px] font-bold mb-2">MARKET LAYER / FX-GBP-01</div>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <div className="text-[9px] text-iron-dust uppercase tracking-widest mb-1">GBP / USD</div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-3xl font-black text-white tracking-tight">${gbpUsdRate.toFixed(2)}</span>
-                      <span className="text-sm font-bold text-blue-400">{(gbpUsdRate % 1).toFixed(3).slice(1)}</span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={clsx('text-[10px] font-bold uppercase tracking-widest mb-1', dailyChange >= 0 ? 'text-emerald-vein' : 'text-magma')}>
-                      {dailyChange >= 0 ? '+' : ''}{dailyChange.toFixed(2)}%
-                    </div>
-                    <div className="text-[9px] font-mono text-blue-400 uppercase tracking-widest">LIVE</div>
-                  </div>
-                </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold text-white">GBP</span>
+                <span className="px-2 py-1 bg-[#e85d04] rounded-sm text-[8px] font-mono font-bold text-black uppercase tracking-wider">£1</span>
+                <span className="text-[9px] font-bold text-white">=</span>
+                <span className="px-2 py-1 bg-[#e85d04] rounded-sm text-[8px] font-mono font-bold text-black uppercase tracking-wider">USD</span>
+                <span className="text-[9px] font-mono font-bold text-white">${gbpUsdRate.toFixed(4)}</span>
               </div>
-
-              {/* Mini Chart */}
-              <div className="relative z-10 h-[32px] -mx-4 mb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={fxChartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
-                    <YAxis hide domain={['dataMin - 0.01', 'dataMax + 0.01']} />
-                    <Line
-                      type="natural"
-                      dataKey="value"
-                      stroke={dailyChange >= 0 ? '#00f2ad' : '#ff6b5b'}
-                      strokeWidth={1.5}
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Footer Stats */}
-              <div className="relative z-10 grid grid-cols-2 gap-3 text-[9px]">
-                <div>
-                  <div className="text-iron-dust uppercase tracking-widest mb-1">BID PRICE</div>
-                  <div className="font-mono text-white font-bold">{(gbpUsdRate - 0.0001).toFixed(5)}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-iron-dust uppercase tracking-widest mb-1">ASK PRICE</div>
-                  <div className="font-mono text-white font-bold">{(gbpUsdRate + 0.0001).toFixed(5)}</div>
-                </div>
-              </div>
-
-              {/* Update time */}
-              <div className="relative z-10 mt-3 text-[8px] text-iron-dust">
-                Updated {formatUpdateTime(rateUpdatedAt)}
-              </div>
+              <div className="text-[8px] text-iron-dust">Updated {formatUpdateTime(rateUpdatedAt)}</div>
             </div>
           </div>
         )}
