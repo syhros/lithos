@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
-import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
+import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes, subDays } from 'date-fns';
@@ -9,12 +9,32 @@ import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
 
+// Returns the base part of a ticker for display: strips '-' and anything after it.
+// e.g. 'ETH-USD' → 'ETH', 'CSP1.L' → 'CSP1', 'AAPL' → 'AAPL'
+const tickerAbbrev = (symbol: string): string => {
+  const base = symbol.split('-')[0];
+  return base.substring(0, 4).toUpperCase();
+};
+
+// Truncates a name to 40 chars, breaking only on full words (no mid-word hyphen).
+const truncateName = (name: string, max = 40): string => {
+  if (name.length <= max) return name;
+  const words = name.split(' ');
+  let result = '';
+  for (const word of words) {
+    if ((result + (result ? ' ' : '') + word).length > max) break;
+    result += (result ? ' ' : '') + word;
+  }
+  return result || name.substring(0, max);
+};
+
 export const Investments: React.FC = () => {
     const { data, currentBalances, currentPrices, historicalPrices, getHistory, currencySymbol, lastUpdated, refreshData, loading, gbpUsdRate } = useFinance();
     const userCurrency = data?.user?.currency || 'GBP';
     const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
+    const [closedOpen, setClosedOpen] = useState(false);
 
     const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
     const isStale = minsSinceUpdate > 5;
@@ -22,22 +42,21 @@ export const Investments: React.FC = () => {
     const investmentAssets = data?.assets?.filter(a => a.type === 'investment') || [];
 
     const holdings = useMemo(() => {
-        const map = new Map<string, { symbol: string; quantity: number; totalCost: number; currency: string }>();
+        const map = new Map<string, { symbol: string; quantity: number; totalCost: number; buyQty: number; buyTotalCost: number; currency: string }>();
 
         (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, currency: tx.currency || 'GBP' };
+                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, buyQty: 0, buyTotalCost: 0, currency: tx.currency || 'GBP' };
                 const isSell = tx.category === 'Sell';
 
                 if (isSell) {
-                  if (current.quantity > 0) {
-                    const costPerShare = current.totalCost / current.quantity;
-                    current.totalCost -= tx.quantity * costPerShare;
-                  }
-                  current.quantity += tx.quantity;
+                    // Reduce quantity only; avg cost stays based on buys
+                    current.quantity += tx.quantity; // quantity is negative for sells
                 } else {
-                  current.quantity += tx.quantity;
-                  current.totalCost += Math.abs(tx.amount);
+                    current.quantity += tx.quantity;
+                    current.totalCost += Math.abs(tx.amount);
+                    current.buyQty += tx.quantity;
+                    current.buyTotalCost += Math.abs(tx.amount);
                 }
                 if (tx.currency) current.currency = tx.currency;
                 map.set(tx.symbol, current);
@@ -66,7 +85,8 @@ export const Investments: React.FC = () => {
             }
 
             const currentValue = h.quantity * displayPrice;
-            const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
+            // Avg cost based solely on buy transactions
+            const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
             const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
@@ -77,6 +97,8 @@ export const Investments: React.FC = () => {
             const yesterdayPrice = history[yesterday] || history[today] || nativePrice;
             const todayPrice = history[today] || nativePrice;
             const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
+
+            const tickerName = marketData?.name ?? h.symbol;
 
             return {
                 ...h,
@@ -90,10 +112,14 @@ export const Investments: React.FC = () => {
                 isZeroCost,
                 marketData,
                 fxRate,
-                dailyChangePercent
+                dailyChangePercent,
+                tickerName,
             };
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices, gbpUsdRate, userCurrency]);
+
+    const activeHoldings = holdings.filter(h => h.quantity > 0);
+    const closedHoldings = holdings.filter(h => h.quantity <= 0);
 
     const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
@@ -174,6 +200,30 @@ export const Investments: React.FC = () => {
         });
         return result;
     }, [holdings, historicalPrices, gbpUsdRate]);
+
+    // Sparkline for closed holdings — price-only (no qty multiplication since qty = 0)
+    const closedSparklines = useMemo(() => {
+        const result: Record<string, { date: string; value: number }[]> = {};
+        closedHoldings.forEach(h => {
+            const today = new Date();
+            const start = subMonths(today, 0.25);
+            const dates = eachDayOfInterval({ start, end: today }).slice(-7);
+            const hist = historicalPrices[h.symbol] || {};
+            const isGbx = h.nativeCurrency === 'GBX';
+            const isUsd = h.nativeCurrency === 'USD';
+            let fx = 1;
+            if (isUsd && gbpUsdRate > 0) fx = 1 / gbpUsdRate;
+
+            result[h.symbol] = dates.map(date => {
+                const dateStr = format(date, 'yyyy-MM-dd');
+                let price = hist[dateStr] ?? h.nativePrice;
+                if (isGbx) price = price / 100;
+                else price = price * fx;
+                return { date: format(date, 'dd'), value: parseFloat(price.toFixed(2)) };
+            });
+        });
+        return result;
+    }, [closedHoldings, historicalPrices, gbpUsdRate]);
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -281,7 +331,7 @@ export const Investments: React.FC = () => {
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
-                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctTotalCost === 0 ? '+∞' : acctProfitPercent.toFixed(2)}%)
+                                        {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({acctTotalCost === 0 ? '+\u221e' : acctProfitPercent.toFixed(2)}%)
                                     </div>
                                 </div>
                             </div>
@@ -290,14 +340,14 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            {/* Section 2: Portfolio Holdings */}
-            <div>
+            {/* Section 2: Active Holdings */}
+            <div className="mb-12">
                 <h2 className="text-sm font-bold text-white uppercase tracking-[2px] mb-6 flex items-center gap-2">
                     <TrendingUp size={16} className="text-emerald-vein" />
                     Portfolio Holdings
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                    {holdings.map((stock) => {
+                    {activeHoldings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
                         const nativeSymbol = getCurrencySymbol(stock.nativeCurrency);
                         const dayChange = stock.dailyChangePercent ?? 0;
@@ -308,6 +358,9 @@ export const Investments: React.FC = () => {
                         const sparkUp = sparkLast >= sparkFirst;
                         const sparkColor = sparkUp ? '#00f2ad' : '#8e8e93';
                         const sparkMin = sparkline.length > 0 ? Math.min(...sparkline.map(d => d.value)) * 0.98 : 'auto';
+                        const abbrev = tickerAbbrev(stock.symbol);
+                        const displayName = truncateName(stock.tickerName);
+                        const isUsd = stock.nativeCurrency === 'USD';
 
                         return (
                             <div
@@ -315,23 +368,38 @@ export const Investments: React.FC = () => {
                                 onClick={() => setSelectedHolding(stock)}
                                 className="bg-[#161618] border border-white/5 p-5 rounded-sm relative hover:bg-white/[0.02] transition-colors group cursor-pointer flex flex-col"
                             >
+                                {/* Header row */}
                                 <div className="flex justify-between items-start mb-4">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-9 h-9 bg-white/5 rounded-full flex items-center justify-center text-white font-bold tracking-wider text-xs border border-white/5">
-                                            {stock.symbol.substring(0, 2).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <h3 className="text-sm font-bold text-white leading-none">{stock.symbol}</h3>
-                                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold text-black uppercase tracking-wider" style={{ backgroundColor: '#e85d04' }}>
+                                    <div className="flex items-end gap-3">
+                                        {/* Ticker square */}
+                                        <div className="flex flex-col items-center gap-1">
+                                            <div
+                                                className="w-12 h-10 flex items-center justify-center rounded-sm font-bold tracking-wider text-[11px] text-black border border-white/5"
+                                                style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
+                                            >
+                                                {abbrev}
+                                            </div>
+                                            <span
+                                                className="px-1.5 py-0.5 rounded text-[7px] font-mono font-bold text-black uppercase tracking-wider"
+                                                style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
+                                            >
                                                 {stock.nativeCurrency}
                                             </span>
                                         </div>
+                                        {/* Name */}
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-xs font-bold text-white leading-snug line-clamp-2 break-words" style={{ wordBreak: 'break-word', overflowWrap: 'break-word', hyphens: 'none' }}>
+                                                {displayName}
+                                            </h3>
+                                        </div>
                                     </div>
-                                    <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                                    {/* P/L badge */}
+                                    <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5 shrink-0 ml-2', isProfit ? 'text-emerald-vein' : 'text-magma')}>
                                         {isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {stock.avgPrice === 0 ? '+∞' : stock.profitPercent.toFixed(1)}%
+                                        {stock.avgPrice === 0 ? '+\u221e' : stock.profitPercent.toFixed(1)}%
                                     </div>
                                 </div>
+
                                 <div className="mb-2">
                                     <div className="text-2xl font-bold text-white tracking-tight">
                                         {currencySymbol}{Math.floor(stock.currentValue).toLocaleString()}<span className="text-base font-light opacity-40">.{stock.currentValue.toFixed(2).split('.')[1]}</span>
@@ -380,6 +448,103 @@ export const Investments: React.FC = () => {
                     })}
                 </div>
             </div>
+
+            {/* Section 3: Closed / Zero-share Holdings */}
+            {closedHoldings.length > 0 && (
+                <div>
+                    <button
+                        onClick={() => setClosedOpen(p => !p)}
+                        className="flex items-center gap-2 text-sm font-bold text-iron-dust uppercase tracking-[2px] mb-4 hover:text-white transition-colors w-full text-left"
+                    >
+                        {closedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <TrendingDown size={16} className="text-iron-dust" />
+                        Closed Positions
+                        <span className="ml-1 text-[10px] font-mono px-1.5 py-0.5 bg-white/5 rounded text-iron-dust">{closedHoldings.length}</span>
+                    </button>
+
+                    {closedOpen && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                            {closedHoldings.map((stock) => {
+                                const isProfit = stock.profitValue >= 0;
+                                const nativeSymbol = getCurrencySymbol(stock.nativeCurrency);
+                                const sparkline = closedSparklines[stock.symbol] || [];
+                                const sparkFirst = sparkline[0]?.value ?? 0;
+                                const sparkLast = sparkline[sparkline.length - 1]?.value ?? 0;
+                                const sparkUp = sparkLast >= sparkFirst;
+                                const sparkColor = sparkUp ? '#00f2ad' : '#8e8e93';
+                                const sparkMin = sparkline.length > 0 ? Math.min(...sparkline.map(d => d.value)) * 0.98 : 'auto';
+                                const abbrev = tickerAbbrev(stock.symbol);
+                                const isUsd = stock.nativeCurrency === 'USD';
+
+                                return (
+                                    <div
+                                        key={stock.symbol}
+                                        onClick={() => setSelectedHolding(stock)}
+                                        className="bg-[#161618] border border-white/5 p-4 rounded-sm relative hover:bg-white/[0.02] transition-colors cursor-pointer flex flex-col opacity-70 hover:opacity-100"
+                                    >
+                                        {/* Header */}
+                                        <div className="flex justify-between items-center mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <div
+                                                    className="w-10 h-8 flex items-center justify-center rounded-sm font-bold tracking-wider text-[10px] text-black"
+                                                    style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
+                                                >
+                                                    {abbrev}
+                                                </div>
+                                                <div>
+                                                    <span className="text-xs font-bold text-white block leading-none">{stock.symbol}</span>
+                                                    <span
+                                                        className="inline-block mt-0.5 px-1 py-0.5 rounded text-[7px] font-mono font-bold text-black uppercase tracking-wider"
+                                                        style={{ backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}
+                                                    >
+                                                        {stock.nativeCurrency}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className={clsx('flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                                                {isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                                {stock.avgPrice === 0 ? '+\u221e' : stock.profitPercent.toFixed(1)}%
+                                            </div>
+                                        </div>
+
+                                        {/* Sparkline */}
+                                        <div className="h-[32px] w-full my-1">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={sparkline} margin={{ top: 1, right: 1, left: 1, bottom: 1 }}>
+                                                    <YAxis domain={[sparkMin, 'auto']} hide={true} />
+                                                    <Line type="monotone" dataKey="value" stroke={sparkColor} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+
+                                        {/* Stats row */}
+                                        <div className="grid grid-cols-3 gap-x-3 border-t border-white/5 pt-2 mt-1">
+                                            <div>
+                                                <span className="block text-[7px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span>
+                                                <span className="font-mono text-[9px] text-white">
+                                                    {stock.nativeCurrency === 'GBX'
+                                                        ? `${stock.nativePrice.toFixed(2)}p`
+                                                        : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span className="block text-[7px] text-iron-dust uppercase tracking-wider mb-0.5">Avg Cost</span>
+                                                <span className="font-mono text-[9px] text-white">{currencySymbol}{stock.avgPrice.toFixed(2)}</span>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className="block text-[7px] text-iron-dust uppercase tracking-wider mb-0.5">P/L</span>
+                                                <span className={clsx('font-mono text-[9px]', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                                                    {isProfit ? '+' : ''}{currencySymbol}{(Math.floor(Math.abs(stock.profitValue) * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
 
             <AddAccountModal isOpen={isAddAccountModalOpen} onClose={() => setIsAddAccountModalOpen(false)} defaultType="investment" />
             <HoldingDetailModal isOpen={!!selectedHolding} onClose={() => setSelectedHolding(null)} holding={selectedHolding} />

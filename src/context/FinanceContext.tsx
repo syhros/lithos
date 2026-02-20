@@ -8,6 +8,7 @@ interface MarketData {
     change: number;
     changePercent: number;
     currency: string;
+    name?: string;
 }
 
 interface HistoricalPoint {
@@ -323,7 +324,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const shouldFetch = force || !lastSync || (now - parseInt(lastSync) > 30 * 60 * 1000);
 
       if (shouldFetch) {
-        // Always get a fresh session token for edge function calls
         const token = await getAuthToken();
         const authHeader = { 'Authorization': `Bearer ${token}` };
 
@@ -342,6 +342,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 fetchedPrices[sym] = {
                   ...rawPrices[sym],
                   currency: symbolCurrencyMap[sym] || rawPrices[sym].currency || 'GBP',
+                  name: rawPrices[sym].name ?? sym,
                 };
               }
             });
@@ -359,6 +360,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               change: jitter,
               changePercent: 0,
               currency: symbolCurrencyMap[sym] || 'GBP',
+              name: sym,
             };
           });
         }

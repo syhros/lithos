@@ -51,6 +51,7 @@ Deno.serve(async (req: Request) => {
               change,
               changePercent,
               currency: meta.currency ?? "USD",
+              name: meta.shortName ?? meta.longName ?? symbol,
             };
           }
         } catch (e) {
