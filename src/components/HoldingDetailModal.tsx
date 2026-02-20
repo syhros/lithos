@@ -1,408 +1,382 @@
 import React, { useMemo, useState } from 'react';
-import { X, Calendar, DollarSign } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Pencil, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { format, subDays, eachDayOfInterval, isBefore, parseISO, addDays, subWeeks, subMonths } from 'date-fns';
+import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } from 'date-fns';
 import { clsx } from 'clsx';
-import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance } from '../context/FinanceContext';
+import { Asset, Currency } from '../data/mockData';
 
-type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
-type ChartMode = 'VALUE' | 'STOCK';
-
-interface HoldingDetailModalProps {
+interface InvestmentAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
-  holding: {
-    symbol: string;
-    quantity: number;
-    nativeCurrency: string;
-    currentValue: number;    // GBP
-    avgPrice: number;        // GBP cost-per-share
-    profitValue: number;     // GBP
-    profitPercent: number;
-    nativePrice: number;     // native currency (pence for GBX)
-  } | null;
+  account: Asset | null;
 }
 
-const TIME_RANGES: TimeRange[] = ['1W', '1M', '3M', '6M', '1Y', 'ALL'];
+const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
-const getStartDate = (range: TimeRange, allDates: Date[], chartMode: ChartMode, firstTxDate: Date): Date => {
-  const today = new Date();
-  switch (range) {
-    case '1W': return subWeeks(today, 1);
-    case '1M': return subMonths(today, 1);
-    case '3M': return subMonths(today, 3);
-    case '6M': return subMonths(today, 6);
-    case '1Y': return subDays(today, 365);
-    case 'ALL':
-      if (chartMode === 'VALUE') {
-        return firstTxDate;
-      } else {
-        return allDates.length > 0 ? allDates[0] : subDays(today, 365);
-      }
+// Returns a display-friendly price string for a holding.
+// GBX raw prices (pence) are shown as both Xp and £X/100.
+// USD shown as $X. GBP shown as £X.
+const formatHoldingPrice = (rawPrice: number, currency: string): string => {
+  if (currency === 'GBX') {
+    const gbp = rawPrice / 100;
+    return `${rawPrice.toFixed(2)}p (\u00a3${gbp.toFixed(4)})`;
   }
+  if (currency === 'USD') return `$${rawPrice.toFixed(2)}`;
+  return `\u00a3${rawPrice.toFixed(2)}`;
 };
 
-const getDateFormat = (range: TimeRange): string => {
-  switch (range) {
-    case '1W': return 'dd MMM';
-    case '1M': return 'dd MMM';
-    case '3M': return 'dd MMM';
-    case '6M': return 'MMM yy';
-    case '1Y': return 'MMM yy';
-    case 'ALL': return 'MMM yy';
-  }
-};
+export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ isOpen, onClose, account }) => {
+  const { data, currentBalances, currentPrices, historicalPrices, updateAccount, currencySymbol, gbpUsdRate } = useFinance();
 
-const CustomTooltip = ({ active, payload, label, mode, nativeCurrency, currencySymbol, gbpUsdRate }: any) => {
-  if (active && payload && payload.length) {
-    const value = payload[0]?.value;
-    const isUsd = nativeCurrency === 'USD';
-    const isGbx = nativeCurrency === 'GBX';
-    return (
-      <div className="bg-[#1a1c1e] border border-white/10 p-3 rounded-sm shadow-xl min-w-[160px]">
-        <p className="text-[10px] font-mono text-iron-dust uppercase tracking-widest mb-2">{label}</p>
-        <p className="text-xs font-bold text-white font-mono">
-          {mode === 'VALUE'
-            ? `${currencySymbol}${value?.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-            : isGbx
-              ? `${value?.toFixed(2)}p`
-              : isUsd
-                ? `$${value?.toFixed(2)}`
-                : `£${value?.toFixed(2)}`
+  const [editMode, setEditMode] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editInstitution, setEditInstitution] = useState('');
+  const [editCurrency, setEditCurrency] = useState<Currency>('GBP');
+  const [editStartingValue, setEditStartingValue] = useState('');
+  const [editColor, setEditColor] = useState('');
+
+  const openEdit = () => {
+    if (!account) return;
+    setEditName(account.name);
+    setEditInstitution(account.institution || '');
+    setEditCurrency(account.currency);
+    setEditStartingValue(account.startingValue.toString());
+    setEditColor(account.color || COLORS[0]);
+    setEditMode(true);
+  };
+
+  const saveEdit = () => {
+    if (!account) return;
+    updateAccount(account.id, {
+      name: editName,
+      institution: editInstitution,
+      currency: editCurrency,
+      startingValue: parseFloat(editStartingValue) || account.startingValue,
+      color: editColor,
+    });
+    setEditMode(false);
+  };
+
+  const balance = account ? currentBalances[account.id] || 0 : 0;
+
+  const holdings = useMemo(() => {
+    if (!account) return [];
+    const map = new Map<string, { symbol: string; quantity: number; totalCost: number; currency: string }>();
+
+    (data?.transactions || []).forEach(tx => {
+      if (tx.type === 'investing' && tx.symbol && tx.quantity && tx.accountId === account.id) {
+        const cur = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, currency: tx.currency || 'GBP' };
+        const isSell = tx.category === 'Sell';
+
+        if (isSell) {
+          if (cur.quantity > 0) {
+            const costPerShare = cur.totalCost / cur.quantity;
+            cur.totalCost -= tx.quantity * costPerShare;
           }
-        </p>
-        {mode === 'STOCK' && isUsd && (
-          <p className="text-[9px] font-mono text-iron-dust mt-0.5">
-            ≈ {currencySymbol}{(value / gbpUsdRate)?.toFixed(2)} GBP
-          </p>
-        )}
-        {mode === 'STOCK' && isGbx && (
-          <p className="text-[9px] font-mono text-iron-dust mt-0.5">
-            ≈ £{(value / 100)?.toFixed(4)} GBP
-          </p>
-        )}
-        <p className="text-[9px] font-mono text-iron-dust mt-0.5 uppercase">
-          {mode === 'VALUE' ? `Portfolio Value (GBP)` : `Stock Price (${nativeCurrency || 'GBP'})`}
-        </p>
-      </div>
-    );
-  }
-  return null;
-};
+          cur.quantity += tx.quantity;
+        } else {
+          cur.quantity += tx.quantity;
+          cur.totalCost += Math.abs(tx.amount); // tx.amount is always in GBP
+        }
 
-export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, onClose, holding }) => {
-  const { data, historicalPrices, currentPrices, currencySymbol, gbpUsdRate } = useFinance();
-  const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
-  const [chartMode, setChartMode] = useState<ChartMode>('VALUE');
+        map.set(tx.symbol, cur);
+      }
+    });
 
-  const transactions = useMemo(() => {
-    if (!holding) return [];
-    return (data?.transactions || [])
-      .filter(t => t.type === 'investing' && t.symbol === holding.symbol)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [data?.transactions, holding]);
+    return Array.from(map.values()).map(h => {
+      const marketData = currentPrices[h.symbol];
+      const isGbx = h.currency === 'GBX';
+      const isUsd = h.currency === 'USD';
+      const fxRate = (isUsd && gbpUsdRate > 0) ? 1 / gbpUsdRate : 1;
 
-  const nativeCurrency = holding?.nativeCurrency || 'GBP';
-  const isGbx = nativeCurrency === 'GBX';
-  const isUsd = nativeCurrency === 'USD';
+      // rawNativePrice: price as returned by API (pence for GBX, USD for USD, GBP for GBP)
+      const rawNativePrice = marketData?.price || 0;
+      // displayPrice: always in GBP for portfolio value calculations
+      const displayPrice = isGbx ? rawNativePrice / 100 : rawNativePrice * fxRate;
+      const currentValue = h.quantity * displayPrice; // GBP
 
-  // Raw native price from market data (still in pence for GBX)
-  const rawNativePrice = holding?.nativePrice ?? 0;
+      // profitValue is GBP vs GBP (totalCost is already in GBP)
+      const profitValue = currentValue - h.totalCost;
+      const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
-  // For avgPrice: holding.avgPrice is GBP cost-per-share. For GBX stocks, convert back to pence for display.
-  const displayAvgPrice = isGbx ? (holding?.avgPrice ?? 0) * 100 : (holding?.avgPrice ?? 0);
-  const avgPriceSymbol = isGbx ? 'p' : isUsd ? '$' : '£';
+      // avgCostGbp: GBP cost per share
+      const avgCostGbp = h.quantity > 0 ? h.totalCost / h.quantity : 0;
 
-  // Current price in native currency
-  const displayCurrentPrice = rawNativePrice;
-  const currentPriceSymbol = isGbx ? 'p' : isUsd ? '$' : '£';
+      return {
+        ...h,
+        rawNativePrice,
+        displayPrice,
+        currentValue,
+        profitValue,
+        profitPercent,
+        marketData,
+        avgCostGbp,
+        isGbx,
+        isUsd,
+      };
+    }).sort((a, b) => b.currentValue - a.currentValue);
+  }, [account, data.transactions, currentPrices, gbpUsdRate]);
 
-  const fxRate = (isUsd && gbpUsdRate > 0) ? (1 / gbpUsdRate) : 1;
+  const totalCost = holdings.reduce((s, h) => s + h.totalCost, 0);
+  const totalValue = holdings.reduce((s, h) => s + h.currentValue, 0);
+  const totalProfit = totalValue - totalCost;
+  const totalProfitPct = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
 
-  const allChartData = useMemo(() => {
-    if (!holding) return [];
+  const chartData = useMemo(() => {
+    if (!account) return [];
 
     const today = new Date();
-    const sortedTxs = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    const history = historicalPrices[holding.symbol] || {};
+    const start = subMonths(today, 1);
+    const dates = eachDayOfInterval({ start, end: today });
 
-    const firstTxDate = sortedTxs.length > 0 ? parseISO(sortedTxs[0].date) : subDays(today, 365);
+    const sortedTxs = data.transactions
+      .filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === account.id)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const historyDates = Object.keys(history).sort();
-    const earliestHistoryDate = historyDates.length > 0 ? parseISO(historyDates[0]) : firstTxDate;
-    const latestHistoryDate = historyDates.length > 0 ? parseISO(historyDates[historyDates.length - 1]) : today;
-
-    const chartStartDate = isBefore(earliestHistoryDate, firstTxDate) ? earliestHistoryDate : firstTxDate;
-    const chartEndDate = isBefore(today, latestHistoryDate) ? latestHistoryDate : today;
-
-    const dates = eachDayOfInterval({ start: chartStartDate, end: chartEndDate });
-
-    let currentQty = 0;
+    const holdingQtys: Record<string, number> = {};
     let txIndex = 0;
-    let lastKnownPrice = rawNativePrice || 100;
+
+    const symbolCurrencies: Record<string, string> = {};
+    sortedTxs.forEach(t => { if (t.symbol && t.currency) symbolCurrencies[t.symbol] = t.currency; });
+
+    let lastKnownValue = balance;
 
     return dates.map(date => {
-      const dateStr = format(date, 'yyyy-MM-dd');
-
       while (txIndex < sortedTxs.length && isBefore(parseISO(sortedTxs[txIndex].date), addDays(date, 1))) {
         const tx = sortedTxs[txIndex];
-        currentQty += tx.quantity || 0;
+        holdingQtys[tx.symbol!] = (holdingQtys[tx.symbol!] || 0) + (tx.quantity || 0);
         txIndex++;
       }
 
-      const rawPrice = history[dateStr] !== undefined ? history[dateStr] : lastKnownPrice;
-      if (history[dateStr] !== undefined) lastKnownPrice = history[dateStr];
+      let val = 0;
+      Object.entries(holdingQtys).forEach(([sym, qty]) => {
+        const hist = historicalPrices[sym] || {};
+        const dateStr = format(date, 'yyyy-MM-dd');
+        let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
+        const isUsd = symbolCurrencies[sym] === 'USD';
+        const isGbx = symbolCurrencies[sym] === 'GBX';
+        const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
+        if (isGbx) price = price / 100;
+        val += qty * price * fxRate;
+      });
 
-      // Convert to GBP for value chart
-      const gbpPrice = isGbx ? rawPrice / 100 : rawPrice * fxRate;
-      const marketValueGbp = currentQty * gbpPrice;
+      if (val > 0) lastKnownValue = val;
 
       return {
-        date,
-        dateStr,
-        value: marketValueGbp,
-        price: rawPrice, // native price (pence for GBX, USD for USD, GBP for GBP)
-        qty: currentQty,
+        date: format(date, 'dd MMM'),
+        value: val > 0 ? parseFloat(val.toFixed(2)) : lastKnownValue,
       };
     });
-  }, [holding, historicalPrices, transactions, rawNativePrice, isGbx, fxRate]);
+  }, [account, data.transactions, historicalPrices, currentPrices, balance, gbpUsdRate]);
 
-  const chartData = useMemo(() => {
-    if (!holding || allChartData.length === 0) return [];
-
-    const allDates = allChartData.map(d => d.date);
-    const sortedTxs = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    const firstTxDate = sortedTxs.length > 0 ? parseISO(sortedTxs[0].date) : subDays(new Date(), 365);
-    const startDate = getStartDate(timeRange, allDates, chartMode, firstTxDate);
-    const fmt = getDateFormat(timeRange);
-
-    return allChartData
-      .filter(d => !isBefore(d.date, startDate))
-      .map(d => ({
-        date: format(d.date, fmt),
-        value: parseFloat(d.value.toFixed(2)),
-        price: parseFloat(d.price.toFixed(2)),
-      }));
-  }, [allChartData, timeRange, holding, chartMode, transactions]);
-
-  if (!isOpen || !holding) return null;
-
-  const isProfit = holding.profitValue >= 0;
-  const activeDataKey = chartMode === 'VALUE' ? 'value' : 'price';
-  const chartColor = chartMode === 'VALUE' ? '#d4af37' : '#3b82f6';
-  const gradientId = `grad-${chartMode.toLowerCase()}`;
+  const firstVal = chartData[0]?.value ?? 0;
+  const lastVal = chartData[chartData.length - 1]?.value ?? 0;
+  const chartUp = lastVal >= firstVal;
+  const chartColor = '#3b82f6';
 
   const chartMin = chartData.length > 0
-    ? Math.min(...chartData.map(d => chartMode === 'VALUE' ? d.value : d.price)) * 0.98
+    ? Math.min(...chartData.map(d => d.value)) * 0.97
     : 'auto';
+
+  if (!isOpen || !account) return null;
+
+  const isProfit = totalProfit >= 0;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-4xl h-[85vh] rounded-sm shadow-2xl overflow-hidden relative slide-up flex flex-col">
+      <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-3xl max-h-[85vh] rounded-sm shadow-2xl overflow-hidden slide-up flex flex-col">
 
-        {/* Header */}
         <div className="p-6 border-b border-white/5 flex justify-between items-start bg-[#131517]">
           <div>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center text-white font-bold text-xs border border-white/5">
-                {holding.symbol.substring(0, 2)}
-              </div>
-              <h2 className="text-2xl font-bold text-white tracking-tight">{holding.symbol}</h2>
-              <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-1 rounded-sm border text-black"
-                style={{ borderColor: isUsd ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}>
-                {nativeCurrency}
-              </span>
-            </div>
-            <p className="text-xs font-mono text-iron-dust uppercase tracking-wider">Investment Performance</p>
+            <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[3px] block mb-1">{account.institution}</span>
+            <h2 className="text-2xl font-bold text-white tracking-tight">{account.name}</h2>
+            <span className="inline-block mt-1 px-2 py-0.5 bg-white/5 border border-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">Investment</span>
           </div>
-
           <div className="flex items-center gap-6">
-            {/* Current Value & Total Return are always in user's GBP */}
             <div className="text-right">
-              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Current Value (GBP)</span>
+              <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Account Value (GBP)</span>
               <span className="text-2xl font-bold text-white tracking-tight">
-                {currencySymbol}{holding.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
             <div className="text-right">
               <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Total Return (GBP)</span>
               <span className={clsx('text-xl font-bold font-mono', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                {isProfit ? '+' : ''}{currencySymbol}{holding.profitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {isProfit ? '+' : ''}{currencySymbol}{totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors ml-4">
+            <button
+              onClick={editMode ? saveEdit : openEdit}
+              className={clsx(
+                'flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors border',
+                editMode
+                  ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
+                  : 'bg-white/5 border-white/10 text-iron-dust hover:text-white hover:border-white/20'
+              )}
+            >
+              {editMode ? <Check size={13} /> : <Pencil size={13} />}
+              {editMode ? 'Save' : 'Edit'}
+            </button>
+            <button onClick={() => { setEditMode(false); onClose(); }} className="p-2 hover:bg-white/5 rounded-full text-iron-dust hover:text-white transition-colors">
               <X size={20} />
             </button>
           </div>
         </div>
 
-        {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-8">
 
-          {/* Chart Section */}
-          <div className="mb-10">
-            <div className="h-[340px] w-full bg-[#161618] border border-white/5 rounded-sm relative flex flex-col p-6">
-
-              {/* Controls Header */}
-              <div className="flex justify-between items-center mb-4 z-10">
-
-                {/* MODE TOGGLE: VALUE / STOCK */}
-                <div className="flex bg-[#1a1c1e] rounded-sm p-1 border border-white/5">
-                  {(['VALUE', 'STOCK'] as ChartMode[]).map(mode => (
-                    <button
-                      key={mode}
-                      onClick={() => setChartMode(mode)}
-                      className={clsx(
-                        'px-4 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all uppercase tracking-widest',
-                        chartMode === mode ? 'bg-white text-black' : 'text-iron-dust hover:text-white'
-                      )}
-                    >
-                      {mode}
-                    </button>
-                  ))}
+          {editMode && (
+            <div className="bg-[#161618] border border-white/5 rounded-sm p-6 space-y-5">
+              <h3 className="text-xs font-bold text-white uppercase tracking-[2px]">Edit Account</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Account Name</label>
+                  <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
                 </div>
-
-                {/* TIME RANGE SELECTOR */}
-                <div className="flex bg-[#1a1c1e] rounded-sm p-1 border border-white/5">
-                  {TIME_RANGES.map(range => (
-                    <button
-                      key={range}
-                      onClick={() => setTimeRange(range)}
-                      className={clsx(
-                        'px-3 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all',
-                        timeRange === range ? 'bg-white text-black' : 'text-iron-dust hover:text-white'
-                      )}
-                    >
-                      {range}
-                    </button>
-                  ))}
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Institution</label>
+                  <input type="text" value={editInstitution} onChange={e => setEditInstitution(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
                 </div>
               </div>
-
-              {/* Chart Area */}
-              <div className="flex-1 w-full min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={chartColor} stopOpacity={0.25} />
-                        <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" vertical={false} strokeOpacity={0.05} />
-                    <XAxis hide={true} dataKey="date" />
-                    <YAxis
-                      tick={{ fill: '#8e8e93', fontSize: 10, fontFamily: 'JetBrains Mono' }}
-                      tickLine={false}
-                      axisLine={false}
-                      domain={[chartMin, 'auto']}
-                      tickFormatter={(val) =>
-                        chartMode === 'VALUE'
-                          ? `${currencySymbol}${(val / 1000).toFixed(1)}k`
-                          : isGbx
-                            ? `${val.toFixed(0)}p`
-                            : isUsd
-                              ? `$${val.toFixed(0)}`
-                              : `£${val.toFixed(0)}`
-                      }
-                    />
-                    <Tooltip content={<CustomTooltip mode={chartMode} nativeCurrency={nativeCurrency} currencySymbol={currencySymbol} gbpUsdRate={gbpUsdRate} />} />
-                    <Area
-                      key={chartMode}
-                      type="monotone"
-                      dataKey={activeDataKey}
-                      stroke={chartColor}
-                      strokeWidth={2}
-                      fill={`url(#${gradientId})`}
-                      isAnimationActive={true}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Currency</label>
+                  <select value={editCurrency} onChange={e => setEditCurrency(e.target.value as Currency)}
+                    className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
+                    <option value="GBP">GBP (\u00a3)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (\u20ac)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Starting Balance</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-3 text-iron-dust text-xs">{currencySymbol}</span>
+                    <input type="number" value={editStartingValue} onChange={e => setEditStartingValue(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 p-3 pl-6 text-sm text-white rounded-sm focus:border-magma outline-none font-mono" />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-4 mb-10">
-            <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Shares Owned</span>
-              <span className="text-lg font-mono text-white">{holding.quantity.toFixed(8)}</span>
-            </div>
-
-            {/* Avg Buy Price — show in native currency */}
-            <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Avg Buy Price ({nativeCurrency})</span>
-              <span className="text-lg font-mono text-white">
-                {avgPriceSymbol}{displayAvgPrice.toFixed(isGbx ? 2 : 4)}
-              </span>
-            </div>
-
-            {/* Current Price — raw native price */}
-            <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">
-                Current Price ({nativeCurrency})
-              </span>
               <div>
-                <span className="text-lg font-mono text-white">
-                  {currentPriceSymbol}{displayCurrentPrice.toFixed(2)}
-                </span>
-                {isUsd && (
-                  <span className="text-[10px] font-mono text-iron-dust block mt-0.5">
-                    ≈ {currencySymbol}{(rawNativePrice / gbpUsdRate).toFixed(2)} GBP
-                  </span>
-                )}
-                {isGbx && (
-                  <span className="text-[10px] font-mono text-iron-dust block mt-0.5">
-                    ≈ £{(rawNativePrice / 100).toFixed(4)} GBP
-                  </span>
-                )}
+                <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-3">Accent Color</label>
+                <div className="flex gap-3">
+                  {COLORS.map(c => (
+                    <button key={c} onClick={() => setEditColor(c)}
+                      className={clsx('w-7 h-7 rounded-full transition-all', editColor === c ? 'ring-2 ring-white ring-offset-2 ring-offset-[#161618] scale-110' : 'opacity-60 hover:opacity-100')}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setEditMode(false)}
+                  className="px-5 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors">Cancel</button>
+                <button onClick={saveEdit}
+                  className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors">Save Changes</button>
               </div>
             </div>
+          )}
 
+          <div className="h-[200px] bg-[#161618] border border-white/5 rounded-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">30 Day Performance</span>
+              <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                {isProfit ? '+' : ''}{totalProfitPct.toFixed(2)}% total return
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height="85%">
+              <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="invAcctGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={chartColor} stopOpacity={0.2} />
+                    <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" vertical={false} strokeOpacity={0.04} />
+                <XAxis dataKey="date" hide={true} />
+                <YAxis
+                  tick={{ fill: '#8e8e93', fontSize: 9, fontFamily: 'JetBrains Mono' }}
+                  tickLine={false}
+                  axisLine={false}
+                  domain={[chartMin, 'auto']}
+                  tickFormatter={val => `${currencySymbol}${(val / 1000).toFixed(1)}k`}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a1c1e', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '11px', fontFamily: 'JetBrains Mono' }}
+                  formatter={(val: number) => [`${currencySymbol}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Value (GBP)']}
+                />
+                <Area type="monotone" dataKey="value" stroke={chartColor} strokeWidth={2} fill="url(#invAcctGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4">
             <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
-              <span className="text-[9px] text-iron-dust uppercase tracking-wider block mb-1">Return %</span>
-              <span className={clsx('text-lg font-mono', isProfit ? 'text-emerald-vein' : 'text-magma')}>
-                {holding.profitPercent.toFixed(2)}%
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Holdings</span>
+              <span className="text-lg font-bold text-white">{holdings.length}</span>
+            </div>
+            <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Total Invested (GBP)</span>
+              <span className="text-sm font-mono text-white">{currencySymbol}{totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className="bg-[#161618] p-4 rounded-sm border border-white/5">
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Market Value (GBP)</span>
+              <span className="text-sm font-mono text-white">{currencySymbol}{totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className={clsx('p-4 rounded-sm border', isProfit ? 'bg-emerald-vein/5 border-emerald-vein/20' : 'bg-magma/5 border-magma/20')}>
+              <span className="block text-[9px] text-iron-dust uppercase tracking-wider mb-1">Return %</span>
+              <span className={clsx('text-sm font-mono font-bold', isProfit ? 'text-emerald-vein' : 'text-magma')}>
+                {isProfit ? '+' : ''}{totalProfitPct.toFixed(2)}%
               </span>
             </div>
           </div>
 
-          {/* Transactions List */}
           <div>
-            <h3 className="text-xs font-bold text-white uppercase tracking-[2px] mb-6 flex items-center gap-2">
-              <Calendar size={16} className="text-iron-dust" />
-              Transaction History
+            <h3 className="text-xs font-bold text-white uppercase tracking-[2px] mb-4 flex items-center gap-2">
+              <TrendingUp size={14} className="text-emerald-vein" />
+              Holdings in this Account
             </h3>
-            <div className="space-y-1">
-              {transactions.map(tx => {
-                const txIsGbx = tx.currency === 'GBX';
-                const txIsUsd = tx.currency === 'USD';
+            {holdings.length === 0 && (
+              <p className="text-xs font-mono text-iron-dust text-center py-6">No holdings found in this account.</p>
+            )}
+            <div className="space-y-2">
+              {holdings.map(h => {
+                const hp = h.profitValue >= 0;
+                const weight = totalValue > 0 ? (h.currentValue / totalValue) * 100 : 0;
                 return (
-                  <div key={tx.id} className="flex justify-between items-center p-4 bg-[#161618] border border-white/5 rounded-sm hover:bg-white/5 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center border', tx.amount > 0 ? 'border-emerald-vein/20 text-emerald-vein' : 'border-magma/20 text-magma')}>
-                        <DollarSign size={14} />
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-white">{tx.description}</p>
-                        <p className="text-[10px] font-mono text-iron-dust">{format(new Date(tx.date), 'dd MMM yyyy')}</p>
-                      </div>
+                  <div key={h.symbol} className="flex items-center gap-4 p-4 bg-[#161618] border border-white/5 rounded-sm">
+                    <div className="w-9 h-9 bg-white/5 rounded-full flex items-center justify-center text-white font-bold text-xs border border-white/5 flex-shrink-0">
+                      {h.symbol.substring(0, 2)}
                     </div>
-                    <div className="text-right">
-                      {/* Price: show in native currency. GBX = Xp, USD = $X, GBP = £X */}
-                      <p className="text-xs font-bold text-white">
-                        {tx.quantity ? `${tx.quantity.toFixed(4)} shares` : ''} @ {txIsGbx ? `${tx.price?.toFixed(2)}p` : `${getCurrencySymbol(tx.currency || 'GBP')}${tx.price?.toFixed(2)}`}
-                      </p>
-                      {/* Amount: always stored in GBP */}
-                      <p className="text-[10px] font-mono text-iron-dust">
-                        Total: {currencySymbol}{Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-bold text-white">{h.symbol}</span>
+                        {/* currentValue is always GBP */}
+                        <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        {/* Show native price with correct symbol */}
+                        <span className="text-[9px] font-mono text-iron-dust">
+                          {h.quantity.toFixed(4)} shares \u00b7 {formatHoldingPrice(h.rawNativePrice, h.currency)}
+                        </span>
+                        <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', hp ? 'text-emerald-vein' : 'text-magma')}>
+                          {hp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
+                          {hp ? '+' : ''}{h.profitPercent.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="mt-2 h-0.5 bg-white/5 rounded-full">
+                        <div className="h-full bg-blue-500/40 rounded-full" style={{ width: `${Math.min(weight, 100)}%` }} />
+                      </div>
+                      <span className="text-[8px] font-mono text-iron-dust mt-0.5 block">{weight.toFixed(1)}% of portfolio</span>
                     </div>
                   </div>
                 );
               })}
             </div>
           </div>
+
         </div>
       </div>
     </div>
