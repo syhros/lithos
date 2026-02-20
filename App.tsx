@@ -10,21 +10,18 @@ import { Investments } from './src/pages/Investments';
 import { Bills } from './src/pages/Bills';
 import { Trends } from './src/pages/Trends';
 import { Settings } from './src/pages/Settings';
+import { Categorize } from './src/pages/Categorize';
 import { Login } from './src/pages/Login';
 import { Signup } from './src/pages/Signup';
 import { supabase } from './src/lib/supabase';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    // Tectonic Grid Layout: Sidebar | Content
-    // We use a gap of 2px with a slate background to create the "fissure" look between panels
     <div className="grid grid-cols-[280px_1fr] h-screen w-full bg-slate gap-[2px] p-[2px] overflow-hidden">
       <Sidebar />
-      
       <main className="strata-panel relative h-full overflow-hidden flex flex-col bg-gradient-to-b from-[#131517] to-shale">
-        {/* Children content area */}
         <div className="flex-1 min-h-0">
-            {children}
+          {children}
         </div>
       </main>
     </div>
@@ -49,16 +46,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
       const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
     };
-
     checkAuth();
-
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setIsAuthenticated(!!session);
     });
-
-    return () => {
-      authListener?.subscription.unsubscribe();
-    };
+    return () => { authListener?.subscription.unsubscribe(); };
   }, []);
 
   if (isAuthenticated === null) {
@@ -71,11 +63,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
       </div>
     );
   }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
@@ -101,7 +89,7 @@ const App: React.FC = () => {
                     <Route path="/bills" element={<Bills />} />
                     <Route path="/recurring" element={<PlaceholderPage title="Recurring" />} />
                     <Route path="/trends" element={<Trends />} />
-                    <Route path="/categorize" element={<PlaceholderPage title="Categorize" />} />
+                    <Route path="/categorize" element={<Categorize />} />
                     <Route path="/settings" element={<Settings />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
