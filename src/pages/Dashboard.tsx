@@ -7,6 +7,7 @@ import { ArrowUpRight, ArrowDownRight, Calendar, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { Bill } from '../data/mockData';
+import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 
 // --- Helpers ---
 
@@ -171,16 +172,17 @@ const CustomSpendingTooltip = ({ active, payload, label, data, currencySymbol }:
 
 export const Dashboard: React.FC = () => {
   const { data, getTotalNetWorth, currentBalances, currentPrices, getHistory, lastUpdated, refreshData, loading, currencySymbol, gbpUsdRate } = useFinance();
-  
+
   // Global Time Range State
   const [timeRange, setTimeRange] = useState<'1W' | '1M' | '1Y'>('1M');
-  
+
   // Chart Visibility State
   const [visibleSeries, setVisibleSeries] = useState({ netWorth: true, assets: false, debts: false });
 
   // Calculations
   const currentNetWorth = getTotalNetWorth();
-  const [nwInt, nwDec] = currentNetWorth.toFixed(2).split('.');
+  const { displayValue } = useAnimatedCounter(currentNetWorth, 1500, 'lithos_net_worth');
+  const [nwInt, nwDec] = displayValue.toFixed(2).split('.');
 
   // Header Metrics Logic
   const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
