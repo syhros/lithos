@@ -102,8 +102,6 @@ const generateSyntheticHistory = (currentPrice: number): Record<string, number> 
     return history;
 };
 
-// Helper: get a valid session JWT to authenticate edge function calls.
-// Falls back to the anon key only if no session is available.
 const getAuthToken = async (): Promise<string> => {
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
   try {
@@ -158,14 +156,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const loadUserData = async (isInitialLoad: boolean = false) => {
-    setLoading(true);
+  /**
+   * Core data loader.
+   * @param isInitialLoad  – true on first mount; applies the 2s splash delay.
+   * @param suppressLoadingOff – when true, the caller owns setLoading(false).
+   */
+  const loadUserData = async (
+    isInitialLoad: boolean = false,
+    suppressLoadingOff: boolean = false
+  ) => {
+    if (!suppressLoadingOff) setLoading(true);
     const startTime = Date.now();
     try {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
-        setLoading(false);
+        if (!suppressLoadingOff) setLoading(false);
         return;
       }
 
@@ -292,7 +298,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (error) {
       console.error('Failed to load user data:', error);
     } finally {
-      setLoading(false);
+      if (!suppressLoadingOff) setLoading(false);
     }
   };
 
@@ -462,19 +468,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     const cachedPrices = localStorage.getItem('lithos_current_prices');
     if (cachedPrices) {
-      try {
-        setCurrentPrices(JSON.parse(cachedPrices));
-      } catch (e) {
-        console.info('Failed to load cached prices');
-      }
+      try { setCurrentPrices(JSON.parse(cachedPrices)); } catch (e) {}
     }
     const cachedHistory = localStorage.getItem('lithos_historical_prices');
     if (cachedHistory) {
-      try {
-        setHistoricalPrices(JSON.parse(cachedHistory));
-      } catch (e) {
-        console.info('Failed to load cached historical prices');
-      }
+      try { setHistoricalPrices(JSON.parse(cachedHistory)); } catch (e) {}
     }
 
     (async () => {
@@ -500,12 +498,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .filter(t => t.type === 'investing' && t.accountId === accountId && t.symbol && t.quantity)
       .forEach(t => {
         if (!map.has(t.symbol)) {
-          map.set(t.symbol, {
-            symbol: t.symbol,
-            quantity: 0,
-            totalCost: 0,
-            currency: t.currency || 'GBP'
-          });
+          map.set(t.symbol, { symbol: t.symbol, quantity: 0, totalCost: 0, currency: t.currency || 'GBP' });
         }
         const h = map.get(t.symbol)!;
         h.quantity += t.quantity || 0;
@@ -527,14 +520,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       const nativePrice = marketData ? marketData.price : 0;
-
       let displayPrice = nativePrice;
-      if (stockIsGbx) {
-        displayPrice = nativePrice / 100;
-      } else {
-        displayPrice = nativePrice * fxRate;
-      }
-
+      if (stockIsGbx) { displayPrice = nativePrice / 100; }
+      else { displayPrice = nativePrice * fxRate; }
       const currentValue = h.quantity * displayPrice;
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
@@ -579,25 +567,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           data.transactions
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && new Date(t.date) <= d)
             .forEach(t => { checking += t.amount; });
-        }
-        else if (asset.type === 'savings') {
+        } else if (asset.type === 'savings') {
           savings += asset.startingValue;
           data.transactions
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && new Date(t.date) <= d)
             .forEach(t => { savings += t.amount; });
-        }
-        else if (asset.type === 'investment') {
+        } else if (asset.type === 'investment') {
           const investingTxns = data.transactions
             .filter(t => t.type === 'investing' && t.accountId === asset.id && t.symbol && t.quantity && new Date(t.date) <= d);
 
           const holdings = new Map<string, any>();
           investingTxns.forEach(t => {
             if (!holdings.has(t.symbol!)) {
-              holdings.set(t.symbol!, {
-                symbol: t.symbol,
-                quantity: 0,
-                currency: t.currency || 'GBP'
-              });
+              holdings.set(t.symbol!, { symbol: t.symbol, quantity: 0, currency: t.currency || 'GBP' });
             }
             const h = holdings.get(t.symbol!)!;
             h.quantity += t.quantity || 0;
@@ -627,11 +609,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               }
 
               let adjustedPrice = priceOnDate;
-              if (stockIsGbx) {
-                adjustedPrice = priceOnDate / 100;
-              } else {
-                adjustedPrice = priceOnDate * fxRate;
-              }
+              if (stockIsGbx) { adjustedPrice = priceOnDate / 100; }
+              else { adjustedPrice = priceOnDate * fxRate; }
               investing += h.quantity * adjustedPrice;
             }
           });
@@ -640,22 +619,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       let assets = checking + savings + investing;
       let debts = 0;
-
-      data.debts.forEach(debt => {
-        debts += debt.startingValue;
-      });
-
+      data.debts.forEach(debt => { debts += debt.startingValue; });
       const netWorth = assets - debts;
 
-      points.push({
-        date: dateStr,
-        netWorth,
-        assets,
-        debts,
-        checking,
-        savings,
-        investing
-      });
+      points.push({ date: dateStr, netWorth, assets, debts, checking, savings, investing });
     }
 
     return points;
@@ -689,17 +656,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (newTx) {
       setData(prev => ({
         ...prev,
-        transactions: [...prev.transactions, {
-          id: newTx.id,
-          ...tx
-        }]
+        transactions: [...prev.transactions, { id: newTx.id, ...tx }]
       }));
     }
   };
 
   const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
     const dbUpdates: Record<string, any> = {};
-
     Object.entries(updates).forEach(([key, value]) => {
       if (key === 'accountId') dbUpdates['account_id'] = value;
       else if (key === 'symbol') dbUpdates['symbol'] = value;
@@ -708,12 +671,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       else if (key === 'currency') dbUpdates['currency'] = value;
       else dbUpdates[key] = value;
     });
-
     const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
-    if (error) {
-      console.error('Failed to update transaction:', error);
-      return;
-    }
+    if (error) { console.error('Failed to update transaction:', error); return; }
     setData(prev => ({
       ...prev,
       transactions: prev.transactions.map(t => t.id === id ? { ...t, ...updates } : t)
@@ -722,10 +681,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const deleteTransaction = (id: string) => {
     supabase.from('transactions').delete().eq('id', id).then(() => {
-      setData(prev => ({
-        ...prev,
-        transactions: prev.transactions.filter(t => t.id !== id)
-      }));
+      setData(prev => ({ ...prev, transactions: prev.transactions.filter(t => t.id !== id) }));
     });
   };
 
@@ -734,19 +690,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const batchSize = 50;
       const idSet = new Set(ids);
-
       for (let i = 0; i < ids.length; i += batchSize) {
         const batch = ids.slice(i, i + batchSize);
         const { error } = await supabase.from('transactions').delete().in('id', batch);
-        if (error) {
-          console.error('Error deleting transaction batch:', error);
-        }
+        if (error) console.error('Error deleting transaction batch:', error);
       }
-
-      setData(prev => ({
-        ...prev,
-        transactions: prev.transactions.filter(t => !idSet.has(t.id))
-      }));
+      setData(prev => ({ ...prev, transactions: prev.transactions.filter(t => !idSet.has(t.id)) }));
     } finally {
       setDeletingTransactions(false);
     }
@@ -755,7 +704,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const addAccount = async (account: Omit<Asset, 'id'>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     const { data: newAccount } = await supabase.from('accounts').insert({
       user_id: session.user.id,
       name: account.name,
@@ -769,15 +717,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       is_closed: account.isClosed,
       opened_date: account.openedDate
     }).select().maybeSingle();
-
     if (newAccount) {
-      setData(prev => ({
-        ...prev,
-        assets: [...prev.assets, {
-          id: newAccount.id,
-          ...account
-        }]
-      }));
+      setData(prev => ({ ...prev, assets: [...prev.assets, { id: newAccount.id, ...account }] }));
     }
   };
 
@@ -790,11 +731,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       is_closed: updates.isClosed,
       closed_date: updates.closedDate
     }).eq('id', id);
-
-    setData(prev => ({
-      ...prev,
-      assets: prev.assets.map(a => a.id === id ? { ...a, ...updates } : a)
-    }));
+    setData(prev => ({ ...prev, assets: prev.assets.map(a => a.id === id ? { ...a, ...updates } : a) }));
   };
 
   const deleteAccount = (id: string) => {
@@ -810,7 +747,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const addDebt = async (debt: Omit<Debt, 'id'>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     const { data: newDebt } = await supabase.from('debts').insert({
       user_id: session.user.id,
       name: debt.name,
@@ -823,129 +759,84 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       promo_apr: debt.promo?.promoApr,
       promo_end_date: debt.promo?.promoEndDate
     }).select().maybeSingle();
-
     if (newDebt) {
-      setData(prev => ({
-        ...prev,
-        debts: [...prev.debts, {
-          id: newDebt.id,
-          ...debt
-        }]
-      }));
+      setData(prev => ({ ...prev, debts: [...prev.debts, { id: newDebt.id, ...debt }] }));
     }
   };
 
   const updateDebt = async (id: string, updates: Partial<Omit<Debt, 'id'>>) => {
     await supabase.from('debts').update({
-      name: updates.name,
-      type: updates.type,
-      credit_limit: updates.limit,
-      apr: updates.apr,
-      min_payment_type: updates.minPaymentType,
-      min_payment_value: updates.minPaymentValue,
-      starting_value: updates.startingValue,
-      promo_apr: updates.promo?.promoApr,
-      promo_end_date: updates.promo?.promoEndDate
+      name: updates.name, type: updates.type, credit_limit: updates.limit, apr: updates.apr,
+      min_payment_type: updates.minPaymentType, min_payment_value: updates.minPaymentValue,
+      starting_value: updates.startingValue, promo_apr: updates.promo?.promoApr, promo_end_date: updates.promo?.promoEndDate
     }).eq('id', id);
-
-    setData(prev => ({
-      ...prev,
-      debts: prev.debts.map(d => d.id === id ? { ...d, ...updates } : d)
-    }));
+    setData(prev => ({ ...prev, debts: prev.debts.map(d => d.id === id ? { ...d, ...updates } : d) }));
   };
 
   const deleteDebt = (id: string) => {
     supabase.from('debts').delete().eq('id', id).then(() => {
-      setData(prev => ({
-        ...prev,
-        debts: prev.debts.filter(d => d.id !== id)
-      }));
+      setData(prev => ({ ...prev, debts: prev.debts.filter(d => d.id !== id) }));
     });
   };
 
   const addBill = async (bill: Omit<Bill, 'id'>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     const { data: newBill } = await supabase.from('bills').insert({
-      user_id: session.user.id,
-      name: bill.name,
-      amount: bill.amount,
-      due_date: bill.dueDate,
-      is_paid: bill.isPaid,
-      auto_pay: bill.autoPay,
-      category: bill.category,
-      is_recurring: bill.isRecurring,
-      frequency: bill.frequency,
-      recurring_end_date: bill.recurringEndDate
+      user_id: session.user.id, name: bill.name, amount: bill.amount,
+      due_date: bill.dueDate, is_paid: bill.isPaid, auto_pay: bill.autoPay,
+      category: bill.category, is_recurring: bill.isRecurring,
+      frequency: bill.frequency, recurring_end_date: bill.recurringEndDate
     }).select().maybeSingle();
-
     if (newBill) {
-      setData(prev => ({
-        ...prev,
-        bills: [...prev.bills, {
-          id: newBill.id,
-          ...bill
-        }]
-      }));
+      setData(prev => ({ ...prev, bills: [...prev.bills, { id: newBill.id, ...bill }] }));
     }
   };
 
   const updateBill = async (id: string, updates: Partial<Omit<Bill, 'id'>>) => {
     await supabase.from('bills').update({
-      name: updates.name,
-      amount: updates.amount,
-      due_date: updates.dueDate,
-      is_paid: updates.isPaid,
-      auto_pay: updates.autoPay,
-      category: updates.category,
-      is_recurring: updates.isRecurring,
-      frequency: updates.frequency,
+      name: updates.name, amount: updates.amount, due_date: updates.dueDate,
+      is_paid: updates.isPaid, auto_pay: updates.autoPay, category: updates.category,
+      is_recurring: updates.isRecurring, frequency: updates.frequency,
       recurring_end_date: updates.recurringEndDate
     }).eq('id', id);
-
-    setData(prev => ({
-      ...prev,
-      bills: prev.bills.map(b => b.id === id ? { ...b, ...updates } : b)
-    }));
+    setData(prev => ({ ...prev, bills: prev.bills.map(b => b.id === id ? { ...b, ...updates } : b) }));
   };
 
   const deleteBill = (id: string) => {
     supabase.from('bills').delete().eq('id', id).then(() => {
-      setData(prev => ({
-        ...prev,
-        bills: prev.bills.filter(b => b.id !== id)
-      }));
+      setData(prev => ({ ...prev, bills: prev.bills.filter(b => b.id !== id) }));
     });
   };
 
   const updateUserProfile = async (updates: Partial<UserProfile>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-
     await supabase.from('user_profiles').update({
-      username: updates.username,
-      currency: updates.currency
+      username: updates.username, currency: updates.currency
     }).eq('id', session.user.id);
-
-    setData(prev => ({
-      ...prev,
-      user: { ...prev.user, ...updates }
-    }));
+    setData(prev => ({ ...prev, user: { ...prev.user, ...updates } }));
   };
 
+  /**
+   * Refresh triggered by the user pressing the refresh button.
+   * Guarantees loading stays true for AT LEAST 2 seconds.
+   * loadUserData is called with suppressLoadingOff=true so it
+   * does NOT call setLoading(false) itself — we own that here.
+   */
   const refreshData = async () => {
     setLoading(true);
     const startTime = Date.now();
     try {
-      await loadUserData();
+      await loadUserData(false, true);
       await fetchMarketData(true);
     } finally {
       const elapsed = Date.now() - startTime;
-      const remainingDelay = Math.max(0, 1500 - elapsed);
-      setTimeout(() => {
-        setLoading(false);
-      }, remainingDelay);
+      const remainingDelay = Math.max(0, 2000 - elapsed);
+      if (remainingDelay > 0) {
+        await new Promise(resolve => setTimeout(resolve, remainingDelay));
+      }
+      setLoading(false);
     }
   };
 
@@ -978,7 +869,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       currencySymbol: getCurrencySymbol(data.user.currency),
       gbpUsdRate,
       rateUpdatedAt
-    }}>
+    } as any}>
       {children}
     </FinanceContext.Provider>
   );
