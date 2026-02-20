@@ -4,7 +4,7 @@ import { useFinance, USD_TO_GBP, getCurrencySymbol } from '../context/FinanceCon
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes } from 'date-fns';
+import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays, differenceInMinutes, subDays } from 'date-fns';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
@@ -66,11 +66,18 @@ export const Investments: React.FC = () => {
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);
 
-            return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate };
+            const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+            const today = format(new Date(), 'yyyy-MM-dd');
+            const history = historicalPrices[h.symbol] || {};
+            const yesterdayPrice = history[yesterday] || history[today] || nativePrice;
+            const todayPrice = history[today] || nativePrice;
+            const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
+
+            return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice, profitValue, profitPercent, isZeroCost, marketData, fxRate, dailyChangePercent };
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices]);
 
-    const portfolioValue = holdings.reduce((acc, curr) => acc + curr.currentValue, 0);
+    const portfolioValue = investmentAssets.reduce((acc, asset) => acc + (currentBalances[asset.id] || 0), 0);
 
     const portfolioChartData = useMemo(() => {
         const history = getHistory('1M');
@@ -261,7 +268,7 @@ export const Investments: React.FC = () => {
                                         </span>
                                     </div>
                                     <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
-                                    <p className="text-xs text-iron-dust font-mono mb-4">{asset.currency} · ISA</p>
+                                    <p className="text-xs text-iron-dust font-mono mb-4">{asset.currency}</p>
                                     <div className="text-3xl font-bold text-white tracking-tight">
                                         {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
                                     </div>
@@ -286,7 +293,7 @@ export const Investments: React.FC = () => {
                     {holdings.map((stock) => {
                         const isProfit = stock.profitValue >= 0;
                         const nativeSymbol = getCurrencySymbol(stock.nativeCurrency);
-                        const dayChange = stock.marketData?.changePercent ?? 0;
+                        const dayChange = stock.dailyChangePercent ?? 0;
                         const isDayUp = dayChange >= 0;
                         const sparkline = holdingSparklines[stock.symbol] || [];
                         const sparkFirst = sparkline[0]?.value ?? 0;

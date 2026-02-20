@@ -476,18 +476,39 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                     </div>
                 </div>
 
-                <div>
-                    <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
-                    <select
-                        value={accountId}
-                        onChange={e => setAccountId(e.target.value)}
-                        className={clsx("w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none", validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}
-                    >
-                        <option value="">Select Account...</option>
-                        <optgroup label="Investment Accounts">
-                            {data.assets.filter(a => a.type === 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </optgroup>
-                    </select>
+                <div className="grid grid-cols-[1fr_auto] gap-4">
+                    <div>
+                        <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
+                        <select
+                            value={accountId}
+                            onChange={e => setAccountId(e.target.value)}
+                            className={clsx("w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none", validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}
+                        >
+                            <option value="">Select Account...</option>
+                            <optgroup label="Investment Accounts">
+                                {data.assets.filter(a => a.type === 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
+                        <div className="flex gap-2 h-[42px]">
+                            {['Buy', 'Sell', 'Dividend'].map(cat => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setCategory(cat)}
+                                    className={clsx(
+                                        'flex-1 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
+                                        category === cat
+                                            ? 'bg-magma text-white border border-magma'
+                                            : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'
+                                    )}
+                                >
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
              </>
           )}

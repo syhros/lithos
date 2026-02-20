@@ -170,8 +170,8 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
                 {holding.symbol.substring(0, 2)}
               </div>
               <h2 className="text-2xl font-bold text-white tracking-tight">{holding.symbol}</h2>
-              <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-1 rounded-sm border"
-                style={{ borderColor: isUsd ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', color: isUsd ? '#3b82f6' : '#d4af37' }}>
+              <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-1 rounded-sm border text-black"
+                style={{ borderColor: isUsd ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', backgroundColor: isUsd ? '#3b82f6' : '#d4af37' }}>
                 {nativeCurrency}
               </span>
             </div>
