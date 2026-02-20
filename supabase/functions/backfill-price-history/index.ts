@@ -12,14 +12,14 @@ interface BackfillRequest {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
-
   try {
+    if (req.method === "OPTIONS") {
+      return new Response(null, {
+        status: 200,
+        headers: corsHeaders,
+      });
+    }
+
     const { symbol }: BackfillRequest = await req.json();
 
     if (!symbol) {
@@ -53,79 +53,43 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    try {
-      const historical = await QueryHistorical.historical(symbol, {
-        period1: new Date("1980-01-01"),
-        period2: new Date(),
-      });
+    const historical = await QueryHistorical.historical(symbol, {
+      period1: new Date("1980-01-01"),
+      period2: new Date(),
+    });
 
-      if (!historical || historical.length === 0) {
-        return new Response(
-          JSON.stringify({ error: "No historical data found", symbol }),
-          {
-            status: 404,
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-      }
-
-      const records = historical.map((item: any) => ({
-        symbol,
-        date: item.date.toISOString().split("T")[0],
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        close: item.close,
-        volume: item.volume,
-        adj_close: item.adjClose,
-      }));
-
-      const { error } = await supabase
-        .from("price_history_cache")
-        .upsert(records, { onConflict: "symbol,date" });
-
-      if (error) {
-        console.error("Database upsert error:", error);
-        return new Response(
-          JSON.stringify({ error: "Failed to store price history", details: error }),
-          {
-            status: 500,
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-      }
-
+    if (!historical || historical.length === 0) {
       return new Response(
-        JSON.stringify({
-          success: true,
-          symbol,
-          recordsInserted: records.length,
-          dateRange: {
-            from: records[0].date,
-            to: records[records.length - 1].date,
-          },
-        }),
+        JSON.stringify({ error: "No historical data found", symbol }),
         {
+          status: 404,
           headers: {
             ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
       );
-    } catch (yahooError) {
-      console.error("Yahoo Finance error:", yahooError);
+    }
+
+    const records = historical.map((item: any) => ({
+      symbol,
+      date: item.date.toISOString().split("T")[0],
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume,
+      adj_close: item.adjClose,
+    }));
+
+    const { error } = await supabase
+      .from("price_history_cache")
+      .upsert(records, { onConflict: "symbol,date" });
+
+    if (error) {
+      console.error("Database upsert error:", error);
       return new Response(
-        JSON.stringify({
-          error: "Failed to fetch from Yahoo Finance",
-          symbol,
-          details: yahooError instanceof Error ? yahooError.message : String(yahooError),
-        }),
+        JSON.stringify({ error: "Failed to store price history", details: error }),
         {
           status: 500,
           headers: {
@@ -135,10 +99,29 @@ Deno.serve(async (req: Request) => {
         }
       );
     }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        symbol,
+        recordsInserted: records.length,
+        dateRange: {
+          from: records[0].date,
+          to: records[records.length - 1].date,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      }
+    );
   } catch (error) {
     console.error("Error:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({ error: "Internal server error", details: error instanceof Error ? error.message : String(error) }),
       {
         status: 500,
         headers: {
