@@ -91,7 +91,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
   }, [transactions]);
 
   const isUsd = nativeCurrency === 'USD';
-  const fxRate = isUsd ? usdToGbp : 1;
+  const fxRate = (isUsd && usdToGbp > 0) ? usdToGbp : 1;
   const nativeSymbol = isUsd ? '$' : '£';
 
   const allChartData = useMemo(() => {

@@ -54,14 +54,16 @@ export const Investments: React.FC = () => {
             const userIsUsd = userCurrency === 'USD';
 
             let fxRate = 1;
-            if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
-            if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+            if (usdToGbp > 0) {
+              if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
+              if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+            }
 
             const nativePrice = marketData ? marketData.price : 0;
             const displayPrice = nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-            const avgPrice = stockIsUsd && !userIsUsd ? avgPriceCost / usdToGbp : (stockIsUsd === userIsUsd ? avgPriceCost : avgPriceCost * usdToGbp);
+            const avgPrice = (usdToGbp > 0 && stockIsUsd && !userIsUsd) ? avgPriceCost / usdToGbp : (stockIsUsd === userIsUsd ? avgPriceCost : (usdToGbp > 0 ? avgPriceCost * usdToGbp : avgPriceCost));
             const profitValue = currentValue - h.totalCost;
             const isZeroCost = h.totalCost === 0;
             const profitPercent = isZeroCost ? 0 : (h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0);

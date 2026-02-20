@@ -75,7 +75,7 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
     return Array.from(map.values()).map(h => {
       const marketData = currentPrices[h.symbol];
       const isUsd = h.currency === 'USD';
-      const fxRate = isUsd ? usdToGbp : 1;
+      const fxRate = (isUsd && usdToGbp > 0) ? usdToGbp : 1;
       const nativePrice = marketData?.price || 0;
       const displayPrice = nativePrice * fxRate;
       const currentValue = h.quantity * displayPrice;

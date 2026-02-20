@@ -230,8 +230,10 @@ export const Dashboard: React.FC = () => {
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
-      if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
-      if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+      if (usdToGbp > 0) {
+        if (stockIsUsd && !userIsUsd) fxRate = usdToGbp;
+        if (!stockIsUsd && userIsUsd) fxRate = 1 / usdToGbp;
+      }
 
       const nativePrice = marketData ? marketData.price : 0;
       const displayPrice = nativePrice * fxRate;

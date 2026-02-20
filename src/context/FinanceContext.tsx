@@ -54,8 +54,6 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-export const USD_TO_GBP = 0.787;
-
 export const getCurrencySymbol = (currency: string): string => {
     switch (currency) {
         case 'USD': return '$';
@@ -99,26 +97,32 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
   const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
-  const [liveUsdToGbp, setLiveUsdToGbp] = useState<number>(USD_TO_GBP);
+  const [liveUsdToGbp, setLiveUsdToGbp] = useState<number>(0);
 
   const fetchFxRate = async () => {
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const res = await fetch(`${supabaseUrl}/functions/v1/live-prices?symbols=GBP%3DX`, {
+      await fetch(`${supabaseUrl}/functions/v1/fx-rate`, {
         headers: { 'Authorization': `Bearer ${supabaseKey}` }
       });
-      if (res.ok) {
-        const json = await res.json();
-        const gbpXRate = json['GBP=X']?.price;
-        if (gbpXRate && gbpXRate > 1) {
-          const usdToGbp = 1 / gbpXRate;
-          setLiveUsdToGbp(usdToGbp);
-          localStorage.setItem('lithos_usd_to_gbp', JSON.stringify({ rate: usdToGbp, ts: Date.now() }));
-        }
+    } catch (e) {
+      console.info('FX rate refresh failed');
+    }
+
+    try {
+      const { data } = await supabase
+        .from('exchange_rates')
+        .select('rate')
+        .eq('from_currency', 'GBP')
+        .eq('to_currency', 'USD')
+        .maybeSingle();
+
+      if (data?.rate && data.rate > 1) {
+        setLiveUsdToGbp(1 / Number(data.rate));
       }
     } catch (e) {
-      console.info('FX rate fetch failed, using cached/default');
+      console.info('Failed to load FX rate from database');
     }
   };
 
@@ -360,18 +364,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.info('Failed to load cached historical prices');
       }
     }
-    const cachedFx = localStorage.getItem('lithos_usd_to_gbp');
-    if (cachedFx) {
-      try {
-        const { rate, ts } = JSON.parse(cachedFx);
-        if (rate > 0 && rate < 1 && Date.now() - ts < 2 * 60 * 60 * 1000) {
-          setLiveUsdToGbp(rate);
-        }
-      } catch (e) {
-        console.info('Failed to load cached FX rate');
-      }
-    }
-
     fetchFxRate();
     loadUserData();
 
@@ -413,8 +405,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
-      if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
-      if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+      if (liveUsdToGbp > 0) {
+        if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
+        if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+      }
 
       const nativePrice = marketData ? marketData.price : 0;
       const displayPrice = nativePrice * fxRate;
@@ -503,8 +497,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               const userIsUsd = userCurrency === 'USD';
 
               let fxRate = 1;
-              if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
-              if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+              if (liveUsdToGbp > 0) {
+                if (stockIsUsd && !userIsUsd) fxRate = liveUsdToGbp;
+                if (!stockIsUsd && userIsUsd) fxRate = 1 / liveUsdToGbp;
+              }
 
               const displayPrice = priceOnDate * fxRate;
               investing += h.quantity * displayPrice;
