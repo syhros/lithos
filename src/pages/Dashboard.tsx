@@ -229,6 +229,7 @@ export const Dashboard: React.FC = () => {
       const marketData = currentPrices[h.symbol];
       const nativeCurrency = marketData?.currency || h.currency || 'GBP';
       const stockIsUsd = nativeCurrency === 'USD';
+      const stockIsGbx = nativeCurrency === 'GBX';
       const userIsUsd = userCurrency === 'USD';
 
       let fxRate = 1;
@@ -237,8 +238,17 @@ export const Dashboard: React.FC = () => {
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
 
+      // nativePrice: keep in native currency (pence for GBX, USD for USD, GBP for GBP)
       const nativePrice = marketData ? marketData.price : 0;
-      const displayPrice = nativePrice * fxRate;
+      
+      // displayPrice: convert to GBP for value calculations
+      let displayPrice = nativePrice;
+      if (stockIsGbx) {
+        displayPrice = nativePrice / 100; // Convert pence to pounds
+      } else {
+        displayPrice = nativePrice * fxRate; // Apply FX rate for USD
+      }
+      
       const currentValue = h.quantity * displayPrice;
 
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue };
