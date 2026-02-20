@@ -730,11 +730,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const refreshData = async () => {
     setLoading(true);
+    const startTime = Date.now();
     try {
       await loadUserData();
       await fetchMarketData(true);
     } finally {
-      setLoading(false);
+      const elapsed = Date.now() - startTime;
+      const remainingDelay = Math.max(0, 1000 - elapsed);
+      setTimeout(() => {
+        setLoading(false);
+      }, remainingDelay);
     }
   };
 

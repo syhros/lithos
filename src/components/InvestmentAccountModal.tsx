@@ -55,8 +55,19 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
     (data?.transactions || []).forEach(tx => {
       if (tx.type === 'investing' && tx.symbol && tx.quantity && tx.accountId === account.id) {
         const cur = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, currency: tx.currency || 'GBP' };
-        cur.quantity += tx.quantity;
-        cur.totalCost += tx.amount;
+        const isSell = tx.category === 'Sell';
+
+        if (isSell) {
+          if (cur.quantity > 0) {
+            const costPerShare = cur.totalCost / cur.quantity;
+            cur.totalCost -= tx.quantity * costPerShare;
+          }
+          cur.quantity += tx.quantity;
+        } else {
+          cur.quantity += tx.quantity;
+          cur.totalCost += Math.abs(tx.amount);
+        }
+
         map.set(tx.symbol, cur);
       }
     });

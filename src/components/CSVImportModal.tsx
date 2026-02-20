@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { X, Upload, FileText, Download, AlertTriangle, CheckCircle, ChevronDown, TrendingUp, TrendingDown, Layers, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { subDays, parseISO, format } from 'date-fns';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency, InvestmentCategory } from '../data/mockData';
@@ -187,6 +188,7 @@ const MappingSelect: React.FC<{
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose }) => {
+  const navigate = useNavigate();
   const { data, addTransaction, currencySymbol, historicalPrices, refreshData } = useFinance();
 
   const [mode, setMode] = useState<ImportMode>('accounts');
@@ -1081,7 +1083,11 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
                 <button onClick={reset} className="px-5 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors">
                   Import Another
                 </button>
-                <button onClick={handleClose} className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors">
+                <button onClick={async () => {
+                  onClose();
+                  await refreshData();
+                  navigate('/dashboard');
+                }} className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors">
                   Done
                 </button>
               </div>
