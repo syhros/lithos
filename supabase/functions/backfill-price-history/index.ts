@@ -53,8 +53,11 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    const period1 = new Date();
+    period1.setDate(period1.getDate() - 1000);
+
     const historical = await yahooFinance.historical(symbol, {
-      period1: new Date("1980-01-01"),
+      period1,
       period2: new Date(),
     });
 
