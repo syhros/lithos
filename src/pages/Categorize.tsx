@@ -100,26 +100,14 @@ function parseHalifaxDate(raw: string): string {
   return raw;
 }
 
-/**
- * Assign account based on transaction direction:
- *   credit (rawAmount >= 0, income) → money arrives INTO the account  → resolvedAccountToId
- *   debit  (rawAmount <  0, expense)→ money leaves FROM the account   → resolvedAccountId
- *
- * This means:
- *   - For a Halifax/NatWest CSV where accountId = "Halifax Current":
- *       a salary credit  → acctTo  = Halifax Current  (money going in)
- *       a direct debit   → acctFrom = Halifax Current (money going out)
- */
 function assignAccountByDirection(
   rawAmount: number,
   csvAccountId: string,
 ): { resolvedAccountId: string; resolvedAccountToId: string } {
   if (!csvAccountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
   if (rawAmount >= 0) {
-    // Credit / income — destination account
     return { resolvedAccountId: '', resolvedAccountToId: csvAccountId };
   } else {
-    // Debit / expense — source account
     return { resolvedAccountId: csvAccountId, resolvedAccountToId: '' };
   }
 }
@@ -186,7 +174,6 @@ function parseCSV(
     const matchedRule = typeRules.find(r => r.bankCode.toUpperCase() === rawType.toUpperCase());
     const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (rawAmount >= 0 ? 'income' : 'expense');
 
-    // Route account assignment based on money direction
     const { resolvedAccountId, resolvedAccountToId } = assignAccountByDirection(
       rawAmount,
       csvConfig?.accountId || '',
@@ -244,8 +231,6 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
       if (match) {
         const di = updated.findIndex(r => r.id === debit.id);
         const ci = updated.findIndex(r => r.id === match.id);
-        // For matched transfers: debit row = money leaving debit.accountId → going to credit.accountId
-        // Keep each side's own account assignment, just mark as transfer and set accountToId cross-reference
         updated[di] = {
           ...updated[di],
           isTransfer: true,
@@ -289,6 +274,8 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   const [matchDescription, setMatchDescription] = useState(true);
   const [matchType,        setMatchType]        = useState(false);
   const [matchAmount,      setMatchAmount]       = useState(false);
+  // Editable "contains" — user can shorten e.g. "PAYBYPHONE RE NORT" → "PAYBYPHONE"
+  const [contains,         setContains]         = useState(row.rawDescription);
   const [setDescription,   setSetDescription]   = useState(row.resolvedDescription || row.rawDescription);
   const [setCategory,      setSetCategory]      = useState(field === 'category' ? row.resolvedCategory : '');
   const [setType,          setSetType]          = useState<TransactionType | ''>(field === 'type' ? row.resolvedType : '');
@@ -304,7 +291,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
       matchDescription,
       matchType,
       matchAmount,
-      contains:       row.rawDescription,
+      contains,
       setDescription,
       setCategory,
       setType,
@@ -331,6 +318,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-lg rounded-sm shadow-2xl overflow-hidden">
+        {/* Header */}
         <div className="px-6 py-4 bg-[#131517] border-b border-white/5 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <h3 className="text-xs font-bold uppercase tracking-[2px] text-white">Create Description Rule</h3>
@@ -353,17 +341,33 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
         </div>
 
         <div className="p-6 space-y-5">
+          {/* Match conditions */}
           <div>
             <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Match when…</p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-3">
               <CheckRow label="Description contains" checked={matchDescription} onChange={setMatchDescription} />
               <CheckRow label="Type matches"          checked={matchType}        onChange={setMatchType} />
               <CheckRow label="Amount matches"        checked={matchAmount}      onChange={setMatchAmount} />
             </div>
+            {/* Editable contains value — only relevant when matchDescription is on */}
+            {matchDescription && (
+              <div>
+                <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">
+                  Description contains <span className="text-iron-dust/50 normal-case tracking-normal">(edit to broaden, e.g. shorten to a keyword)</span>
+                </label>
+                <input
+                  value={contains}
+                  onChange={e => setContains(e.target.value)}
+                  className="w-full bg-black/30 border border-white/10 px-3 py-2 text-xs text-white font-mono rounded-sm focus:border-magma outline-none"
+                  placeholder="e.g. PAYBYPHONE"
+                />
+              </div>
+            )}
           </div>
 
           <hr className="border-white/5" />
 
+          {/* Then set… */}
           <div>
             <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-3">Then set…</p>
             <div className="space-y-3">
@@ -393,7 +397,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                   <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Account From</label>
                   <select value={setAccountId} onChange={e => setSetAccountId(e.target.value)}
                     className="w-full bg-black/30 border border-white/10 px-3 py-2 text-xs text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">— none —</option>
+                    <option value="">— any account —</option>
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
@@ -554,17 +558,22 @@ interface CsvAssignPanelProps {
   csvConfigs: CsvConfig[];
   onChange: (name: string, patch: Partial<CsvConfig>) => void;
   accounts: { id: string; name: string }[];
+  onAddMore: (files: FileList) => void;
 }
 
-const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, accounts }) => {
+const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, accounts, onAddMore }) => {
+  const addMoreRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
   if (csvConfigs.length === 0) return null;
   return (
     <div className="bg-white/[0.02] border border-white/5 rounded-sm p-4 space-y-3">
       <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-1">Assign CSVs to Account</p>
-      {csvConfigs.map(cfg => (
+      {csvConfigs.map((cfg, cfgIdx) => (
         <div key={cfg.csvName} className="space-y-2">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-xs font-mono text-iron-dust bg-black/30 border border-white/10 px-2.5 py-1.5 rounded-sm shrink-0 max-w-[200px] truncate">
+          {/* Row 1: filename → account → amount cols toggle (all inline) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-mono text-iron-dust bg-black/30 border border-white/10 px-2.5 py-1.5 rounded-sm shrink-0 max-w-[180px] truncate">
               {cfg.csvName}
             </span>
             <ArrowRight size={12} className="text-iron-dust shrink-0" />
@@ -576,67 +585,79 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
               {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
 
-            <div className="flex items-center gap-1 ml-auto">
+            {/* Amount columns toggle — inline */}
+            <div className="flex items-center gap-1">
               <Columns2 size={12} className="text-iron-dust" />
-              <span className="text-[10px] text-iron-dust font-mono">Amount cols:</span>
+              <span className="text-[10px] text-iron-dust font-mono">Cols:</span>
               <button
                 onClick={() => onChange(cfg.csvName, { amountColumns: 1 })}
                 className={clsx(
                   'px-2 py-1 text-[10px] font-mono border rounded-sm transition-colors',
-                  cfg.amountColumns === 1
-                    ? 'border-magma/50 bg-magma/10 text-white'
-                    : 'border-white/10 text-iron-dust hover:border-white/20'
+                  cfg.amountColumns === 1 ? 'border-magma/50 bg-magma/10 text-white' : 'border-white/10 text-iron-dust hover:border-white/20'
                 )}>1</button>
               <button
                 onClick={() => onChange(cfg.csvName, { amountColumns: 2 })}
                 className={clsx(
                   'px-2 py-1 text-[10px] font-mono border rounded-sm transition-colors',
-                  cfg.amountColumns === 2
-                    ? 'border-magma/50 bg-magma/10 text-white'
-                    : 'border-white/10 text-iron-dust hover:border-white/20'
+                  cfg.amountColumns === 2 ? 'border-magma/50 bg-magma/10 text-white' : 'border-white/10 text-iron-dust hover:border-white/20'
                 )}>2</button>
             </div>
+
+            {/* Column header selectors — inline after the toggle */}
+            {cfg.headers.length > 0 && cfg.amountColumns === 1 && (
+              <>
+                <span className="text-[10px] text-iron-dust font-mono">Amount col:</span>
+                <select
+                  value={cfg.amountCol}
+                  onChange={e => onChange(cfg.csvName, { amountCol: e.target.value })}
+                  className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
+                  <option value="">— select —</option>
+                  {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </>
+            )}
+            {cfg.headers.length > 0 && cfg.amountColumns === 2 && (
+              <>
+                <span className="text-[10px] text-iron-dust font-mono">Debit:</span>
+                <select
+                  value={cfg.debitCol}
+                  onChange={e => onChange(cfg.csvName, { debitCol: e.target.value })}
+                  className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
+                  <option value="">— select —</option>
+                  {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <span className="text-[10px] text-iron-dust font-mono">Credit:</span>
+                <select
+                  value={cfg.creditCol}
+                  onChange={e => onChange(cfg.csvName, { creditCol: e.target.value })}
+                  className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
+                  <option value="">— select —</option>
+                  {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </>
+            )}
           </div>
 
-          {cfg.headers.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap pl-1">
-              {cfg.amountColumns === 1 ? (
-                <>
-                  <span className="text-[10px] text-iron-dust font-mono">Amount column:</span>
-                  <select
-                    value={cfg.amountCol}
-                    onChange={e => onChange(cfg.csvName, { amountCol: e.target.value })}
-                    className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">— select header —</option>
-                    {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </>
-              ) : (
-                <>
-                  <span className="text-[10px] text-iron-dust font-mono">Debit col:</span>
-                  <select
-                    value={cfg.debitCol}
-                    onChange={e => onChange(cfg.csvName, { debitCol: e.target.value })}
-                    className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">— select header —</option>
-                    {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                  <span className="text-[10px] text-iron-dust font-mono">Credit col:</span>
-                  <select
-                    value={cfg.creditCol}
-                    onChange={e => onChange(cfg.csvName, { creditCol: e.target.value })}
-                    className="bg-black/30 border border-white/10 px-2 py-1 text-xs text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">— select header —</option>
-                    {cfg.headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </>
-              )}
-            </div>
-          )}
-
-          {csvConfigs.length > 1 && <hr className="border-white/5" />}
+          {cfgIdx < csvConfigs.length - 1 && <hr className="border-white/5" />}
         </div>
       ))}
+
+      {/* Add more CSVs */}
+      <div
+        onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) onAddMore(e.dataTransfer.files); }}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onClick={() => addMoreRef.current?.click()}
+        className={clsx(
+          'mt-1 flex items-center gap-2 px-3 py-2 border border-dashed rounded-sm cursor-pointer transition-colors text-xs',
+          dragging ? 'border-magma/60 bg-magma/5 text-white' : 'border-white/10 text-iron-dust hover:border-white/20 hover:text-white'
+        )}>
+        <Plus size={12} />
+        <span className="font-mono">Add more CSVs…</span>
+        <input ref={addMoreRef} type="file" accept=".csv" multiple className="hidden"
+          onChange={e => { if (e.target.files?.length) { onAddMore(e.target.files); e.target.value = ''; } }} />
+      </div>
+
       <p className="text-[10px] text-iron-dust/50 font-mono">(you can still override account per-row in the preview below)</p>
     </div>
   );
@@ -664,7 +685,9 @@ export const Categorize: React.FC = () => {
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [rulePopup,     setRulePopup]     = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
   const [csvConfigs,    setCsvConfigs]    = useState<CsvConfig[]>([]);
-  const [pendingCsvs,   setPendingCsvs]  = useState<{ name: string; text: string }[]>([]);
+  // Use a Map keyed by filename so merging new files never duplicates
+  const pendingCsvsRef = useRef<Map<string, string>>(new Map());
+  const [pendingCsvs,  setPendingCsvs]   = useState<{ name: string; text: string }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const allAccounts      = useMemo(() => [...data.assets, ...data.debts], [data.assets, data.debts]);
@@ -700,31 +723,55 @@ export const Categorize: React.FC = () => {
     };
   };
 
-  const rebuildRows = useCallback((csvs: { name: string; text: string }[], configs: CsvConfig[]) => {
-    const allRows: RawRow[] = [];
+  // typeRules / merchantRules / transferRules are stable references inside the callback
+  // so we read them via a ref to avoid stale closures in the file-load handlers
+  const typeRulesRef     = useRef(typeRules);
+  const merchantRulesRef = useRef(merchantRules);
+  const transferRulesRef = useRef(transferRules);
+  typeRulesRef.current     = typeRules;
+  merchantRulesRef.current = merchantRules;
+  transferRulesRef.current = transferRules;
+
+  const rebuildRows = useCallback((
+    csvs: { name: string; text: string }[],
+    configs: CsvConfig[],
+  ): RawRow[] => {
+    const allRowsArr: RawRow[] = [];
     for (const csv of csvs) {
       const cfg = configs.find(c => c.csvName === csv.name) || null;
-      let parsed = parseCSV(csv.text, csv.name, typeRules, cfg);
-      parsed = applyMerchantRules(parsed, merchantRules);
-      allRows.push(...parsed);
+      let parsed = parseCSV(csv.text, csv.name, typeRulesRef.current, cfg);
+      parsed = applyMerchantRules(parsed, merchantRulesRef.current);
+      allRowsArr.push(...parsed);
     }
-    return applyTransferMatching(allRows, transferRules);
-  }, [typeRules, merchantRules, transferRules]);
+    return applyTransferMatching(allRowsArr, transferRulesRef.current);
+  }, []);
 
-  const handleFiles = useCallback((files: FileList | null) => {
-    if (!files || !files.length) return;
-    const newCsvs: { name: string; text: string }[] = [];
-    let loaded = 0;
-    Array.from(files).forEach(file => {
+  /**
+   * Core loader — reads FileList, merges into pendingCsvsRef (dedup by name),
+   * builds/merges configs, then calls rebuildRows exactly once.
+   */
+  const loadFiles = useCallback((files: FileList, existingConfigs: CsvConfig[]) => {
+    const fileArr = Array.from(files);
+    let remaining = fileArr.length;
+    if (remaining === 0) return;
+
+    fileArr.forEach(file => {
       const reader = new FileReader();
       reader.onload = e => {
-        newCsvs.push({ name: file.name, text: e.target?.result as string });
-        loaded++;
-        if (loaded === files.length) {
-          const newConfigs = newCsvs.map(c => buildInitialConfig(c.name, c.text));
-          setPendingCsvs(newCsvs);
-          setCsvConfigs(newConfigs);
-          setRows(rebuildRows(newCsvs, newConfigs));
+        const text = e.target?.result as string;
+        // Merge into the stable ref map (dedup — same filename replaces)
+        pendingCsvsRef.current.set(file.name, text);
+        remaining--;
+        if (remaining === 0) {
+          // All files for this batch are loaded — build final snapshot
+          const allCsvs = Array.from(pendingCsvsRef.current.entries()).map(([name, text]) => ({ name, text }));
+          // Build configs: keep existing ones, add new ones for new filenames
+          const merged = allCsvs.map(csv => {
+            return existingConfigs.find(c => c.csvName === csv.name) || buildInitialConfig(csv.name, csv.text);
+          });
+          setPendingCsvs(allCsvs);
+          setCsvConfigs(merged);
+          setRows(rebuildRows(allCsvs, merged));
           setActiveTab('preview');
           setImportDone(false);
         }
@@ -732,6 +779,22 @@ export const Categorize: React.FC = () => {
       reader.readAsText(file);
     });
   }, [rebuildRows]);
+
+  // Initial upload from the rules tab
+  const handleFiles = useCallback((files: FileList | null) => {
+    if (!files || !files.length) return;
+    // Reset map for a fresh upload from the rules tab
+    pendingCsvsRef.current = new Map();
+    loadFiles(files, []);
+  }, [loadFiles]);
+
+  // "Add more" from within the preview panel — merges with what's already there
+  const handleAddMore = useCallback((files: FileList) => {
+    setCsvConfigs(currentConfigs => {
+      loadFiles(files, currentConfigs);
+      return currentConfigs; // unchanged until loadFiles finishes
+    });
+  }, [loadFiles]);
 
   const updateCsvConfig = useCallback((csvName: string, patch: Partial<CsvConfig>) => {
     setCsvConfigs(prev => {
@@ -782,6 +845,7 @@ export const Categorize: React.FC = () => {
     setRows([]);
     setPendingCsvs([]);
     setCsvConfigs([]);
+    pendingCsvsRef.current = new Map();
   };
 
   const addTypeRule    = () => setTypeRules(prev => [...prev, { id: `tr-${Date.now()}`, bankCode: '', mapsTo: 'expense' }]);
@@ -818,12 +882,14 @@ export const Categorize: React.FC = () => {
     <div className="h-full overflow-y-auto custom-scrollbar">
       <div className="p-8 max-w-7xl mx-auto pb-24">
 
+        {/* Header */}
         <div className="mb-8">
           <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Tools</span>
           <h1 className="text-3xl font-bold text-white tracking-tight">Categorize & Import</h1>
           <p className="text-iron-dust text-sm mt-2">Set rules for cleaning bank CSVs, match transfers, then import in bulk.</p>
         </div>
 
+        {/* Tab bar */}
         <div className="flex gap-1 mb-6 border-b border-white/10">
           {(['rules', 'preview'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
@@ -908,7 +974,7 @@ export const Categorize: React.FC = () => {
                       <select value={rule.setAccountId}
                         onChange={e => updateMerchantRule(rule.id, { setAccountId: e.target.value })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none">
-                        <option value="">— all —</option>
+                        <option value="">— any —</option>
                         {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </select>
                       <select value={rule.setAccountToId}
@@ -1010,6 +1076,7 @@ export const Categorize: React.FC = () => {
 
             {rows.length > 0 && (
               <>
+                {/* Stats */}
                 <div className="grid grid-cols-4 gap-3">
                   {[
                     { label: 'Total Rows',  value: stats.total,     color: 'text-white' },
@@ -1024,12 +1091,15 @@ export const Categorize: React.FC = () => {
                   ))}
                 </div>
 
+                {/* Assign CSVs to Account — now with inline col toggles + add more */}
                 <CsvAssignPanel
                   csvConfigs={csvConfigs}
                   onChange={updateCsvConfig}
                   accounts={allAccounts}
+                  onAddMore={handleAddMore}
                 />
 
+                {/* Bulk override */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -1049,6 +1119,7 @@ export const Categorize: React.FC = () => {
                   </div>
                 )}
 
+                {/* Filters */}
                 <div className="flex items-center gap-3">
                   <Filter size={12} className="text-iron-dust" />
                   <select value={filterType} onChange={e => setFilterType(e.target.value)}
@@ -1068,6 +1139,7 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
+                {/* Table */}
                 <div className="border border-white/10 rounded-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1123,7 +1195,6 @@ export const Categorize: React.FC = () => {
                                                                         'text-purple-400 border-purple-400/20 bg-purple-400/10'
                                 )} />
                             </td>
-                            {/* Acct From — source, highlighted if empty on an expense */}
                             <td className="px-3 py-2">
                               <select value={row.resolvedAccountId} onChange={e => updateRow(row.id, { resolvedAccountId: e.target.value })}
                                 className={clsx('bg-black/30 border px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none',
@@ -1134,7 +1205,6 @@ export const Categorize: React.FC = () => {
                                 <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
                               </select>
                             </td>
-                            {/* Acct To — destination, highlighted if empty on an income */}
                             <td className="px-3 py-2">
                               <select value={row.resolvedAccountToId} onChange={e => updateRow(row.id, { resolvedAccountToId: e.target.value })}
                                 className={clsx('bg-black/30 border px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none',
@@ -1165,6 +1235,7 @@ export const Categorize: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Import bar */}
                 <div className="flex items-center justify-between bg-[#131517] border border-white/10 rounded-sm p-4">
                   <div>
                     <p className="text-sm font-bold text-white">{stats.toImport} transactions ready to import</p>
@@ -1187,6 +1258,7 @@ export const Categorize: React.FC = () => {
         )}
       </div>
 
+      {/* Create Rule Popup */}
       {rulePopup && (
         <CreateRulePopup
           row={rulePopup.row}
