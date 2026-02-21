@@ -37,27 +37,6 @@ export const Accounts: React.FC = () => {
         }, 0);
     const checkSavingsRatio = totalSavings > 0 ? ((totalChecking / totalSavings) * 100).toFixed(1) + '%' : '—';
 
-    const SummaryBar = () => (
-        <div className="mb-10">
-            <h3 className="text-[10px] font-mono uppercase tracking-[3px] text-iron-dust mb-3">Account Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                {[
-                    { label: 'Total Assets', value: `${currencySymbol}${totalAssets.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
-                    { label: 'Total Checking', value: `${currencySymbol}${totalChecking.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
-                    { label: 'Total Savings', value: `${currencySymbol}${totalSavings.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
-                    { label: 'Monthly Saving', value: `${currencySymbol}${monthlySaving.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: monthlySaving > 0 ? 'text-emerald-vein' : 'text-white' },
-                    { label: 'Est. Monthly Interest', value: `${currencySymbol}${estMonthlyInterest.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: estMonthlyInterest > 0 ? 'text-emerald-vein' : 'text-white' },
-                    { label: 'Checking / Savings', value: checkSavingsRatio, color: 'text-white' },
-                ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
-                        <span className={clsx('text-lg font-bold font-mono', color)}>{value}</span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-
     const AccountTile = ({ asset }: { asset: Asset }) => {
         const balance = currentBalances[asset.id] || 0;
         const change = balance - asset.startingValue;
@@ -126,8 +105,50 @@ export const Accounts: React.FC = () => {
                 </button>
             </div>
 
-            {/* Summary at top — only when accounts exist */}
-            {liquidAssets.length > 0 && <SummaryBar />}
+            {/* Account Summary — Debts-style panel */}
+            {liquidAssets.length > 0 && (
+                <div className="bg-[#161618] border border-white/5 rounded-sm p-6 mb-10">
+                    <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-[3px] mb-5">Account Summary</span>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Assets</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{totalAssets.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Checking</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{totalChecking.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Savings</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {currencySymbol}{totalSavings.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Monthly Saving</span>
+                            <span className={clsx('text-lg font-bold font-mono', monthlySaving > 0 ? 'text-emerald-vein' : 'text-white')}>
+                                {currencySymbol}{monthlySaving.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Est. Monthly Interest</span>
+                            <span className={clsx('text-lg font-bold font-mono', estMonthlyInterest > 0 ? 'text-emerald-vein' : 'text-white')}>
+                                {currencySymbol}{estMonthlyInterest.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                            <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Checking / Savings</span>
+                            <span className="text-lg font-bold text-white font-mono">
+                                {checkSavingsRatio}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {liquidAssets.length === 0 ? (
                 <div className="col-span-full py-20 text-center border border-dashed border-white/10 rounded-sm bg-white/[0.02] mb-12">

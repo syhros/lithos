@@ -43,7 +43,7 @@ export const Debts: React.FC = () => {
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
-            <div className="mb-12 flex items-end justify-between">
+            <div className="mb-8 flex items-end justify-between">
                 <div>
                     <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-2">Module</span>
                     <h1 className="text-4xl font-bold text-white tracking-tight">Debts & Liabilities</h1>
@@ -55,6 +55,49 @@ export const Debts: React.FC = () => {
                     <Plus size={14} />
                     Add Debt
                 </button>
+            </div>
+
+            {/* Total Credit Summary — moved to top */}
+            <div className="bg-[#161618] border border-white/5 rounded-sm p-6 mb-10">
+                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-[3px] mb-5">Total Credit Summary</span>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Used</span>
+                        <span className="text-lg font-bold text-white font-mono">
+                            {currencySymbol}{totalDebt.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Limit</span>
+                        <span className="text-lg font-bold text-white font-mono">
+                            {currencySymbol}{totalLimit.toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Utilization</span>
+                        <span className={clsx('text-lg font-bold font-mono', totalUtilization > 30 ? 'text-magma' : 'text-emerald-vein')}>
+                            {totalUtilization.toFixed(1)}%
+                        </span>
+                    </div>
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Min Payment</span>
+                        <span className="text-lg font-bold text-white font-mono">
+                            {currencySymbol}{totalMinPayment.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Est. Monthly Interest</span>
+                        <span className={clsx('text-lg font-bold font-mono', totalMonthlyInterest > 0 ? 'text-magma' : 'text-emerald-vein')}>
+                            {currencySymbol}{totalMonthlyInterest.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Debt / Asset Ratio</span>
+                        <span className={clsx('text-lg font-bold font-mono', debtToAssetRatio > 50 ? 'text-magma' : debtToAssetRatio > 20 ? 'text-amber-400' : 'text-emerald-vein')}>
+                            {debtToAssetRatio.toFixed(1)}%
+                        </span>
+                    </div>
+                </div>
             </div>
 
             {/* Debt Cards */}
@@ -186,49 +229,6 @@ export const Debts: React.FC = () => {
                         No debts recorded. Add one to start tracking.
                     </div>
                 )}
-            </div>
-
-            {/* Total Credit Summary */}
-            <div className="bg-[#161618] border border-white/5 rounded-sm p-6">
-                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-[3px] mb-5">Total Credit Summary</span>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Used</span>
-                        <span className="text-lg font-bold text-white font-mono">
-                            {currencySymbol}{totalDebt.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                    </div>
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Limit</span>
-                        <span className="text-lg font-bold text-white font-mono">
-                            {currencySymbol}{totalLimit.toLocaleString()}
-                        </span>
-                    </div>
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Utilization</span>
-                        <span className={clsx('text-lg font-bold font-mono', totalUtilization > 30 ? 'text-magma' : 'text-emerald-vein')}>
-                            {totalUtilization.toFixed(1)}%
-                        </span>
-                    </div>
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Min Payment</span>
-                        <span className="text-lg font-bold text-white font-mono">
-                            {currencySymbol}{totalMinPayment.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                    </div>
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Est. Monthly Interest</span>
-                        <span className={clsx('text-lg font-bold font-mono', totalMonthlyInterest > 0 ? 'text-magma' : 'text-emerald-vein')}>
-                            {currencySymbol}{totalMonthlyInterest.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                    </div>
-                    <div className="bg-black/30 rounded-sm p-4 border border-white/5">
-                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Debt / Asset Ratio</span>
-                        <span className={clsx('text-lg font-bold font-mono', debtToAssetRatio > 50 ? 'text-magma' : debtToAssetRatio > 20 ? 'text-amber-400' : 'text-emerald-vein')}>
-                            {debtToAssetRatio.toFixed(1)}%
-                        </span>
-                    </div>
-                </div>
             </div>
 
             <AddAccountModal

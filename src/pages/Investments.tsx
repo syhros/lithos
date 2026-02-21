@@ -233,11 +233,14 @@ export const Investments: React.FC = () => {
         return result;
     }, [closedHoldings, historicalPrices, gbpUsdRate]);
 
-    // ── Total Credit Summary data ──────────────────────────────────────────────
+    // ── Investment Summary data ────────────────────────────────────────────────
     const totalInvested = activeHoldings.reduce((sum, h) => sum + h.totalCost, 0);
     const totalProfitValue = activeHoldings.reduce((sum, h) => sum + h.profitValue, 0);
     const totalProfitPercent = totalInvested > 0 ? (totalProfitValue / totalInvested) * 100 : 0;
     const portfolioIsUp = totalProfitValue >= 0;
+    const bestPerformer = activeHoldings.length > 0
+        ? activeHoldings.reduce((best, h) => h.profitPercent > best.profitPercent ? h : best, activeHoldings[0])
+        : null;
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -283,42 +286,34 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            {/* ── Account Summary + Total Credit Summary ── */}
+            {/* ── Investment Summary ── */}
             {investmentAssets.length > 0 && (
-                <div className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Account Summary */}
-                    <div>
-                        <h3 className="text-[10px] font-mono uppercase tracking-[3px] text-iron-dust mb-3">Account Summary</h3>
-                        <div className="grid grid-cols-2 gap-3">
-                            {[
-                                { label: 'Total Value', value: `${currencySymbol}${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
-                                { label: 'Total Invested', value: `${currencySymbol}${totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
-                                { label: 'Total P/L', value: `${portfolioIsUp ? '+' : ''}${currencySymbol}${Math.abs(totalProfitValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: portfolioIsUp ? 'text-emerald-vein' : 'text-magma' },
-                                { label: 'P/L %', value: `${portfolioIsUp ? '+' : ''}${totalProfitPercent.toFixed(2)}%`, color: portfolioIsUp ? 'text-emerald-vein' : 'text-magma' },
-                            ].map(({ label, value, color }) => (
-                                <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
-                                    <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
-                                    <span className={clsx('text-lg font-bold font-mono', color)}>{value}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Total Credit Summary */}
-                    <div>
-                        <h3 className="text-[10px] font-mono uppercase tracking-[3px] text-iron-dust mb-3">Total Credit Summary</h3>
-                        <div className="grid grid-cols-2 gap-3">
-                            {[
-                                { label: 'Active Holdings', value: String(activeHoldings.length), color: 'text-white' },
-                                { label: 'Closed Positions', value: String(closedHoldings.length), color: 'text-iron-dust' },
-                                { label: 'Best Performer', value: activeHoldings.length > 0 ? `${activeHoldings.reduce((best, h) => h.profitPercent > best.profitPercent ? h : best, activeHoldings[0]).symbol.split('-')[0].substring(0,4).toUpperCase()} +${Math.max(...activeHoldings.map(h => h.profitPercent)).toFixed(1)}%` : '—', color: 'text-emerald-vein' },
-                                { label: 'Accounts', value: String(investmentAssets.length), color: 'text-white' },
-                            ].map(({ label, value, color }) => (
-                                <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
-                                    <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
-                                    <span className={clsx('text-lg font-bold font-mono', color)}>{value}</span>
-                                </div>
-                            ))}
+                <div className="mb-10">
+                    <div className="bg-[#161618] border border-white/5 rounded-sm p-6">
+                        <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-[3px] mb-5">Investment Summary</span>
+                        <div className="grid grid-cols-3 gap-4">
+                            {/* Total Invested */}
+                            <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Invested</span>
+                                <span className="text-lg font-bold text-white font-mono">
+                                    {currencySymbol}{totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                            {/* Total P/L with P/L% inline */}
+                            <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total P/L</span>
+                                <span className={clsx('text-lg font-bold font-mono', portfolioIsUp ? 'text-emerald-vein' : 'text-magma')}>
+                                    {portfolioIsUp ? '+' : ''}{currencySymbol}{Math.abs(totalProfitValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                <span className={clsx('block text-[10px] font-mono mt-1', portfolioIsUp ? 'text-emerald-vein/70' : 'text-magma/70')}>
+                                    {portfolioIsUp ? '+' : ''}{totalProfitPercent.toFixed(2)}%
+                                </span>
+                            </div>
+                            {/* Accounts count */}
+                            <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Accounts</span>
+                                <span className="text-lg font-bold text-white font-mono">{investmentAssets.length}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
