@@ -1,36 +1,35 @@
 // useSmartSearch
 //
-// Parses a smart search string into structured tokens, then filters a
-// transaction list against them.
+// Parses a smart search string into structured tokens, then filters transactions.
 //
 // Syntax:
-//   plain text     -> fuzzy match description, category, or account name
-//   account:value  -> match account name (partial)
-//   type:value     -> match transaction type
-//   category:value -> match category (partial)
-//   amount:value   -> match absolute amount (e.g. amount:12.50)
+//   plain text              -> fuzzy match description, category, or account
+//   account:halifax         -> single account filter (partial match)
+//   account:halifax,natwest -> multi-value OR  (comma-separated, no spaces)
+//   type:expense,income     -> multi-value OR  for type
+//   category:groceries      -> category filter
+//   amount:12.50            -> exact absolute amount
 //
-//   &  (OR)      -> show results matching EITHER the left OR right token
-//   #  (AND)     -> show results matching BOTH the left AND right token
-//   /  (EXCLUDE) -> show results matching the first, excluding the second
+// Operators between tokens:
+//   #  AND     - next token must ALSO match
+//   /  EXCLUDE - next token must NOT match
 //
-// Multiple bare tokens (no operator) are treated as implicit AND.
-// Wrap multi-word values in quotes: account:"Halifax Current"
+// Multiple bare tokens with no operator = implicit AND.
 import { useMemo } from 'react';
 import { Transaction } from '../data/mockData';
 
 export type TokenType = 'text' | 'account' | 'type' | 'category' | 'amount';
-export type Modifier  = 'or' | 'and' | 'not' | null;
+export type Modifier  = 'and' | 'not' | null;
 
 export interface SearchToken {
   modifier: Modifier;
   field:    TokenType;
-  value:    string;
+  // values is an array to support comma-separated OR lists
+  values:   string[];
 }
 
 export function parseSearchQuery(raw: string): SearchToken[] {
   const tokens: SearchToken[] = [];
-  // Lex: split on whitespace but respect quoted strings
   const parts: string[] = [];
   const lexRe = /"[^"]*"|\S+/g;
   let m: RegExpExecArray | null;
@@ -39,8 +38,8 @@ export function parseSearchQuery(raw: string): SearchToken[] {
   let i = 0;
   while (i < parts.length) {
     const part = parts[i];
-    if (part === '&' || part === '#' || part === '/') {
-      const mod: Modifier = part === '&' ? 'or' : part === '#' ? 'and' : 'not';
+    if (part === '#' || part === '/') {
+      const mod: Modifier = part === '#' ? 'and' : 'not';
       i++;
       if (i < parts.length) { tokens.push(buildToken(mod, parts[i])); i++; }
       continue;
@@ -52,25 +51,38 @@ export function parseSearchQuery(raw: string): SearchToken[] {
 }
 
 function buildToken(modifier: Modifier, raw: string): SearchToken {
-  const unquote = (s: string) => s.replace(/^"|"$/g, '');
+  const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
   const colonIdx = raw.indexOf(':');
   if (colonIdx > 0) {
     const field  = raw.slice(0, colonIdx).toLowerCase();
-    const value  = unquote(raw.slice(colonIdx + 1));
+    const rest   = raw.slice(colonIdx + 1);
     const knownFields: TokenType[] = ['account', 'type', 'category', 'amount'];
     const matched = knownFields.find(f => f.startsWith(field));
-    if (matched) return { modifier, field: matched, value };
+    if (matched) {
+      // Split on commas to support multi-value OR: account:halifax,natwest
+      const values = rest.split(',').map(unquote).filter(Boolean);
+      return { modifier, field: matched, values };
+    }
   }
-  return { modifier, field: 'text', value: unquote(raw) };
+  return { modifier, field: 'text', values: [unquote(raw)] };
 }
 
+// A token matches if ANY of its values match (OR within a token)
 function matchToken(
   token: SearchToken,
   tx: Transaction,
   accountName: string,
 ): boolean {
-  const v = token.value.toLowerCase();
-  switch (token.field) {
+  return token.values.some(v => matchSingleValue(token.field, v.toLowerCase(), tx, accountName));
+}
+
+function matchSingleValue(
+  field: TokenType,
+  v: string,
+  tx: Transaction,
+  accountName: string,
+): boolean {
+  switch (field) {
     case 'account':  return accountName.toLowerCase().includes(v);
     case 'type':     return tx.type.toLowerCase().includes(v);
     case 'category': return tx.category.toLowerCase().includes(v);
@@ -88,46 +100,19 @@ function matchToken(
   }
 }
 
-// Filter logic:
-//   null / 'and' tokens   -> ALL must match (implicit AND chain)
-//   'or' tokens           -> pass if ANY 'or' token matches (OR pool)
-//   'not' tokens          -> fail if ANY 'not' token matches
-//
-// Evaluation order per row:
-//   1. Collect non-modifier (null) base terms — all must match
-//   2. Collect 'and' terms — all must match
-//   3. Collect 'or' terms  — at least one must match (only if any exist)
-//   4. Collect 'not' terms — none must match
 export function filterByTokens(
   transactions: Transaction[],
   tokens: SearchToken[],
   accountMap: Record<string, string>,
 ): Transaction[] {
   if (tokens.length === 0) return transactions;
-
-  const baseTokens = tokens.filter(t => t.modifier === null);
-  const andTokens  = tokens.filter(t => t.modifier === 'and');
-  const orTokens   = tokens.filter(t => t.modifier === 'or');
-  const notTokens  = tokens.filter(t => t.modifier === 'not');
-
   return transactions.filter(tx => {
     const acc = accountMap[tx.accountId ?? ''] ?? '';
-
-    // Base (implicit AND)
-    for (const t of baseTokens) {
-      if (!matchToken(t, tx, acc)) return false;
-    }
-    // Explicit AND
-    for (const t of andTokens) {
-      if (!matchToken(t, tx, acc)) return false;
-    }
-    // OR pool — at least one must match (skip check if pool is empty)
-    if (orTokens.length > 0) {
-      if (!orTokens.some(t => matchToken(t, tx, acc))) return false;
-    }
-    // NOT / exclude
-    for (const t of notTokens) {
-      if (matchToken(t, tx, acc)) return false;
+    for (const token of tokens) {
+      const matches = matchToken(token, tx, acc);
+      // null = implicit AND, 'and' = explicit AND, 'not' = exclude
+      if (token.modifier === 'not') { if (matches) return false; }
+      else { if (!matches) return false; }
     }
     return true;
   });

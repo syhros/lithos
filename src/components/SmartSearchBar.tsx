@@ -1,51 +1,49 @@
 // SmartSearchBar
 //
-// A search input with live autocomplete for field prefixes,
-// account names, type values, and operator tokens.
+// Search input with live autocomplete for field prefixes, account names,
+// type values, and operator tokens.
 //
-// Operators:
-//   &  OR      - show results matching either term
-//   #  AND     - show results matching both terms
-//   /  EXCLUDE - show results matching the first, not the second
-//
-// Pressing Tab / clicking a suggestion inserts it into the query.
+// Multi-value OR  -> use commas:  account:halifax,natwest
+// AND operator    -> #  (next token must also match)
+// EXCLUDE         -> /  (next token must not match)
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const FIELD_PREFIXES = [
-  { label: 'account:',  hint: 'Filter by account name' },
-  { label: 'type:',     hint: 'Filter by transaction type' },
-  { label: 'category:', hint: 'Filter by category' },
-  { label: 'amount:',   hint: 'Filter by exact amount' },
+  { label: 'account:',  hint: 'account:name1,name2  — comma = OR' },
+  { label: 'type:',     hint: 'type:expense,income' },
+  { label: 'category:', hint: 'category:groceries' },
+  { label: 'amount:',   hint: 'amount:12.50' },
 ];
 
 const OPERATORS = [
-  { label: '&', hint: 'OR \u2013 show results matching either term' },
-  { label: '#', hint: 'AND \u2013 show results matching both terms' },
-  { label: '/', hint: 'EXCLUDE \u2013 show first, exclude second' },
+  { label: '#', hint: 'AND – next token must also match' },
+  { label: '/', hint: 'EXCLUDE – next token must not match' },
 ];
 
 const TYPE_VALUES = ['income', 'expense', 'investing', 'transfer', 'debt_payment'];
 
 interface Suggestion {
-  insert: string;
-  label:  string;
-  hint?:  string;
-  kind:   'field' | 'value' | 'operator' | 'account';
+  insert:  string;
+  label:   string;
+  hint?:   string;
+  kind:    'field' | 'value' | 'operator' | 'account';
+  // If true, insert appends after the last comma instead of replacing the whole word
+  append?: boolean;
 }
 
 interface Props {
-  value: string;
-  onChange: (v: string) => void;
-  accounts: { id: string; name: string }[];
-  categories: string[];
+  value:       string;
+  onChange:    (v: string) => void;
+  accounts:    { id: string; name: string }[];
+  categories:  string[];
   placeholder?: string;
 }
 
 export const SmartSearchBar: React.FC<Props> = ({
   value, onChange, accounts, categories,
-  placeholder = 'Search\u2026  account:  type:  category:  amount:  & # /'
+  placeholder = 'Search…  account:name1,name2  type:expense  # /'
 }) => {
   const [open,        setOpen]        = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -61,39 +59,57 @@ export const SmartSearchBar: React.FC<Props> = ({
     const currentWord  = beforeCursor.slice(wordStart).toLowerCase();
     if (!currentWord) return [];
 
-    // Single-char operators (&, #, /)
+    // Single-char operator suggestions
     OPERATORS.forEach(op => {
       if (op.label === currentWord)
         suggs.push({ insert: op.label, label: op.label, hint: op.hint, kind: 'operator' });
     });
 
-    // Field prefixes  (account:, type:, …)
-    FIELD_PREFIXES.forEach(fp => {
-      if (fp.label.startsWith(currentWord) && currentWord !== fp.label)
-        suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field' });
-    });
+    // Detect if we're inside a comma list: account:halifax,nat<cursor>
+    const commaFieldMatch = beforeCursor.match(/(?:^|\s)(account|type|category):((?:[^\s,]*,)*)([^\s,]*)$/);
 
-    // Values after a known field
-    const fieldMatch = beforeCursor.match(/(?:^|\s)(account|type|category|amount):(\S*)$/);
-    if (fieldMatch) {
-      const field   = fieldMatch[1];
-      const partial = fieldMatch[2].toLowerCase();
+    if (commaFieldMatch) {
+      const field    = commaFieldMatch[1];
+      const prefix   = commaFieldMatch[2]; // already-confirmed values  e.g. "halifax,"
+      const partial  = commaFieldMatch[3].toLowerCase();
+
       if (field === 'account') {
         accounts
           .filter(a => a.name.toLowerCase().includes(partial))
           .slice(0, 8)
-          .forEach(a => suggs.push({ insert: `account:"${a.name}"`, label: a.name, kind: 'account' }));
+          .forEach(a => suggs.push({
+            insert:  `account:${prefix}"${a.name}"`,
+            label:   a.name,
+            hint:    prefix ? `add to: ${prefix.replace(/,$/, '')}` : undefined,
+            kind:    'account',
+            append:  !!prefix,
+          }));
       } else if (field === 'type') {
         TYPE_VALUES
           .filter(t => t.includes(partial))
-          .forEach(t => suggs.push({ insert: `type:${t}`, label: t, kind: 'value' }));
+          .forEach(t => suggs.push({
+            insert: `type:${prefix}${t}`,
+            label:  t,
+            kind:   'value',
+          }));
       } else if (field === 'category') {
         categories
           .filter(c => c.toLowerCase().includes(partial))
           .slice(0, 8)
-          .forEach(c => suggs.push({ insert: `category:"${c}"`, label: c, kind: 'value' }));
+          .forEach(c => suggs.push({
+            insert: `category:${prefix}"${c}"`,
+            label:  c,
+            kind:   'value',
+          }));
       }
+    } else {
+      // Field prefix suggestions (only when not already inside a field:value)
+      FIELD_PREFIXES.forEach(fp => {
+        if (fp.label.startsWith(currentWord) && currentWord !== fp.label)
+          suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field' });
+      });
     }
+
     return suggs;
   }, [accounts, categories]);
 
@@ -109,6 +125,7 @@ export const SmartSearchBar: React.FC<Props> = ({
     const beforeCursor = value.slice(0, cursorPos);
     const afterCursor  = value.slice(cursorPos);
     const wordStart    = beforeCursor.lastIndexOf(' ') + 1;
+    // Replace the entire current token (from wordStart) with the insertion
     const newVal = value.slice(0, wordStart) + sugg.insert + ' ' + afterCursor.trimStart();
     onChange(newVal.trimEnd() + ' ');
     setOpen(false);
@@ -162,7 +179,7 @@ export const SmartSearchBar: React.FC<Props> = ({
       {open && suggestions.length > 0 && (
         <div className="absolute top-full left-0 mt-1 w-full bg-[#1a1c1e] border border-white/10 rounded-sm shadow-2xl z-50 overflow-hidden">
           <div className="px-3 pt-2 pb-1">
-            <p className="text-[9px] font-mono text-iron-dust/60 uppercase tracking-widest">Suggestions \u00b7 Tab or click to insert</p>
+            <p className="text-[9px] font-mono text-iron-dust/60 uppercase tracking-widest">Suggestions · Tab or click to insert</p>
           </div>
           <ul>
             {suggestions.map((s, i) => (
@@ -173,7 +190,7 @@ export const SmartSearchBar: React.FC<Props> = ({
                     'w-full flex items-center gap-3 px-3 py-2 text-xs text-left transition-colors',
                     i === highlighted ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
                   )}>
-                  <span className={clsx('font-mono font-bold w-4', kindColour[s.kind])}>{s.label}</span>
+                  <span className={clsx('font-mono font-bold w-6 shrink-0', kindColour[s.kind])}>{s.label}</span>
                   {s.hint && <span className="text-iron-dust/60 text-[10px]">{s.hint}</span>}
                 </button>
               </li>
