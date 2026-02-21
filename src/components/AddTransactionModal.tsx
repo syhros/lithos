@@ -96,12 +96,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setAssetType('Stock');
       setInvestCurrency(tx.currency || 'GBP');
     } else if (tx.type === 'transfer') {
-      const paired = data.transactions.find(t =>
-        t.type === 'transfer' && t.id !== tx.id && t.amount > 0 &&
-        Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
-        Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
-      );
-      setAccountToId(paired?.accountId || '');
+      // Prefer the stored accountToId (single-row import) over hunting for a pair
+      if (tx.accountToId) {
+        setAccountToId(tx.accountToId);
+      } else {
+        // Legacy: find paired transaction by amount + timestamp proximity
+        const paired = data.transactions.find(t =>
+          t.type === 'transfer' && t.id !== tx.id && t.amount > 0 &&
+          Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
+          Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
+        );
+        setAccountToId(paired?.accountId || '');
+      }
       setMerchant(tx.description || '');
     } else if (tx.type === 'debt_payment') {
       const debtIds = new Set(data.debts.map(d => d.id));
@@ -116,12 +122,17 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         setAccountId(paired?.accountId || '');
       } else {
         setAccountId(tx.accountId || '');
-        const paired = data.transactions.find(t =>
-          t.type === 'debt_payment' && t.id !== tx.id && debtIds.has(t.accountId || '') &&
-          Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
-          Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
-        );
-        setAccountToId(paired?.accountId || '');
+        // Prefer stored accountToId for debt side, then fall back to pair search
+        if (tx.accountToId) {
+          setAccountToId(tx.accountToId);
+        } else {
+          const paired = data.transactions.find(t =>
+            t.type === 'debt_payment' && t.id !== tx.id && debtIds.has(t.accountId || '') &&
+            Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
+            Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
+          );
+          setAccountToId(paired?.accountId || '');
+        }
       }
       setCategory(tx.category || 'Debt Payment');
     } else {
@@ -159,13 +170,28 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
     if (editTransaction) {
       if (editTransaction.type === 'transfer') {
-        const outflowTx = editTransaction;
-        const paired = data.transactions.find(t =>
-          t.type === 'transfer' && t.id !== outflowTx.id &&
-          Math.abs(new Date(t.date).getTime() - new Date(outflowTx.date).getTime()) < 5000
-        );
-        await updateTransaction(outflowTx.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId, notes: trimmedNotes });
-        if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
+        // Single-row transfer (imported): update in place with accountToId stored directly.
+        // Only fall back to pair-update for legacy two-row transfers that have no accountToId.
+        if (editTransaction.accountToId) {
+          // Single-row: just update this one transaction
+          await updateTransaction(editTransaction.id, {
+            date: fullDate,
+            description: merchant || `Transfer to ${getAccountName(accountToId)}`,
+            amount: -Math.abs(amountNum),
+            category: 'Transfer',
+            accountId,
+            accountToId,
+            notes: trimmedNotes,
+          });
+        } else {
+          // Legacy two-row transfer
+          const paired = data.transactions.find(t =>
+            t.type === 'transfer' && t.id !== editTransaction.id &&
+            Math.abs(new Date(t.date).getTime() - new Date(editTransaction.date).getTime()) < 5000
+          );
+          await updateTransaction(editTransaction.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId, notes: trimmedNotes });
+          if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
+        }
       } else if (editTransaction.type === 'debt_payment') {
         const isDebtSide = debtIds.has(editTransaction.accountId || '');
         const sourceId = isDebtSide ? accountId : editTransaction.accountId!;
@@ -189,9 +215,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       resetForm(); onClose(); return;
     }
 
+    // New transaction
     if (type === 'transfer') {
-      addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId, notes: trimmedNotes });
-      addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
+      // Create as a single row with accountToId
+      addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId, accountToId, notes: trimmedNotes });
     } else if (type === 'debt_payment') {
       addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId, notes: trimmedNotes });
       addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId, notes: trimmedNotes });

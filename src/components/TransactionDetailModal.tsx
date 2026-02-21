@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, TrendingUp, TrendingDown, ArrowLeftRight, CreditCard, Landmark, BarChart2, Trash2, Pencil } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, ArrowLeftRight, CreditCard, BarChart2, Trash2, Pencil, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
@@ -35,9 +35,12 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
 
   const meta = TYPE_META[transaction.type] ?? TYPE_META.expense;
   const { Icon } = meta;
-  const account = [...data.assets, ...data.debts].find(a => a.id === transaction.accountId);
+  const allAccounts = [...data.assets, ...data.debts];
+  const account   = allAccounts.find(a => a.id === transaction.accountId);
+  const accountTo = allAccounts.find(a => a.id === transaction.accountToId);
+  const isTransfer   = transaction.type === 'transfer';
   const isInvestment = transaction.type === 'investing';
-  const isDividend = transaction.category === 'Dividend';
+  const isDividend   = transaction.category === 'Dividend';
 
   const fmtMoney = (n: number, sym = currencySymbol) =>
     `${sym}${Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -55,6 +58,14 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
     onDelete?.(transaction.id);
     onClose();
   };
+
+  // For transfers: show neutral amount (no +/-)
+  const amountDisplay = isTransfer
+    ? fmtMoney(transaction.amount)
+    : `${transaction.amount > 0 ? '+' : ''}${fmtMoney(transaction.amount)}`;
+  const amountColor = isTransfer
+    ? 'text-white'
+    : transaction.amount > 0 ? 'text-emerald-vein' : 'text-white';
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -76,8 +87,8 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
         {/* Amount hero */}
         <div className="px-5 py-6 border-b border-white/5">
           <p className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-1.5">Amount</p>
-          <p className={clsx('text-4xl font-bold tracking-tight', transaction.amount > 0 ? 'text-emerald-vein' : 'text-white')}>
-            {transaction.amount > 0 ? '+' : ''}{fmtMoney(transaction.amount)}
+          <p className={clsx('text-4xl font-bold tracking-tight', amountColor)}>
+            {amountDisplay}
           </p>
           <p className="text-sm text-iron-dust mt-1">{transaction.description}</p>
         </div>
@@ -85,7 +96,27 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ 
         {/* Details grid */}
         <div className="px-5 py-2">
           <DetailRow label="Date" value={format(new Date(transaction.date), 'dd MMM yyyy, HH:mm')} mono />
-          <DetailRow label="Account" value={account?.name ?? 'Unknown'} />
+
+          {/* Transfer: show From → To */}
+          {isTransfer ? (
+            <DetailRow
+              label="Account"
+              value={
+                <span className="flex items-center gap-1.5 justify-end flex-wrap">
+                  <span>{account?.name ?? 'Unknown'}</span>
+                  {accountTo && (
+                    <>
+                      <ArrowRight size={11} className="text-iron-dust shrink-0" />
+                      <span>{accountTo.name}</span>
+                    </>
+                  )}
+                </span>
+              }
+            />
+          ) : (
+            <DetailRow label="Account" value={account?.name ?? 'Unknown'} />
+          )}
+
           <DetailRow label="Category" value={
             <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-mono bg-white/5 border border-white/5 uppercase text-iron-dust">
               {transaction.category}
