@@ -2,15 +2,18 @@
 //
 // Search input with live autocomplete.
 //
-// Multi-value OR  -> commas:  account:"Halifax Main",Natwest
+// Multi-value OR  -> commas:  account:Halifax,Natwest
 // AND operator    -> #  (next token must also match)
 // EXCLUDE         -> /  (next token must not match)
+//
+// Tab / click inserts field: with NO trailing space so the value dropdown
+// appears immediately. Values are inserted without quotes.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const FIELD_PREFIXES = [
-  { label: 'account:',  hint: 'account:"Name 1","Name 2"  — comma = OR' },
+  { label: 'account:',  hint: 'account:Halifax,Natwest  — comma = OR' },
   { label: 'type:',     hint: 'type:expense,income' },
   { label: 'category:', hint: 'category:groceries,shopping' },
   { label: 'amount:',   hint: 'amount:12.50' },
@@ -28,6 +31,9 @@ interface Suggestion {
   label:  string;
   hint?:  string;
   kind:   'field' | 'value' | 'operator' | 'account';
+  // When true, insertion does NOT append a trailing space
+  // (used for field: so the value dropdown opens immediately)
+  noTrailingSpace?: boolean;
 }
 
 interface Props {
@@ -38,19 +44,17 @@ interface Props {
   placeholder?: string;
 }
 
-// Return the partial value being typed after the last comma inside a field:... token
-// e.g. 'account:"Halifax Main",Nat' -> { field: 'account', prefix: '"Halifax Main",', partial: 'nat' }
+// Detect if cursor is inside a field:value,... context (handles quoted segments too)
 function parseCommaContext(beforeCursor: string) {
-  // Match field: followed by any mix of quoted/unquoted comma-separated values
-  const re = /(?:^|\s)(account|type|category):((?:(?:"[^"]*"|[^\s,"])+,)*)([^\s,"]*)$/;
+  const re = /(?:^|\s)(account|type|category):((?:(?:"[^"]*"|[^\s,"])+,)*)([^\s,"]*)$/i;
   const m = re.exec(beforeCursor);
   if (!m) return null;
-  return { field: m[1], prefix: m[2], partial: m[3].toLowerCase() };
+  return { field: m[1].toLowerCase(), prefix: m[2], partial: m[3].toLowerCase() };
 }
 
 export const SmartSearchBar: React.FC<Props> = ({
   value, onChange, accounts, categories,
-  placeholder = 'Search…  account:"Name","Name 2"  type:expense  # /'
+  placeholder = 'Search…  account:Halifax,Natwest  type:expense  # /'
 }) => {
   const [open,        setOpen]        = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -66,13 +70,13 @@ export const SmartSearchBar: React.FC<Props> = ({
     const currentWord  = beforeCursor.slice(wordStart).toLowerCase();
     if (!currentWord) return [];
 
-    // Operator suggestions
+    // Operators
     OPERATORS.forEach(op => {
       if (op.label === currentWord)
         suggs.push({ insert: op.label, label: op.label, hint: op.hint, kind: 'operator' });
     });
 
-    // Check if we're inside a field:value,... context
+    // Check if cursor is inside a field:value,... context
     const ctx = parseCommaContext(beforeCursor);
     if (ctx) {
       const { field, prefix, partial } = ctx;
@@ -81,9 +85,10 @@ export const SmartSearchBar: React.FC<Props> = ({
           .filter(a => a.name.toLowerCase().includes(partial))
           .slice(0, 8)
           .forEach(a => suggs.push({
-            insert: `account:${prefix}"${a.name}"`,
+            // No quotes — names inserted plain, normaliser handles spaces
+            insert: `account:${prefix}${a.name}`,
             label:  a.name,
-            hint:   prefix ? `+ add to list` : undefined,
+            hint:   prefix ? '+ add to list' : undefined,
             kind:   'account',
           }));
       } else if (field === 'type') {
@@ -94,13 +99,13 @@ export const SmartSearchBar: React.FC<Props> = ({
         categories
           .filter(c => c.toLowerCase().includes(partial))
           .slice(0, 8)
-          .forEach(c => suggs.push({ insert: `category:${prefix}"${c}"`, label: c, kind: 'value' }));
+          .forEach(c => suggs.push({ insert: `category:${prefix}${c}`, label: c, kind: 'value' }));
       }
     } else {
-      // Field prefix suggestions
+      // Field prefix suggestions — NO trailing space so value autocomplete fires immediately
       FIELD_PREFIXES.forEach(fp => {
         if (fp.label.startsWith(currentWord) && currentWord !== fp.label)
-          suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field' });
+          suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field', noTrailingSpace: true });
       });
     }
 
@@ -119,10 +124,20 @@ export const SmartSearchBar: React.FC<Props> = ({
     const beforeCursor = value.slice(0, cursorPos);
     const afterCursor  = value.slice(cursorPos);
     const wordStart    = beforeCursor.lastIndexOf(' ') + 1;
-    const newVal = value.slice(0, wordStart) + sugg.insert + ' ' + afterCursor.trimStart();
-    onChange(newVal.trimEnd() + ' ');
+    const trail = sugg.noTrailingSpace ? '' : ' ';
+    const newVal = value.slice(0, wordStart) + sugg.insert + trail + afterCursor.trimStart();
+    // For field: insertions keep the cursor right after the colon (no extra space)
+    onChange(sugg.noTrailingSpace ? newVal : newVal.trimEnd() + ' ');
     setOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    // Re-open suggestions immediately after field: insertion
+    setTimeout(() => {
+      inputRef.current?.focus();
+      if (sugg.noTrailingSpace) {
+        const s = buildSuggestions(newVal);
+        setSuggestions(s);
+        setOpen(s.length > 0);
+      }
+    }, 0);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -183,7 +198,7 @@ export const SmartSearchBar: React.FC<Props> = ({
                     'w-full flex items-center gap-3 px-3 py-2 text-xs text-left transition-colors',
                     i === highlighted ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
                   )}>
-                  <span className={clsx('font-mono font-bold w-6 shrink-0', kindColour[s.kind])}>{s.label}</span>
+                  <span className={clsx('font-mono font-bold shrink-0', kindColour[s.kind])}>{s.label}</span>
                   {s.hint && <span className="text-iron-dust/60 text-[10px]">{s.hint}</span>}
                 </button>
               </li>
