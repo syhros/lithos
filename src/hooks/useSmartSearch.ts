@@ -1,20 +1,13 @@
 // useSmartSearch
 //
-// Parses a smart search string into structured tokens, then filters transactions.
-//
 // Syntax:
-//   plain text              -> fuzzy match description, category, or account
-//   account:halifax         -> single account filter (partial match)
-//   account:halifax,natwest -> multi-value OR  (comma-separated, no spaces)
-//   type:expense,income     -> multi-value OR  for type
-//   category:groceries      -> category filter
-//   amount:12.50            -> exact absolute amount
-//
-// Operators between tokens:
-//   #  AND     - next token must ALSO match
-//   /  EXCLUDE - next token must NOT match
-//
-// Multiple bare tokens with no operator = implicit AND.
+//   plain text                       -> fuzzy match description, category, or account
+//   account:"Halifax Main",Natwest   -> OR across comma-separated values (quotes respected)
+//   type:expense,income              -> OR across types
+//   category:groceries               -> category filter
+//   amount:12.50                     -> exact absolute amount
+//   #  token                         -> AND  (next token must also match)
+//   /  token                         -> EXCLUDE (next token must not match)
 import { useMemo } from 'react';
 import { Transaction } from '../data/mockData';
 
@@ -24,12 +17,35 @@ export type Modifier  = 'and' | 'not' | null;
 export interface SearchToken {
   modifier: Modifier;
   field:    TokenType;
-  // values is an array to support comma-separated OR lists
-  values:   string[];
+  values:   string[];   // OR list — any value matching = token matches
+}
+
+// Split a comma-separated string but respect double-quoted segments.
+// e.g. '"Halifax Main",Natwest,"foo bar"' -> ['Halifax Main', 'Natwest', 'foo bar']
+function splitCommaRespectingQuotes(raw: string): string[] {
+  const results: string[] = [];
+  let current = '';
+  let inQuote = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '"') {
+      inQuote = !inQuote;
+    } else if (ch === ',' && !inQuote) {
+      const v = current.trim();
+      if (v) results.push(v);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  const v = current.trim();
+  if (v) results.push(v);
+  return results;
 }
 
 export function parseSearchQuery(raw: string): SearchToken[] {
   const tokens: SearchToken[] = [];
+  // Lex: split on whitespace but keep quoted strings together
   const parts: string[] = [];
   const lexRe = /"[^"]*"|\S+/g;
   let m: RegExpExecArray | null;
@@ -51,28 +67,28 @@ export function parseSearchQuery(raw: string): SearchToken[] {
 }
 
 function buildToken(modifier: Modifier, raw: string): SearchToken {
-  const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
   const colonIdx = raw.indexOf(':');
   if (colonIdx > 0) {
-    const field  = raw.slice(0, colonIdx).toLowerCase();
-    const rest   = raw.slice(colonIdx + 1);
+    const field = raw.slice(0, colonIdx).toLowerCase();
+    const rest  = raw.slice(colonIdx + 1);
     const knownFields: TokenType[] = ['account', 'type', 'category', 'amount'];
     const matched = knownFields.find(f => f.startsWith(field));
     if (matched) {
-      // Split on commas to support multi-value OR: account:halifax,natwest
-      const values = rest.split(',').map(unquote).filter(Boolean);
-      return { modifier, field: matched, values };
+      const values = splitCommaRespectingQuotes(rest).filter(Boolean);
+      return { modifier, field: matched, values: values.length ? values : [''] };
     }
   }
-  return { modifier, field: 'text', values: [unquote(raw)] };
+  // Plain text — strip surrounding quotes if present
+  const plain = raw.replace(/^"|"$/g, '').trim();
+  return { modifier, field: 'text', values: [plain] };
 }
 
-// A token matches if ANY of its values match (OR within a token)
 function matchToken(
   token: SearchToken,
   tx: Transaction,
   accountName: string,
 ): boolean {
+  // OR within a token: any value matching = passes
   return token.values.some(v => matchSingleValue(token.field, v.toLowerCase(), tx, accountName));
 }
 
@@ -90,7 +106,6 @@ function matchSingleValue(
       const n = parseFloat(v);
       return !isNaN(n) && Math.abs(tx.amount) === n;
     }
-    case 'text':
     default:
       return (
         tx.description.toLowerCase().includes(v) ||
@@ -110,9 +125,8 @@ export function filterByTokens(
     const acc = accountMap[tx.accountId ?? ''] ?? '';
     for (const token of tokens) {
       const matches = matchToken(token, tx, acc);
-      // null = implicit AND, 'and' = explicit AND, 'not' = exclude
-      if (token.modifier === 'not') { if (matches) return false; }
-      else { if (!matches) return false; }
+      if (token.modifier === 'not') { if (matches)  return false; }
+      else                          { if (!matches) return false; }
     }
     return true;
   });
