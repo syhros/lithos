@@ -1,17 +1,16 @@
 // CustomSelect
 //
-// A fixed-option dropdown that is visually identical to CustomComboBox:
-//   - Same trigger wrapper: bg-black/20 border rounded-sm p-3 text-sm font-mono
-//   - Same border colours on hover / open / error
-//   - Portal-rendered list so it never gets clipped by overflow:hidden parents
-//   - Auto-flips above trigger when insufficient space below
-//   - Blank-value options (value==='' | 'all') shown in iron-dust grey
-//   - Real selections shown in white (matching typed text in ComboBox)
-//   - Group heading only rendered when SelectGroup.label is set
-//   - Hints shown inside the dropdown only
+// A fixed-option dropdown visually identical to CustomComboBox.
 //
-// The 'size' prop is intentionally removed — sizing is always p-3 text-sm
-// to stay in sync with CustomComboBox and native <input> fields.
+// Padding / font-size live ONLY in triggerClassName so they can be
+// overridden per call-site without Tailwind class conflicts:
+//
+//   Default (modal / full-width fields):  p-3 text-sm        ← matches native inputs
+//   Compact (table rows, Categorize):     px-2 py-2 text-xs  ← matches neighbouring inputs
+//
+// Usage:
+//   <CustomSelect ... />                              // default p-3 text-sm
+//   <CustomSelect ... triggerClassName="px-2 py-2 text-xs" />  // compact
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -34,6 +33,9 @@ interface Props {
   groups:            SelectGroup[];
   placeholder?:      string;
   className?:        string;
+  /** Override padding + font-size to match neighbouring inputs.
+   *  Defaults to "p-3 text-sm" (same as CustomComboBox / native inputs).
+   *  Pass e.g. "px-2 py-2 text-xs" for compact table-row contexts. */
   triggerClassName?: string;
   error?:            boolean;
   disabled?:         boolean;
@@ -114,19 +116,21 @@ export const CustomSelect: React.FC<Props> = ({
 
   return (
     <div className={clsx('relative', className)}>
-      {/* Trigger — same wrapper style as CustomComboBox */}
+      {/* Trigger */}
       <button
         ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={openDropdown}
         className={clsx(
-          'w-full flex items-center justify-between bg-black/20 border rounded-sm transition-colors focus:outline-none',
-          'p-3 text-sm font-mono text-left',
+          // layout / chrome — never overridden
+          'w-full flex items-center justify-between bg-black/20 border rounded-sm transition-colors focus:outline-none font-mono text-left',
+          // border state
           error    ? 'border-magma/50' : 'border-white/10',
           open     ? 'border-magma/50' : 'hover:border-white/20',
           disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-          triggerClassName,
+          // padding + font-size — caller overrides via triggerClassName
+          triggerClassName ?? 'p-3 text-sm',
         )}
       >
         <span className={clsx(
