@@ -274,7 +274,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   const [matchDescription, setMatchDescription] = useState(true);
   const [matchType,        setMatchType]        = useState(false);
   const [matchAmount,      setMatchAmount]       = useState(false);
-  // Editable "contains" — user can shorten e.g. "PAYBYPHONE RE NORT" → "PAYBYPHONE"
   const [contains,         setContains]         = useState(row.rawDescription);
   const [setDescription,   setSetDescription]   = useState(row.resolvedDescription || row.rawDescription);
   const [setCategory,      setSetCategory]      = useState(field === 'category' ? row.resolvedCategory : '');
@@ -349,7 +348,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
               <CheckRow label="Type matches"          checked={matchType}        onChange={setMatchType} />
               <CheckRow label="Amount matches"        checked={matchAmount}      onChange={setMatchAmount} />
             </div>
-            {/* Editable contains value — only relevant when matchDescription is on */}
             {matchDescription && (
               <div>
                 <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">
@@ -571,7 +569,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
       <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-1">Assign CSVs to Account</p>
       {csvConfigs.map((cfg, cfgIdx) => (
         <div key={cfg.csvName} className="space-y-2">
-          {/* Row 1: filename → account → amount cols toggle (all inline) */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-mono text-iron-dust bg-black/30 border border-white/10 px-2.5 py-1.5 rounded-sm shrink-0 max-w-[180px] truncate">
               {cfg.csvName}
@@ -584,8 +581,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
               <option value="">— select account —</option>
               {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-
-            {/* Amount columns toggle — inline */}
             <div className="flex items-center gap-1">
               <Columns2 size={12} className="text-iron-dust" />
               <span className="text-[10px] text-iron-dust font-mono">Cols:</span>
@@ -602,8 +597,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
                   cfg.amountColumns === 2 ? 'border-magma/50 bg-magma/10 text-white' : 'border-white/10 text-iron-dust hover:border-white/20'
                 )}>2</button>
             </div>
-
-            {/* Column header selectors — inline after the toggle */}
             {cfg.headers.length > 0 && cfg.amountColumns === 1 && (
               <>
                 <span className="text-[10px] text-iron-dust font-mono">Amount col:</span>
@@ -637,7 +630,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
               </>
             )}
           </div>
-
           {cfgIdx < csvConfigs.length - 1 && <hr className="border-white/5" />}
         </div>
       ))}
@@ -674,6 +666,7 @@ export const Categorize: React.FC = () => {
     transferRules, setTransferRules,
     loading, saving, saved,
     saveTypeRules, saveMerchantRules, saveTransferRules,
+    persistMerchantRule,
   } = useImportRules();
 
   const [rows,          setRows]          = useState<RawRow[]>([]);
@@ -685,7 +678,6 @@ export const Categorize: React.FC = () => {
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [rulePopup,     setRulePopup]     = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
   const [csvConfigs,    setCsvConfigs]    = useState<CsvConfig[]>([]);
-  // Use a Map keyed by filename so merging new files never duplicates
   const pendingCsvsRef = useRef<Map<string, string>>(new Map());
   const [pendingCsvs,  setPendingCsvs]   = useState<{ name: string; text: string }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -723,8 +715,6 @@ export const Categorize: React.FC = () => {
     };
   };
 
-  // typeRules / merchantRules / transferRules are stable references inside the callback
-  // so we read them via a ref to avoid stale closures in the file-load handlers
   const typeRulesRef     = useRef(typeRules);
   const merchantRulesRef = useRef(merchantRules);
   const transferRulesRef = useRef(transferRules);
@@ -746,10 +736,6 @@ export const Categorize: React.FC = () => {
     return applyTransferMatching(allRowsArr, transferRulesRef.current);
   }, []);
 
-  /**
-   * Core loader — reads FileList, merges into pendingCsvsRef (dedup by name),
-   * builds/merges configs, then calls rebuildRows exactly once.
-   */
   const loadFiles = useCallback((files: FileList, existingConfigs: CsvConfig[]) => {
     const fileArr = Array.from(files);
     let remaining = fileArr.length;
@@ -759,13 +745,10 @@ export const Categorize: React.FC = () => {
       const reader = new FileReader();
       reader.onload = e => {
         const text = e.target?.result as string;
-        // Merge into the stable ref map (dedup — same filename replaces)
         pendingCsvsRef.current.set(file.name, text);
         remaining--;
         if (remaining === 0) {
-          // All files for this batch are loaded — build final snapshot
           const allCsvs = Array.from(pendingCsvsRef.current.entries()).map(([name, text]) => ({ name, text }));
-          // Build configs: keep existing ones, add new ones for new filenames
           const merged = allCsvs.map(csv => {
             return existingConfigs.find(c => c.csvName === csv.name) || buildInitialConfig(csv.name, csv.text);
           });
@@ -780,19 +763,16 @@ export const Categorize: React.FC = () => {
     });
   }, [rebuildRows]);
 
-  // Initial upload from the rules tab
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || !files.length) return;
-    // Reset map for a fresh upload from the rules tab
     pendingCsvsRef.current = new Map();
     loadFiles(files, []);
   }, [loadFiles]);
 
-  // "Add more" from within the preview panel — merges with what's already there
   const handleAddMore = useCallback((files: FileList) => {
     setCsvConfigs(currentConfigs => {
       loadFiles(files, currentConfigs);
-      return currentConfigs; // unchanged until loadFiles finishes
+      return currentConfigs;
     });
   }, [loadFiles]);
 
@@ -861,11 +841,28 @@ export const Categorize: React.FC = () => {
   const removeTransferRule = (id: string) => setTransferRules(prev => prev.filter(r => r.id !== id));
   const updateTransferRule = (id: string, patch: Partial<TransferRule>) => setTransferRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  const handleRuleConfirm = (rule: MerchantRule) => {
-    setMerchantRules(prev => [...prev, rule]);
+  /**
+   * Called when the user confirms a rule from the preview popup.
+   * 1. Adds rule to local state immediately (optimistic UI).
+   * 2. Persists to Supabase via persistMerchantRule.
+   * 3. Replaces the temp id with the real DB id so state stays consistent.
+   * 4. Re-applies rules to the current row set.
+   */
+  const handleRuleConfirm = useCallback(async (rule: MerchantRule) => {
+    // 1. Add optimistically with temp id
+    const updatedRules = [...merchantRules, rule];
+    setMerchantRules(updatedRules);
     setRulePopup(null);
-    setRows(prev => applyMerchantRules(prev, [...merchantRules, rule]));
-  };
+    setRows(prev => applyMerchantRules(prev, updatedRules));
+
+    // 2. Persist to Supabase
+    const persisted = await persistMerchantRule(rule);
+
+    // 3. Swap temp id for real DB id if it changed
+    if (persisted.id !== rule.id) {
+      setMerchantRules(prev => prev.map(r => r.id === rule.id ? { ...r, id: persisted.id } : r));
+    }
+  }, [merchantRules, persistMerchantRule]);
 
   if (loading) {
     return (
@@ -882,14 +879,12 @@ export const Categorize: React.FC = () => {
     <div className="h-full overflow-y-auto custom-scrollbar">
       <div className="p-8 max-w-7xl mx-auto pb-24">
 
-        {/* Header */}
         <div className="mb-8">
           <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Tools</span>
           <h1 className="text-3xl font-bold text-white tracking-tight">Categorize & Import</h1>
           <p className="text-iron-dust text-sm mt-2">Set rules for cleaning bank CSVs, match transfers, then import in bulk.</p>
         </div>
 
-        {/* Tab bar */}
         <div className="flex gap-1 mb-6 border-b border-white/10">
           {(['rules', 'preview'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
@@ -901,7 +896,6 @@ export const Categorize: React.FC = () => {
           ))}
         </div>
 
-        {/* ══════════════════════ RULES TAB ══════════════════════ */}
         {activeTab === 'rules' && (
           <div className="space-y-4">
 
@@ -1056,7 +1050,6 @@ export const Categorize: React.FC = () => {
           </div>
         )}
 
-        {/* ══════════════════════ PREVIEW TAB ══════════════════════ */}
         {activeTab === 'preview' && (
           <div className="space-y-4">
 
@@ -1076,7 +1069,6 @@ export const Categorize: React.FC = () => {
 
             {rows.length > 0 && (
               <>
-                {/* Stats */}
                 <div className="grid grid-cols-4 gap-3">
                   {[
                     { label: 'Total Rows',  value: stats.total,     color: 'text-white' },
@@ -1091,7 +1083,6 @@ export const Categorize: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Assign CSVs to Account — now with inline col toggles + add more */}
                 <CsvAssignPanel
                   csvConfigs={csvConfigs}
                   onChange={updateCsvConfig}
@@ -1099,7 +1090,6 @@ export const Categorize: React.FC = () => {
                   onAddMore={handleAddMore}
                 />
 
-                {/* Bulk override */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -1119,7 +1109,6 @@ export const Categorize: React.FC = () => {
                   </div>
                 )}
 
-                {/* Filters */}
                 <div className="flex items-center gap-3">
                   <Filter size={12} className="text-iron-dust" />
                   <select value={filterType} onChange={e => setFilterType(e.target.value)}
@@ -1139,7 +1128,6 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Table */}
                 <div className="border border-white/10 rounded-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1235,7 +1223,6 @@ export const Categorize: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Import bar */}
                 <div className="flex items-center justify-between bg-[#131517] border border-white/10 rounded-sm p-4">
                   <div>
                     <p className="text-sm font-bold text-white">{stats.toImport} transactions ready to import</p>
@@ -1258,7 +1245,6 @@ export const Categorize: React.FC = () => {
         )}
       </div>
 
-      {/* Create Rule Popup */}
       {rulePopup && (
         <CreateRulePopup
           row={rulePopup.row}
