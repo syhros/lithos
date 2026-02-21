@@ -203,7 +203,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         amount: parseFloat(t.amount), type: t.type as TransactionType,
         category: t.category,
         accountId: t.account_id || t.debt_id || undefined,
-        // --- Phase 2: load the transfer destination ---
         accountToId: t.account_to_id || undefined,
         notes: t.notes ?? undefined, symbol: t.symbol,
         quantity: t.quantity ? parseFloat(t.quantity) : undefined,
@@ -391,8 +390,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
     const debtIdSet = new Set(data.debts.map(d => d.id));
+    const assetIdSet = new Set(data.assets.map(a => a.id));
 
-    // Investment accounts: value = sum of holdings at market price only (never touched by transfers)
+    // Investment accounts: value = sum of holdings at market price only
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -402,14 +402,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    // Non-investment asset transactions — skip 'investing' type AND skip 'transfer' on investment accounts
+    // Non-investment asset transactions
     data.transactions.forEach(tx => {
-      if (!tx.accountId) return;
-      if (tx.type === 'investing') return; // always skip raw buy/sell entries from balance replay
-      const acct = data.assets.find(a => a.id === tx.accountId);
-      if (acct?.type === 'investment') return; // skip transfers INTO/FROM investment account — value comes from holdings
-      if (debtIdSet.has(tx.accountId)) return; // handled separately below
-      if (balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
+      if (tx.type === 'investing') return;
+
+      // Credit the FROM side (accountId) — skip if investment account or debt
+      if (tx.accountId) {
+        const fromAcct = data.assets.find(a => a.id === tx.accountId);
+        if (fromAcct && fromAcct.type !== 'investment' && !debtIdSet.has(tx.accountId)) {
+          if (balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
+        }
+      }
+
+      // For single-row transfers: credit the TO side with the positive (incoming) amount
+      if (tx.type === 'transfer' && tx.accountToId && assetIdSet.has(tx.accountToId)) {
+        const toAcct = data.assets.find(a => a.id === tx.accountToId);
+        if (toAcct && toAcct.type !== 'investment') {
+          if (balances[tx.accountToId] !== undefined) {
+            balances[tx.accountToId] += Math.abs(tx.amount);
+          }
+        }
+      }
     });
 
     // Debt balances
@@ -423,7 +436,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [data.assets, data.transactions, data.debts, currentPrices, gbpUsdRate]);
 
   const getHistory = (range: HistoryRange): HistoricalPoint[] => {
-    // For 'all', find earliest transaction date
     let days: number;
     if (range === 'all') {
       const allDates = data.transactions.map(t => t.date).filter(Boolean).sort();
@@ -442,8 +454,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const points: HistoricalPoint[] = [];
     const userCurrency = data.user.currency || 'GBP';
     const debtIdSet = new Set(data.debts.map(d => d.id));
+    const assetIdSet = new Set(data.assets.map(a => a.id));
 
-    // Subsample for large ranges to keep performance snappy
     const totalDays = days + 1;
     const maxPoints = 90;
     const step = totalDays > maxPoints ? Math.ceil(totalDays / maxPoints) : 1;
@@ -457,16 +469,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (asset.type === 'checking') {
           checking += asset.startingValue;
           data.transactions
-            // skip investing type; skip transfers on non-checking accounts
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { checking += t.amount; });
+          // Credit incoming transfers to this account
+          data.transactions
+            .filter(t => t.type === 'transfer' && t.accountToId === asset.id && assetIdSet.has(t.accountId ?? '') && new Date(t.date) <= d)
+            .forEach(t => { checking += Math.abs(t.amount); });
         } else if (asset.type === 'savings') {
           savings += asset.startingValue;
           data.transactions
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { savings += t.amount; });
+          // Credit incoming transfers to this account
+          data.transactions
+            .filter(t => t.type === 'transfer' && t.accountToId === asset.id && assetIdSet.has(t.accountId ?? '') && new Date(t.date) <= d)
+            .forEach(t => { savings += Math.abs(t.amount); });
         } else if (asset.type === 'investment') {
-          // Investment value = quantity × historical price only
           const investingTxns = data.transactions.filter(t => t.type === 'investing' && t.accountId === asset.id && t.symbol && t.quantity && new Date(t.date) <= d);
           const holdings = new Map<string, any>();
           investingTxns.forEach(t => {
@@ -500,7 +518,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       });
 
-      // Replay debt transactions per-day
       let debts = 0;
       data.debts.forEach(debt => {
         let balance = debt.startingValue;
@@ -513,7 +530,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       points.push({ date: dateStr, netWorth: checking + savings + investing - debts, assets: checking + savings + investing, debts, checking, savings, investing });
     }
 
-    // Always ensure the final point is today's real data
     const lastPoint = points[points.length - 1];
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (!lastPoint || lastPoint.date !== todayStr) {
@@ -549,8 +565,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const isDebtAccount = data.debts.some(d => d.id === tx.accountId);
-    // Normalise date to yyyy-MM-dd — ISO strings like 2024-01-15T00:00:00.000Z
-    // are rejected or mishandled by Supabase date columns.
     const normalisedDate = tx.date ? tx.date.substring(0, 10) : tx.date;
     const { data: newTx, error } = await supabase.from('transactions').insert({
       user_id: session.user.id,

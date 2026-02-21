@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Trash2 } from 'lucide-react';
+import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Trash2, ArrowRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
@@ -35,10 +35,17 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
     return (balance * (account.interestRate / 100)) / 12;
   }, [account, balance]);
 
+  const allAccountMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    [...data.assets, ...data.debts].forEach(a => { map[a.id] = a.name; });
+    return map;
+  }, [data.assets, data.debts]);
+
+  // Include transfers where this account is the destination (accountToId)
   const transactions = useMemo(() => {
     if (!account) return [];
     return (data?.transactions || [])
-      .filter(t => t.accountId === account.id)
+      .filter(t => t.accountId === account.id || t.accountToId === account.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 20);
   }, [data?.transactions, account]);
@@ -65,8 +72,8 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
   const chartUp = lastVal >= firstVal;
   const chartColor = chartUp ? '#00f2ad' : '#ff4d00';
 
-  const income = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const expenses = transactions.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const income   = transactions.filter(t => t.amount > 0 || (t.type === 'transfer' && t.accountToId === account?.id)).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const expenses = transactions.filter(t => t.amount < 0 && !(t.type === 'transfer' && t.accountToId === account?.id)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
   const openEdit = () => {
     if (!account) return;
@@ -384,22 +391,41 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
                   {transactions.length === 0 && (
                     <p className="text-xs font-mono text-iron-dust py-4 text-center">No transactions found.</p>
                   )}
-                  {transactions.map(tx => (
-                    <div key={tx.id} className="flex justify-between items-center p-4 bg-[#161618] border border-white/5 rounded-sm hover:bg-white/[0.02] transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className={clsx('w-7 h-7 rounded-full flex items-center justify-center border', tx.amount > 0 ? 'border-emerald-vein/20 text-emerald-vein' : 'border-white/10 text-iron-dust')}>
-                          {tx.amount > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                  {transactions.map(tx => {
+                    const isIncoming = tx.type === 'transfer' && tx.accountToId === account.id;
+                    const isTransfer = tx.type === 'transfer';
+                    const displayAmt = isIncoming ? Math.abs(tx.amount) : tx.amount;
+                    return (
+                      <div key={tx.id} className="flex justify-between items-center p-4 bg-[#161618] border border-white/5 rounded-sm hover:bg-white/[0.02] transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className={clsx('w-7 h-7 rounded-full flex items-center justify-center border',
+                            isIncoming || displayAmt > 0 ? 'border-emerald-vein/20 text-emerald-vein' : 'border-white/10 text-iron-dust'
+                          )}>
+                            {isIncoming || displayAmt > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-white">{tx.description}</p>
+                            <p className="text-[9px] font-mono text-iron-dust uppercase">
+                              {tx.category} · {format(new Date(tx.date), 'dd MMM yyyy')}
+                              {isTransfer && (
+                                <span className="ml-1">
+                                  {isIncoming
+                                    ? <> ← {allAccountMap[tx.accountId ?? ''] || 'Unknown'}</>
+                                    : <> → {allAccountMap[tx.accountToId ?? ''] || 'Unknown'}</>
+                                  }
+                                </span>
+                              )}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-bold text-white">{tx.description}</p>
-                          <p className="text-[9px] font-mono text-iron-dust uppercase">{tx.category} · {format(new Date(tx.date), 'dd MMM yyyy')}</p>
-                        </div>
+                        <span className={clsx('text-xs font-mono font-bold',
+                          isIncoming || displayAmt > 0 ? 'text-emerald-vein' : 'text-white'
+                        )}>
+                          {isTransfer ? '' : (displayAmt > 0 ? '+' : '')}{currencySymbol}{Math.abs(displayAmt).toFixed(2)}
+                        </span>
                       </div>
-                      <span className={clsx('text-xs font-mono font-bold', tx.amount > 0 ? 'text-emerald-vein' : 'text-white')}>
-                        {tx.amount > 0 ? '+' : ''}{currencySymbol}{Math.abs(tx.amount).toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </>

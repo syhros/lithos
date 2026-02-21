@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
-import { Plus, Upload, Trash2, CheckSquare, Square, X, Edit2 } from 'lucide-react';
+import { Plus, Upload, Trash2, CheckSquare, Square, X, Edit2, ArrowRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import { AddTransactionModal } from '../components/AddTransactionModal';
@@ -39,16 +39,15 @@ const getDisplayAmount = (tx: Transaction): { value: number; prefix: string; col
       return { value: abs, prefix: '', colorClass: 'text-white' };
     }
     case 'debt_payment': return { value: abs, prefix: '-', colorClass: 'text-white' };
-    case 'transfer':
-      if (tx.amount > 0) return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
-      return { value: abs, prefix: '-', colorClass: 'text-white' };
+    // Transfers are neutral — no +/- sign
+    case 'transfer':     return { value: abs, prefix: '', colorClass: 'text-iron-dust' };
     default:
       if (tx.amount > 0) return { value: abs, prefix: '+', colorClass: 'text-emerald-vein' };
       return { value: abs, prefix: '-', colorClass: 'text-white' };
   }
 };
 
-// ─── Bulk Edit Modal ──────────────────────────────────────────────────────────
+// ─── Bulk Edit Modal ─────────────────────────────────────────────────────
 interface BulkEditFields {
   accountId?: string;
   type?: string;
@@ -207,7 +206,7 @@ const BulkEditModal: React.FC<BulkEditModalProps> = ({ count, accounts, categori
   );
 };
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────
 export const Transactions: React.FC = () => {
   const { data, deleteTransaction, deleteTransactions, updateTransaction, currencySymbol, deletingTransactions } = useFinance();
   const [search,            setSearch]            = useState('');
@@ -260,7 +259,6 @@ export const Transactions: React.FC = () => {
     if (fields.category)  updates.category  = fields.category;
     if (fields.date)      updates.date      = new Date(fields.date).toISOString();
     if (fields.currency)  updates.currency  = fields.currency;
-    // Fire updates in parallel
     await Promise.all(Array.from(selectedIds).map(id => updateTransaction(id, updates)));
     setShowBulkEdit(false);
     setSelectedIds(new Set());
@@ -382,6 +380,8 @@ export const Transactions: React.FC = () => {
                 const typeLabel   = TYPE_LABELS[tx.type] ?? tx.type;
                 const typeColor   = TYPE_COLORS[tx.type]  ?? 'text-iron-dust bg-white/5 border-white/10';
                 const { value, prefix, colorClass } = getDisplayAmount(tx);
+                const isTransfer  = tx.type === 'transfer';
+                const accountToName = isTransfer && tx.accountToId ? accountMap[tx.accountToId] : null;
                 return (
                   <tr key={tx.id}
                     onClick={selectMode ? () => toggleSelect(tx.id) : () => setSelectedTx(tx)}
@@ -398,9 +398,17 @@ export const Transactions: React.FC = () => {
                       {tx.description}
                     </td>
                     <td className="py-4 px-6">
-                      <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">
-                        {accountMap[tx.accountId ?? ''] || 'Unknown'}
-                      </span>
+                      {isTransfer && accountToName ? (
+                        <span className="flex items-center gap-1 text-[10px] font-mono text-iron-dust uppercase tracking-wider">
+                          <span>{accountMap[tx.accountId ?? ''] || 'Unknown'}</span>
+                          <ArrowRight size={10} className="shrink-0 opacity-50" />
+                          <span>{accountToName}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-iron-dust uppercase tracking-wider">
+                          {accountMap[tx.accountId ?? ''] || 'Unknown'}
+                        </span>
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       <span className={clsx('inline-flex items-center px-2 py-1 rounded-sm text-[10px] font-mono font-bold border uppercase', typeColor)}>
