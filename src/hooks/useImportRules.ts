@@ -17,6 +17,8 @@ export interface MerchantRule {
   setDescription: string;
   setCategory: string;
   setType: TransactionType | '';
+  // setAccountId: if set, the rule only applies when resolvedAccountId matches this account.
+  // When empty, the rule applies to all accounts.
   setAccountId: string;
   setAccountToId: string;
   setNotes: string;
@@ -111,7 +113,6 @@ export function useImportRules() {
     load();
   }, []);
 
-  // ─ Save helpers ─
   const flashSaved = (key: string) => {
     setSaved(prev => ({ ...prev, [key]: true }));
     setTimeout(() => setSaved(prev => ({ ...prev, [key]: false })), 2000);
@@ -121,7 +122,6 @@ export function useImportRules() {
     setSaving(prev => ({ ...prev, type: true }));
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    // Delete all and reinsert (simple approach for small rule sets)
     await supabase.from('import_type_rules').delete().eq('user_id', user.id);
     const rows = typeRules
       .filter(r => r.bankCode)
@@ -147,6 +147,7 @@ export function useImportRules() {
         set_description:    r.setDescription   || null,
         set_category:       r.setCategory      || null,
         set_type:           r.setType          || null,
+        // set_account_id used as "only run when Acct From matches" filter
         set_account_id:     r.setAccountId     || null,
         set_account_to_id:  r.setAccountToId   || null,
         set_notes:          r.setNotes         || null,
