@@ -4,6 +4,7 @@ import { useFinance } from '../context/FinanceContext';
 import { Download, Upload, Trash2, AlertCircle, Check, LogOut, Database, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../lib/supabase';
+import { CustomSelect, SelectGroup } from '../components/CustomSelect';
 
 type LogEntry = {
   id: number;
@@ -21,6 +22,69 @@ type PullPhase =
 
 // Strip any timestamp component, return just YYYY-MM-DD
 const toDateOnly = (dateStr: string): string => dateStr.substring(0, 10);
+
+const DELETE_OPTIONS: SelectGroup[] = [
+  {
+    options: [
+      { value: 'none', label: 'Select deletion type…' },
+    ],
+  },
+  {
+    label: 'Transactions',
+    options: [
+      {
+        value: 'all_transactions',
+        label: 'All Transactions',
+        hint: 'removes every transaction record',
+      },
+      {
+        value: 'recent_transactions',
+        label: 'Recent Transactions',
+        hint: 'delete last X months of transactions',
+      },
+    ],
+  },
+  {
+    label: 'Assets & Debts',
+    options: [
+      {
+        value: 'accounts',
+        label: 'All Accounts',
+        hint: 'resets all account balances to £0',
+      },
+      {
+        value: 'debts',
+        label: 'All Debts',
+        hint: 'removes all debt records',
+      },
+    ],
+  },
+  {
+    label: 'Other Data',
+    options: [
+      {
+        value: 'investments',
+        label: 'All Investments',
+        hint: 'clears investment transactions & holdings',
+      },
+      {
+        value: 'bills',
+        label: 'All Bills',
+        hint: 'removes all bill & subscription records',
+      },
+    ],
+  },
+  {
+    label: 'Danger Zone',
+    options: [
+      {
+        value: 'factory_reset',
+        label: 'Factory Reset',
+        hint: 'deletes everything — irreversible',
+      },
+    ],
+  },
+];
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
@@ -78,7 +142,7 @@ export const Settings: React.FC = () => {
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
     await sleep(150);
 
-    const firstTxDate = new Map<string, string>(); // symbol -> YYYY-MM-DD
+    const firstTxDate = new Map<string, string>();
     const investingTxs = transactions.filter(t => t.type === 'investing' && t.symbol && t.date);
     const allSymbols = Array.from(new Set(investingTxs.map(t => t.symbol!)));
 
@@ -105,7 +169,6 @@ export const Settings: React.FC = () => {
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
     await sleep(150);
 
-    // toFetch: symbol -> { from: YYYY-MM-DD, to: YYYY-MM-DD }
     const toFetch = new Map<string, { from: string; to: string }>();
     const ignored: string[] = [];
 
@@ -125,15 +188,12 @@ export const Settings: React.FC = () => {
       const cacheStart = cached?.date ? toDateOnly(cached.date) : null;
 
       if (cacheStart && cacheStart <= txFrom) {
-        // Cache already covers the first transaction date — nothing to do
         addLog(`  → ${sym}: cache covers ${cacheStart} ✓ — skipping`, 'success');
         ignored.push(sym);
       } else if (cacheStart) {
-        // Gap exists: pull from first tx date up to (but not including) the cache start
         addLog(`  → ${sym}: cache starts ${cacheStart}, need ${txFrom} — gap: ${txFrom} → ${cacheStart}`, 'info');
         toFetch.set(sym, { from: txFrom, to: cacheStart });
       } else {
-        // No cache at all — pull from first tx date to today
         addLog(`  → ${sym}: no cache found — will fetch ${txFrom} → ${today}`, 'info');
         toFetch.set(sym, { from: txFrom, to: today });
       }
@@ -273,17 +333,6 @@ export const Settings: React.FC = () => {
     setDeleteType('none');
     setTimeout(() => setDeleteSuccess(false), 3000);
   };
-
-  const deleteOptions = [
-    { value: 'none', label: 'Select deletion type...' },
-    { value: 'all_transactions', label: 'All Transactions' },
-    { value: 'recent_transactions', label: 'Transactions from Last X Months' },
-    { value: 'accounts', label: 'All Accounts (set balances to 0)' },
-    { value: 'investments', label: 'All Investments' },
-    { value: 'debts', label: 'All Debts' },
-    { value: 'bills', label: 'All Bills' },
-    { value: 'factory_reset', label: 'Factory Reset (Delete Everything)' },
-  ];
 
   const isPulling = pullPhase !== 'idle' && pullPhase !== 'done';
   const phaseLabel: Record<PullPhase, string> = {
@@ -444,15 +493,13 @@ export const Settings: React.FC = () => {
             <p className="text-sm text-iron-dust">Permanently delete specific data. This action cannot be undone.</p>
             <div>
               <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Select Data to Delete</label>
-              <select
+              <CustomSelect
                 value={deleteType}
-                onChange={e => { setDeleteType(e.target.value); setConfirmDelete(false); }}
-                className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-              >
-                {deleteOptions.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+                onChange={v => { setDeleteType(v); setConfirmDelete(false); }}
+                groups={DELETE_OPTIONS}
+                placeholder="Select deletion type…"
+                maxVisibleItems={8}
+              />
             </div>
             {deleteType === 'recent_transactions' && (
               <div>
