@@ -203,6 +203,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         amount: parseFloat(t.amount), type: t.type as TransactionType,
         category: t.category,
         accountId: t.account_id || t.debt_id || undefined,
+        // --- Phase 2: load the transfer destination ---
+        accountToId: t.account_to_id || undefined,
         notes: t.notes ?? undefined, symbol: t.symbol,
         quantity: t.quantity ? parseFloat(t.quantity) : undefined,
         price: t.price ? parseFloat(t.price) : undefined, currency: t.currency
@@ -389,6 +391,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
     const debtIdSet = new Set(data.debts.map(d => d.id));
+
+    // Investment accounts: value = sum of holdings at market price only (never touched by transfers)
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -397,15 +401,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         balances[asset.id] = asset.startingValue;
       }
     });
+
+    // Non-investment asset transactions — skip 'investing' type AND skip 'transfer' on investment accounts
     data.transactions.forEach(tx => {
-      if (!tx.accountId || tx.type === 'investing') return;
-      if (!debtIdSet.has(tx.accountId) && balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
+      if (!tx.accountId) return;
+      if (tx.type === 'investing') return; // always skip raw buy/sell entries from balance replay
+      const acct = data.assets.find(a => a.id === tx.accountId);
+      if (acct?.type === 'investment') return; // skip transfers INTO/FROM investment account — value comes from holdings
+      if (debtIdSet.has(tx.accountId)) return; // handled separately below
+      if (balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
     });
+
+    // Debt balances
     data.debts.forEach(debt => { balances[debt.id] = debt.startingValue; });
     data.transactions.forEach(tx => {
       if (!tx.accountId || !debtIdSet.has(tx.accountId)) return;
       balances[tx.accountId] += tx.amount;
     });
+
     return balances;
   }, [data.assets, data.transactions, data.debts, currentPrices, gbpUsdRate]);
 
@@ -444,6 +457,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (asset.type === 'checking') {
           checking += asset.startingValue;
           data.transactions
+            // skip investing type; skip transfers on non-checking accounts
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { checking += t.amount; });
         } else if (asset.type === 'savings') {
@@ -452,6 +466,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { savings += t.amount; });
         } else if (asset.type === 'investment') {
+          // Investment value = quantity × historical price only
           const investingTxns = data.transactions.filter(t => t.type === 'investing' && t.accountId === asset.id && t.symbol && t.quantity && new Date(t.date) <= d);
           const holdings = new Map<string, any>();
           investingTxns.forEach(t => {
@@ -502,7 +517,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const lastPoint = points[points.length - 1];
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     if (!lastPoint || lastPoint.date !== todayStr) {
-      // Compute today's values
       let checking = 0, savings = 0, investing = 0;
       data.assets.forEach(asset => {
         if (asset.type !== 'investment') {
@@ -535,16 +549,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const isDebtAccount = data.debts.some(d => d.id === tx.accountId);
+    // --- Phase 2: persist accountToId as account_to_id ---
     const { data: newTx } = await supabase.from('transactions').insert({
       user_id: session.user.id,
       account_id: isDebtAccount ? null : (tx.accountId ?? null),
       debt_id: isDebtAccount ? tx.accountId : null,
+      account_to_id: tx.accountToId ?? null,
       date: tx.date, description: tx.description, amount: tx.amount, type: tx.type,
       category: tx.category, notes: tx.notes ?? null, symbol: tx.symbol ?? null,
       quantity: tx.quantity ?? null, price: tx.price ?? null, currency: tx.currency ?? null,
     }).select().maybeSingle();
     if (newTx) {
-      setData(prev => ({ ...prev, transactions: [...prev.transactions, { id: newTx.id, ...tx, accountId: newTx.account_id || newTx.debt_id || tx.accountId }] }));
+      setData(prev => ({ ...prev, transactions: [...prev.transactions, {
+        id: newTx.id, ...tx,
+        accountId: newTx.account_id || newTx.debt_id || tx.accountId,
+        accountToId: newTx.account_to_id || tx.accountToId || undefined,
+      }] }));
     }
   };
 
@@ -552,6 +572,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const dbUpdates: Record<string, any> = {};
     Object.entries(updates).forEach(([key, value]) => {
       if (key === 'accountId') { const isDebt = data.debts.some(d => d.id === value); dbUpdates['account_id'] = isDebt ? null : value; dbUpdates['debt_id'] = isDebt ? value : null; }
+      else if (key === 'accountToId') { dbUpdates['account_to_id'] = value ?? null; }
       else if (key === 'symbol') { dbUpdates['symbol'] = value; }
       else if (key === 'quantity') { dbUpdates['quantity'] = value; }
       else if (key === 'price') { dbUpdates['price'] = value; }
