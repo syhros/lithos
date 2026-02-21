@@ -3,22 +3,36 @@ import { MockData, Transaction, Asset, Debt, Bill, UserProfile, currentStockPric
 import { subDays, format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 
+export type CardSortOrder = 'az' | 'highest' | 'date';
+
+export interface SortOrders {
+  accounts: CardSortOrder;
+  investments: CardSortOrder;
+  debts: CardSortOrder;
+}
+
+const DEFAULT_SORT_ORDERS: SortOrders = {
+  accounts: 'highest',
+  investments: 'highest',
+  debts: 'highest',
+};
+
 interface MarketData {
-    price: number;
-    change: number;
-    changePercent: number;
-    currency: string;
-    name?: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  currency: string;
+  name?: string;
 }
 
 interface HistoricalPoint {
-    date: string;
-    netWorth: number;
-    assets: number;
-    debts: number;
-    checking: number;
-    savings: number;
-    investing: number;
+  date: string;
+  netWorth: number;
+  assets: number;
+  debts: number;
+  checking: number;
+  savings: number;
+  investing: number;
 }
 
 interface FinanceContextType {
@@ -50,6 +64,9 @@ interface FinanceContextType {
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   refreshData: () => Promise<void>;
 
+  sortOrders: SortOrders;
+  updateSortOrder: (page: keyof SortOrders, order: CardSortOrder) => Promise<void>;
+
   currencySymbol: string;
   gbpUsdRate: number;
 }
@@ -57,18 +74,15 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const getCurrencySymbol = (currency: string): string => {
-    switch (currency) {
-        case 'USD': return '$';
-        case 'EUR': return '\u20ac';
-        case 'GBX': return 'p';
-        default: return '\u00a3';
-    }
+  switch (currency) {
+    case 'USD': return '$';
+    case 'EUR': return '\u20ac';
+    case 'GBX': return 'p';
+    default: return '\u00a3';
+  }
 };
 
-const getCurrencyFromTransactions = (
-  symbol: string,
-  transactions: Transaction[]
-): string => {
+const getCurrencyFromTransactions = (symbol: string, transactions: Transaction[]): string => {
   const tx = transactions.find(t => t.symbol === symbol && t.currency);
   return tx?.currency || 'GBP';
 };
@@ -80,7 +94,6 @@ const getEarliestTxDate = (symbol: string, transactions: Transaction[]): string 
   return earliest.substring(0, 10);
 };
 
-/** Returns the most recent close price from a history map, or undefined if empty. */
 const getMostRecentClose = (history: Record<string, number>): number | undefined => {
   const dates = Object.keys(history).sort();
   if (dates.length === 0) return undefined;
@@ -88,21 +101,21 @@ const getMostRecentClose = (history: Record<string, number>): number | undefined
 };
 
 const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
-    const history: Record<string, number> = {};
-    const today = new Date();
-    const volatility = 0.015;
-    const prices: number[] = [currentPrice];
-    for (let i = 1; i < 365; i++) {
-        const prev = prices[i - 1];
-        const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
-        prices.push(move);
-    }
-    prices.reverse();
-    for (let i = 0; i < 365; i++) {
-        const d = subDays(today, i);
-        history[format(d, 'yyyy-MM-dd')] = prices[i];
-    }
-    return history;
+  const history: Record<string, number> = {};
+  const today = new Date();
+  const volatility = 0.015;
+  const prices: number[] = [currentPrice];
+  for (let i = 1; i < 365; i++) {
+    const prev = prices[i - 1];
+    const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
+    prices.push(move);
+  }
+  prices.reverse();
+  for (let i = 0; i < 365; i++) {
+    const d = subDays(today, i);
+    history[format(d, 'yyyy-MM-dd')] = prices[i];
+  }
+  return history;
 };
 
 const getAuthToken = async (): Promise<string> => {
@@ -130,6 +143,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
   const [gbpUsdRate, setGbpUsdRate] = useState<number>(0);
   const [rateUpdatedAt, setRateUpdatedAt] = useState<string>('');
+  const [sortOrders, setSortOrders] = useState<SortOrders>(DEFAULT_SORT_ORDERS);
 
   const fetchFxRate = async () => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -168,6 +182,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         supabase.from('bills').select('*').eq('user_id', userId)
       ]);
 
+      // Load sort orders from profile
+      if (profile?.sort_orders) {
+        try {
+          const saved = typeof profile.sort_orders === 'string'
+            ? JSON.parse(profile.sort_orders)
+            : profile.sort_orders;
+          setSortOrders({ ...DEFAULT_SORT_ORDERS, ...saved });
+        } catch (_) {}
+      }
+
       const mappedAccounts: Asset[] = (accounts || []).map(a => ({
         id: a.id, name: a.name, type: a.type as AssetType, currency: a.currency as Currency,
         institution: a.institution, color: a.color, startingValue: parseFloat(a.starting_value),
@@ -176,19 +200,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }));
 
       const mappedTransactions: Transaction[] = (allTransactions || []).map(t => ({
-        id: t.id,
-        date: t.date,
-        description: t.description,
-        amount: parseFloat(t.amount),
-        type: t.type as TransactionType,
+        id: t.id, date: t.date, description: t.description,
+        amount: parseFloat(t.amount), type: t.type as TransactionType,
         category: t.category,
-        // Resolve accountId from whichever FK column is set
         accountId: t.account_id || t.debt_id || undefined,
-        notes: t.notes ?? undefined,
-        symbol: t.symbol,
+        notes: t.notes ?? undefined, symbol: t.symbol,
         quantity: t.quantity ? parseFloat(t.quantity) : undefined,
-        price: t.price ? parseFloat(t.price) : undefined,
-        currency: t.currency
+        price: t.price ? parseFloat(t.price) : undefined, currency: t.currency
       }));
 
       const mappedDebts: Debt[] = (debts || []).map(d => ({
@@ -207,7 +225,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         recurringEndDate: b.recurring_end_date
       }));
 
-      setData({ transactions: mappedTransactions, assets: mappedAccounts, debts: mappedDebts, bills: mappedBills, recurring: [], user: { username: profile?.username || '', currency: profile?.currency || 'GBP', notifications: 0 } });
+      setData({
+        transactions: mappedTransactions, assets: mappedAccounts,
+        debts: mappedDebts, bills: mappedBills, recurring: [],
+        user: { username: profile?.username || '', currency: profile?.currency || 'GBP', notifications: 0 }
+      });
       setLastUpdated(new Date());
       await fetchMarketData(false, mappedTransactions);
 
@@ -254,9 +276,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             });
             liveApiAvailable = true;
           } else { console.warn(`live-prices returned ${res.status}`); }
-        } catch (e) {
-          console.warn('live-prices fetch failed, will use cached prices:', e);
-        }
+        } catch (e) { console.warn('live-prices fetch failed, will use cached prices:', e); }
 
         localStorage.setItem('lithos_last_sync', now.toString());
         const historyCache: Record<string, Record<string, number>> = {};
@@ -274,9 +294,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           if (Object.keys(history).length === 0) {
             try {
-              let allCached: any[] = [];
-              let offset = 0;
-              let hasMore = true;
+              let allCached: any[] = []; let offset = 0; let hasMore = true;
               while (hasMore) {
                 const { data: cached, error } = await supabase.from('price_history_cache').select('date, close').eq('symbol', sym).gte('date', fromDate).order('date', { ascending: true }).range(offset, offset + 999);
                 if (error || !cached || cached.length === 0) { hasMore = false; }
@@ -304,13 +322,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               const dates = Object.keys(hist).sort();
               const prevClose = dates.length >= 2 ? hist[dates[dates.length - 2]] : mostRecentClose;
               const chg = mostRecentClose - prevClose;
-              updatedPrices[sym] = {
-                price: mostRecentClose,
-                change: chg,
-                changePercent: prevClose > 0 ? (chg / prevClose) * 100 : 0,
-                currency: symbolCurrencyMap[sym] || 'GBP',
-                name: sym,
-              };
+              updatedPrices[sym] = { price: mostRecentClose, change: chg, changePercent: prevClose > 0 ? (chg / prevClose) * 100 : 0, currency: symbolCurrencyMap[sym] || 'GBP', name: sym };
             }
           }
         });
@@ -335,10 +347,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (cachedPrices) { try { setCurrentPrices(JSON.parse(cachedPrices)); } catch (e) {} }
     const cachedHistory = localStorage.getItem('lithos_historical_prices');
     if (cachedHistory) { try { setHistoricalPrices(JSON.parse(cachedHistory)); } catch (e) {} }
+
+    // Initial load
     (async () => { await fetchFxRate(); await loadUserData(true); })();
+
+    // FX hourly refresh
     const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
     const firstTimeout = setTimeout(() => { fetchFxRate(); const i = setInterval(fetchFxRate, 60 * 60 * 1000); return () => clearInterval(i); }, msUntilNextHour);
-    return () => clearTimeout(firstTimeout);
+
+    // Listen for auth state changes — reload data immediately after login
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        loadUserData(false);
+      }
+    });
+
+    return () => {
+      clearTimeout(firstTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const getHoldingsByAccount = (accountId: string) => {
@@ -371,7 +398,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const currentBalances = useMemo(() => {
     const balances: { [key: string]: number } = {};
     const debtIdSet = new Set(data.debts.map(d => d.id));
-
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -380,21 +406,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         balances[asset.id] = asset.startingValue;
       }
     });
-
     data.transactions.forEach(tx => {
       if (!tx.accountId || tx.type === 'investing') return;
-      if (!debtIdSet.has(tx.accountId) && balances[tx.accountId] !== undefined) {
-        balances[tx.accountId] += tx.amount;
-      }
+      if (!debtIdSet.has(tx.accountId) && balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
     });
-
     data.debts.forEach(debt => { balances[debt.id] = debt.startingValue; });
-
     data.transactions.forEach(tx => {
       if (!tx.accountId || !debtIdSet.has(tx.accountId)) return;
       balances[tx.accountId] += tx.amount;
     });
-
     return balances;
   }, [data.assets, data.transactions, data.debts, currentPrices, gbpUsdRate]);
 
@@ -403,12 +423,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const points: HistoricalPoint[] = [];
     const userCurrency = data.user.currency || 'GBP';
     const debtIdSet = new Set(data.debts.map(d => d.id));
-
     for (let i = days; i >= 0; i--) {
       const d = subDays(new Date(), i);
       const dateStr = format(d, 'yyyy-MM-dd');
       let checking = 0, savings = 0, investing = 0;
-
       data.assets.forEach(asset => {
         if (asset.type === 'checking') {
           checking += asset.startingValue;
@@ -431,11 +449,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (priceOnDate === undefined) {
               const dates = Object.keys(historicalData).sort();
               const latestBeforeDate = dates.filter(date => date <= dateStr).pop();
-              if (latestBeforeDate) {
-                priceOnDate = historicalData[latestBeforeDate];
-              } else {
-                priceOnDate = dates.length > 0 ? historicalData[dates[0]] : currentPrices[h.symbol]?.price;
-              }
+              if (latestBeforeDate) priceOnDate = historicalData[latestBeforeDate];
+              else priceOnDate = dates.length > 0 ? historicalData[dates[0]] : currentPrices[h.symbol]?.price;
             }
             if (priceOnDate !== undefined && priceOnDate > 0) {
               const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
@@ -452,7 +467,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
         }
       });
-
       let debts = 0;
       data.debts.forEach(debt => { debts += debt.startingValue; });
       points.push({ date: dateStr, netWorth: checking + savings + investing - debts, assets: checking + savings + investing, debts, checking, savings, investing });
@@ -462,8 +476,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const getTotalNetWorth = (): number => {
     const debtIdSet = new Set(data.debts.map(d => d.id));
-    let assetTotal = 0;
-    let debtTotal = 0;
+    let assetTotal = 0; let debtTotal = 0;
     Object.entries(currentBalances).forEach(([id, bal]) => {
       if (debtIdSet.has(id)) debtTotal += bal;
       else assetTotal += bal;
@@ -478,44 +491,26 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const { data: newTx } = await supabase.from('transactions').insert({
       user_id: session.user.id,
       account_id: isDebtAccount ? null : (tx.accountId ?? null),
-      debt_id:    isDebtAccount ? tx.accountId : null,
-      date: tx.date,
-      description: tx.description,
-      amount: tx.amount,
-      type: tx.type,
-      category: tx.category,
-      notes: tx.notes ?? null,
-      symbol: tx.symbol ?? null,
-      quantity: tx.quantity ?? null,
-      price: tx.price ?? null,
-      currency: tx.currency ?? null,
+      debt_id: isDebtAccount ? tx.accountId : null,
+      date: tx.date, description: tx.description, amount: tx.amount, type: tx.type,
+      category: tx.category, notes: tx.notes ?? null, symbol: tx.symbol ?? null,
+      quantity: tx.quantity ?? null, price: tx.price ?? null, currency: tx.currency ?? null,
     }).select().maybeSingle();
-
     if (newTx) {
-      setData(prev => ({
-        ...prev,
-        transactions: [...prev.transactions, {
-          id: newTx.id,
-          ...tx,
-          accountId: newTx.account_id || newTx.debt_id || tx.accountId,
-        }]
-      }));
+      setData(prev => ({ ...prev, transactions: [...prev.transactions, { id: newTx.id, ...tx, accountId: newTx.account_id || newTx.debt_id || tx.accountId }] }));
     }
   };
 
   const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id'>>) => {
     const dbUpdates: Record<string, any> = {};
     Object.entries(updates).forEach(([key, value]) => {
-      if (key === 'accountId') {
-        const isDebt = data.debts.some(d => d.id === value);
-        dbUpdates['account_id'] = isDebt ? null : value;
-        dbUpdates['debt_id']    = isDebt ? value : null;
-      } else if (key === 'symbol')   { dbUpdates['symbol']   = value; }
-        else if (key === 'quantity') { dbUpdates['quantity'] = value; }
-        else if (key === 'price')    { dbUpdates['price']    = value; }
-        else if (key === 'currency') { dbUpdates['currency'] = value; }
-        else if (key === 'notes')    { dbUpdates['notes']    = value ?? null; }
-        else                         { dbUpdates[key]        = value; }
+      if (key === 'accountId') { const isDebt = data.debts.some(d => d.id === value); dbUpdates['account_id'] = isDebt ? null : value; dbUpdates['debt_id'] = isDebt ? value : null; }
+      else if (key === 'symbol') { dbUpdates['symbol'] = value; }
+      else if (key === 'quantity') { dbUpdates['quantity'] = value; }
+      else if (key === 'price') { dbUpdates['price'] = value; }
+      else if (key === 'currency') { dbUpdates['currency'] = value; }
+      else if (key === 'notes') { dbUpdates['notes'] = value ?? null; }
+      else { dbUpdates[key] = value; }
     });
     const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
     if (error) { console.error('Failed to update transaction:', error); return; }
@@ -573,7 +568,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteDebt = (id: string) => {
-    supabase.from('debts').delete().eq('id', id).then(() => {
+    supabase.from('accounts').delete().eq('id', id).then(() => {
       setData(prev => ({ ...prev, debts: prev.debts.filter(d => d.id !== id) }));
     });
   };
@@ -603,6 +598,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setData(prev => ({ ...prev, user: { ...prev.user, ...updates } }));
   };
 
+  const updateSortOrder = async (page: keyof SortOrders, order: CardSortOrder) => {
+    const next = { ...sortOrders, [page]: order };
+    setSortOrders(next);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await supabase.from('user_profiles')
+        .update({ sort_orders: next })
+        .eq('id', session.user.id);
+    } catch (e) { console.error('Failed to save sort order:', e); }
+  };
+
   const refreshData = async () => {
     setLoading(true);
     const startTime = Date.now();
@@ -627,6 +634,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       addDebt, updateDebt, deleteDebt,
       addBill, updateBill, deleteBill,
       updateUserProfile, refreshData,
+      sortOrders, updateSortOrder,
       currencySymbol: getCurrencySymbol(data.user.currency),
       gbpUsdRate, rateUpdatedAt
     } as any}>
