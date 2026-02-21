@@ -16,6 +16,8 @@ export interface Transaction {
   type: TransactionType;
   category: string;
   accountId: string;
+  /** For transfers: the destination account/debt id */
+  accountToId?: string;
   notes?: string;
   // Investment specifics
   symbol?: string;
@@ -163,16 +165,8 @@ const generateLedger = (): Transaction[] => {
              amount: -800, 
              type: 'transfer', 
              category: 'Transfer', 
-             accountId: CHECKING_ID 
-        });
-        transactions.push({ 
-            id: `sav-in-${i}`, 
-            date: dateStr(2), 
-            description: 'Monthly Savings', 
-            amount: 800, 
-            type: 'transfer', 
-            category: 'Transfer', 
-            accountId: SAVINGS_ID 
+             accountId: CHECKING_ID,
+             accountToId: SAVINGS_ID,
         });
 
         // --- INVESTING ---
@@ -183,7 +177,8 @@ const generateLedger = (): Transaction[] => {
             amount: -1000,
             type: 'transfer', 
             category: 'Investments',
-            accountId: CHECKING_ID
+            accountId: CHECKING_ID,
+            accountToId: STOCK_ID,
         });
 
         // VUSA.L Purchase (Vanguard S&P 500 - GBP listed on LSE)
