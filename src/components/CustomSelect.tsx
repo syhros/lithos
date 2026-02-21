@@ -1,21 +1,17 @@
 // CustomSelect
 //
-// Portal-rendered dropdown — always floats above overflow:hidden parents.
+// A fixed-option dropdown that is visually identical to CustomComboBox:
+//   - Same trigger wrapper: bg-black/20 border rounded-sm p-3 text-sm font-mono
+//   - Same border colours on hover / open / error
+//   - Portal-rendered list so it never gets clipped by overflow:hidden parents
+//   - Auto-flips above trigger when insufficient space below
+//   - Blank-value options (value==='' | 'all') shown in iron-dust grey
+//   - Real selections shown in white (matching typed text in ComboBox)
+//   - Group heading only rendered when SelectGroup.label is set
+//   - Hints shown inside the dropdown only
 //
-// Props:
-//   size  'sm' | 'md' | 'lg'
-//         sm  — px-2.5 py-1.5  text-[11px]  (inline / table cells, Categorize rows)
-//         md  — px-3   py-2.5  text-sm       (modal form fields, matches native p-3 inputs)
-//         lg  — px-3   py-3    text-sm       (full-width Settings-style selects)
-//   triggerClassName — extra classes merged onto the trigger button
-//
-// Behaviour:
-//   - Dropdown rendered via createPortal onto <body>; never clipped.
-//   - Auto-flips above trigger when insufficient space below.
-//   - Blank-value options (value === '' | 'all') rendered in iron-dust grey.
-//   - Real selections shown in magma orange in the trigger.
-//   - Group heading only rendered when SelectGroup.label is set.
-//   - hints shown inside the dropdown only (not in trigger).
+// The 'size' prop is intentionally removed — sizing is always p-3 text-sm
+// to stay in sync with CustomComboBox and native <input> fields.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -32,14 +28,11 @@ export interface SelectGroup {
   options: SelectOption[];
 }
 
-type SelectSize = 'sm' | 'md' | 'lg';
-
 interface Props {
   value:             string;
   onChange:          (v: string) => void;
   groups:            SelectGroup[];
   placeholder?:      string;
-  size?:             SelectSize;
   className?:        string;
   triggerClassName?: string;
   error?:            boolean;
@@ -47,20 +40,12 @@ interface Props {
   maxVisibleItems?:  number;
 }
 
-// row height used to estimate list pixel height before it renders
-const ROW_H   = 28;
+const ROW_H   = 30;
 const GROUP_H = 22;
-
-const SIZES: Record<SelectSize, string> = {
-  sm: 'px-2.5 py-1.5 text-[11px]',
-  md: 'px-3   py-2.5 text-sm',
-  lg: 'px-3   py-3   text-sm',
-};
 
 export const CustomSelect: React.FC<Props> = ({
   value, onChange, groups, placeholder = 'Select…',
-  size = 'sm', className, triggerClassName,
-  error, disabled, maxVisibleItems = 8,
+  className, triggerClassName, error, disabled, maxVisibleItems = 8,
 }) => {
   const [open,    setOpen]    = useState(false);
   const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -69,10 +54,8 @@ export const CustomSelect: React.FC<Props> = ({
 
   const allOptions = groups.flatMap(g => g.options);
   const selected   = allOptions.find(o => o.value === value);
-  // blank = placeholder-style value (no real selection)
   const isBlank    = !value || value === 'all';
 
-  // estimate dropdown pixel height
   const estimateH = useCallback(() => {
     let h = 0;
     groups.forEach(g => {
@@ -101,7 +84,6 @@ export const CustomSelect: React.FC<Props> = ({
     setOpen(true);
   };
 
-  // close on outside click
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => {
@@ -115,7 +97,6 @@ export const CustomSelect: React.FC<Props> = ({
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  // re-position on scroll / resize
   useEffect(() => {
     if (!open) return;
     const u = () => calcPos();
@@ -133,34 +114,34 @@ export const CustomSelect: React.FC<Props> = ({
 
   return (
     <div className={clsx('relative', className)}>
-      {/* ── Trigger ── */}
+      {/* Trigger — same wrapper style as CustomComboBox */}
       <button
         ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={openDropdown}
         className={clsx(
-          'w-full flex items-center justify-between bg-black/20 border rounded-sm focus:outline-none transition-colors font-mono text-left',
-          SIZES[size],
+          'w-full flex items-center justify-between bg-black/20 border rounded-sm transition-colors focus:outline-none',
+          'p-3 text-sm font-mono text-left',
           error    ? 'border-magma/50' : 'border-white/10',
-          open     ? 'border-magma/40' : 'hover:border-white/20',
+          open     ? 'border-magma/50' : 'hover:border-white/20',
           disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
           triggerClassName,
         )}
       >
         <span className={clsx(
           'truncate font-mono',
-          isBlank ? 'text-iron-dust/50' : 'text-magma font-bold',
+          isBlank ? 'text-iron-dust/50' : 'text-white',
         )}>
           {selected ? selected.label : placeholder}
         </span>
         <ChevronDown
-          size={size === 'sm' ? 11 : 13}
-          className={clsx('shrink-0 ml-1 text-iron-dust/50 transition-transform', open && 'rotate-180')}
+          size={13}
+          className={clsx('shrink-0 ml-2 text-iron-dust transition-transform pointer-events-none', open && 'rotate-180')}
         />
       </button>
 
-      {/* ── Portal dropdown ── */}
+      {/* Portal dropdown */}
       {open && dropPos && createPortal(
         <div
           ref={dropRef}
@@ -190,15 +171,15 @@ export const CustomSelect: React.FC<Props> = ({
                     type="button"
                     onMouseDown={() => handleSelect(opt.value)}
                     className={clsx(
-                      'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors font-mono',
-                      isSel      ? 'bg-magma/10'
-                      : isBlankOpt ? 'hover:bg-white/[0.03]'
-                      :              'hover:bg-white/[0.04]',
+                      'w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors font-mono',
+                      isSel        ? 'bg-white/[0.06] text-magma'
+                      : isBlankOpt ? 'text-iron-dust/50 hover:bg-white/[0.03]'
+                      :              'text-white hover:bg-white/[0.03]',
                     )}
                   >
                     <span className={clsx(
                       'font-mono',
-                      isSel      ? 'text-magma font-bold'
+                      isSel        ? 'text-magma'
                       : isBlankOpt ? 'text-iron-dust/50'
                       :              'text-white',
                     )}>
