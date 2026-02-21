@@ -1,34 +1,25 @@
 // CustomSelect
 //
-// A fully custom dropdown that matches the search bar aesthetic:
-//   - Dark background, orange highlight, mono font
-//   - Supports option groups
-//   - Each option can have a primary label (orange) and a secondary hint (grey)
+// Portal-rendered dropdown — always floats above overflow:hidden parents.
 //
-// Usage:
-//   <CustomSelect
-//     value={accountId}
-//     onChange={setAccountId}
-//     placeholder="Select Account..."
-//     groups={[
-//       {
-//         label: 'Assets',
-//         options: data.assets.map(a => ({
-//           value: a.id,
-//           label: a.name,
-//           hint: a.type,
-//         }))
-//       }
-//     ]}
-//   />
-import React, { useState, useRef, useEffect } from 'react';
+// Behaviour:
+//   - Dropdown is appended to <body> via createPortal, positioned with
+//     getBoundingClientRect so it never gets clipped.
+//   - Auto-flips above the trigger if there isn’t enough space below.
+//   - Trigger shows only the plain label (no hint) at a compact size.
+//   - Options with value==='' or value==='all' (blank / placeholder rows)
+//     render in iron-dust grey so they’re visually distinct.
+//   - A group heading is only rendered when SelectGroup.label is set.
+//   - hints are still shown inside the dropdown for non-blank options.
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export interface SelectOption {
   value: string;
   label: string;
-  hint?: string;   // shown in grey after the label
+  hint?: string;
 }
 
 export interface SelectGroup {
@@ -37,117 +28,175 @@ export interface SelectGroup {
 }
 
 interface Props {
-  value:        string;
-  onChange:     (v: string) => void;
-  groups:       SelectGroup[];
-  placeholder?: string;
-  className?:   string;
-  error?:       boolean;
-  disabled?:    boolean;
+  value:             string;
+  onChange:          (v: string) => void;
+  groups:            SelectGroup[];
+  placeholder?:      string;
+  className?:        string;
+  triggerClassName?: string;
+  error?:            boolean;
+  disabled?:         boolean;
+  maxVisibleItems?:  number;
 }
 
+// Approximate px height of one option row (py-1.5 * 2 + 16px text)
+const ROW_H    = 26;
+const GROUP_H  = 22;
+
 export const CustomSelect: React.FC<Props> = ({
-  value, onChange, groups, placeholder = 'Select...', className, error, disabled
+  value, onChange, groups, placeholder = 'Select…',
+  className, triggerClassName, error, disabled, maxVisibleItems = 8,
 }) => {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [open,    setOpen]    = useState(false);
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropRef    = useRef<HTMLDivElement>(null);
 
-  const allOptions = groups.flatMap(g => g.options);
-  const selected   = allOptions.find(o => o.value === value);
+  const allOptions  = groups.flatMap(g => g.options);
+  const selected    = allOptions.find(o => o.value === value);
+  const isBlankSel  = !value || value === 'all';
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  // —— estimate list height ——
+  const estimateH = useCallback(() => {
+    let h = 0;
+    groups.forEach(g => {
+      if (g.label) h += GROUP_H;
+      h += g.options.length * ROW_H;
+    });
+    return Math.min(h, maxVisibleItems * ROW_H + 8);
+  }, [groups, maxVisibleItems]);
 
-  const handleSelect = (v: string) => {
-    onChange(v);
-    setOpen(false);
+  // —— position portal ——
+  const calcPos = useCallback(() => {
+    if (!triggerRef.current) return;
+    const r        = triggerRef.current.getBoundingClientRect();
+    const maxH     = estimateH();
+    const below    = window.innerHeight - r.bottom - 8;
+    const useAbove = below < maxH && r.top > maxH;
+    setDropPos({
+      top:   useAbove ? r.top - maxH - 4 : r.bottom + 4,
+      left:  r.left,
+      width: r.width,
+    });
+  }, [estimateH]);
+
+  const openDropdown = () => {
+    if (disabled) return;
+    calcPos();
+    setOpen(true);
   };
 
-  const humaniseType = (t: string) =>
-    t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  // close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(t) &&
+        dropRef.current    && !dropRef.current.contains(t)
+      ) setOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  // re-calc on scroll / resize while open
+  useEffect(() => {
+    if (!open) return;
+    const u = () => calcPos();
+    window.addEventListener('scroll', u, true);
+    window.addEventListener('resize', u);
+    return () => {
+      window.removeEventListener('scroll', u, true);
+      window.removeEventListener('resize', u);
+    };
+  }, [open, calcPos]);
+
+  const handleSelect = (v: string) => { onChange(v); setOpen(false); };
+
+  const listMaxH = estimateH();
 
   return (
-    <div ref={containerRef} className={clsx('relative', className)}>
+    <div className={clsx('relative', className)}>
+      {/* trigger */}
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setOpen(o => !o)}
+        onClick={openDropdown}
         className={clsx(
-          'w-full flex items-center justify-between bg-black/20 border p-3 text-sm rounded-sm focus:outline-none transition-colors font-mono text-left',
-          error    ? 'border-magma/50 focus:border-magma' : 'border-white/10',
-          open     ? 'border-magma/50'                    : 'hover:border-white/20',
-          disabled ? 'opacity-50 cursor-not-allowed'      : 'cursor-pointer',
-          selected ? 'text-white' : 'text-iron-dust/60'
+          'w-full flex items-center justify-between bg-black/20 border px-2.5 py-1.5 text-[11px] rounded-sm focus:outline-none transition-colors font-mono text-left',
+          error    ? 'border-magma/50' : 'border-white/10',
+          open     ? 'border-magma/40' : 'hover:border-white/20',
+          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+          triggerClassName,
         )}
       >
-        <span className="truncate flex items-center gap-2">
-          {selected ? (
-            <>
-              <span className="text-magma font-bold">{selected.label}</span>
-              {selected.hint && (
-                <span className="text-iron-dust/60 text-[10px] font-mono">
-                  {humaniseType(selected.hint)}
-                </span>
-              )}
-            </>
-          ) : (
-            <span>{placeholder}</span>
-          )}
+        <span className={clsx('truncate font-mono', isBlankSel ? 'text-iron-dust/50' : 'text-white')}>
+          {selected ? selected.label : placeholder}
         </span>
         <ChevronDown
-          size={13}
-          className={clsx('shrink-0 text-iron-dust transition-transform', open && 'rotate-180')}
+          size={11}
+          className={clsx('shrink-0 ml-1 text-iron-dust/50 transition-transform', open && 'rotate-180')}
         />
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-full bg-[#1a1c1e] border border-white/10 rounded-sm shadow-2xl z-50 overflow-hidden max-h-60 overflow-y-auto custom-scrollbar">
-          {placeholder && (
-            <button
-              type="button"
-              onMouseDown={() => handleSelect('')}
-              className="w-full flex items-center px-3 py-2 text-xs text-iron-dust/40 hover:bg-white/[0.03] text-left font-mono italic"
-            >
-              {placeholder}
-            </button>
-          )}
+      {/* portal dropdown */}
+      {open && dropPos && createPortal(
+        <div
+          ref={dropRef}
+          style={{
+            position:  'fixed',
+            top:       dropPos.top,
+            left:      dropPos.left,
+            width:     dropPos.width,
+            maxHeight: listMaxH,
+            zIndex:    9999,
+          }}
+          className="bg-[#1a1c1e] border border-white/10 rounded-sm shadow-2xl overflow-y-auto custom-scrollbar"
+        >
           {groups.map((group, gi) => (
             <div key={gi}>
               {group.label && (
-                <p className="px-3 pt-2 pb-1 text-[9px] font-mono text-iron-dust/50 uppercase tracking-widest">
+                <p className="px-3 pt-2 pb-0.5 text-[9px] font-mono text-iron-dust/50 uppercase tracking-widest select-none">
                   {group.label}
                 </p>
               )}
-              {group.options.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onMouseDown={() => handleSelect(opt.value)}
-                  className={clsx(
-                    'w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors',
-                    opt.value === value
-                      ? 'bg-magma/10 text-magma'
-                      : 'hover:bg-white/[0.04] text-white'
-                  )}
-                >
-                  <span className={clsx('font-mono font-bold', opt.value === value ? 'text-magma' : 'text-magma')}>
-                    {opt.label}
-                  </span>
-                  {opt.hint && (
-                    <span className="text-iron-dust/50 text-[10px] font-mono">
-                      {humaniseType(opt.hint)}
+              {group.options.map(opt => {
+                const isSel   = opt.value === value;
+                const isBlank = !opt.value || opt.value === 'all';
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onMouseDown={() => handleSelect(opt.value)}
+                    className={clsx(
+                      'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors font-mono',
+                      isSel
+                        ? 'bg-magma/10'
+                        : isBlank
+                          ? 'hover:bg-white/[0.03]'
+                          : 'hover:bg-white/[0.04]',
+                    )}
+                  >
+                    <span className={clsx(
+                      'font-mono',
+                      isSel   ? 'text-magma font-bold'
+                      : isBlank ? 'text-iron-dust/50'
+                      : 'text-white',
+                    )}>
+                      {opt.label}
                     </span>
-                  )}
-                </button>
-              ))}
+                    {opt.hint && !isBlank && (
+                      <span className="text-iron-dust/40 text-[10px] font-mono">{opt.hint}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
