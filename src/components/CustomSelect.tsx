@@ -125,7 +125,7 @@ export const CustomSelect: React.FC<Props> = ({
         disabled={disabled}
         onClick={openDropdown}
         className={clsx(
-          'w-full flex items-center justify-between bg-black/20 border px-2.5 py-1.5 text-[11px] rounded-sm focus:outline-none transition-colors font-mono text-left',
+          'w-full flex items-center justify-between bg-black/20 border px-2.5 py-2.5 text-[11px] rounded-sm focus:outline-none transition-colors font-mono text-left',
           error    ? 'border-magma/50' : 'border-white/10',
           open     ? 'border-magma/40' : 'hover:border-white/20',
           disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
