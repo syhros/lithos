@@ -50,7 +50,7 @@ interface FinanceContextType {
   getHistory: (range: HistoryRange) => HistoricalPoint[];
   getTotalNetWorth: () => number;
 
-  addTransaction: (tx: Omit<Transaction, 'id'>) => void;
+  addTransaction: (tx: Omit<Transaction, 'id'>) => Promise<void>;
   updateTransaction: (id: string, updates: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
   deleteTransactions: (ids: string[]) => Promise<void>;
@@ -545,23 +545,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return assetTotal - debtTotal;
   };
 
-  const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
+  const addTransaction = async (tx: Omit<Transaction, 'id'>): Promise<void> => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const isDebtAccount = data.debts.some(d => d.id === tx.accountId);
-    // --- Phase 2: persist accountToId as account_to_id ---
-    const { data: newTx } = await supabase.from('transactions').insert({
+    // Normalise date to yyyy-MM-dd — ISO strings like 2024-01-15T00:00:00.000Z
+    // are rejected or mishandled by Supabase date columns.
+    const normalisedDate = tx.date ? tx.date.substring(0, 10) : tx.date;
+    const { data: newTx, error } = await supabase.from('transactions').insert({
       user_id: session.user.id,
       account_id: isDebtAccount ? null : (tx.accountId ?? null),
       debt_id: isDebtAccount ? tx.accountId : null,
       account_to_id: tx.accountToId ?? null,
-      date: tx.date, description: tx.description, amount: tx.amount, type: tx.type,
+      date: normalisedDate, description: tx.description, amount: tx.amount, type: tx.type,
       category: tx.category, notes: tx.notes ?? null, symbol: tx.symbol ?? null,
       quantity: tx.quantity ?? null, price: tx.price ?? null, currency: tx.currency ?? null,
     }).select().maybeSingle();
+    if (error) {
+      console.error('addTransaction: Supabase insert failed:', error);
+      return;
+    }
     if (newTx) {
       setData(prev => ({ ...prev, transactions: [...prev.transactions, {
         id: newTx.id, ...tx,
+        date: normalisedDate,
         accountId: newTx.account_id || newTx.debt_id || tx.accountId,
         accountToId: newTx.account_to_id || tx.accountToId || undefined,
       }] }));
