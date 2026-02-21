@@ -101,7 +101,7 @@ const CustomSpendingTooltip = ({ active, payload, data, currencySymbol }: any) =
   return null;
 };
 
-// Metric card styled after the Investments page account cards
+// Metric card — investment-page style with larger typography
 const MetricCard: React.FC<{
   label: string;
   value: number;
@@ -129,12 +129,13 @@ const MetricCard: React.FC<{
   const minVal = vals.length > 0 ? Math.min(...vals) * 0.97 : 'auto';
 
   return (
-    <div className="group bg-[#161618] border border-white/5 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer h-full flex flex-col" style={{ minHeight: 170 }}>
+    // Fixed height 240px as requested
+    <div className="group bg-[#161618] border border-white/5 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer flex flex-col" style={{ height: 240 }}>
       {/* accent bar on hover */}
       <div className="absolute left-0 bottom-0 w-[2px] h-0 group-hover:h-full transition-all duration-500 ease-out" style={{ backgroundColor: color }} />
       {/* sparkline background */}
       <div className="absolute bottom-0 right-0 pointer-events-none"
-        style={{ width: '65%', height: '55%', opacity: 0.7,
+        style={{ width: '65%', height: '60%', opacity: 0.7,
           maskImage: 'linear-gradient(to right, transparent 0%, black 40%)',
           WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)' }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -156,23 +157,24 @@ const MetricCard: React.FC<{
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-white/5 rounded-sm text-white shrink-0">{icon}</div>
-            <span className="font-mono text-[10px] text-iron-dust uppercase tracking-[2px]">{label}</span>
+            {/* Label: ~20% bigger — was text-[10px], now text-xs (12px) */}
+            <span className="font-mono text-xs text-iron-dust uppercase tracking-[2px]">{label}</span>
           </div>
-          {/* % change badge — top-right like institution tag on investments */}
+          {/* % badge: ~20% bigger — was text-[10px], now text-xs (12px) */}
           <span className={clsx(
-            'px-2 py-1 rounded text-[10px] font-mono font-bold uppercase shrink-0 ml-2',
-            isLiability
-              ? (isUp ? 'bg-emerald-vein/10 text-emerald-vein' : 'bg-magma/10 text-magma')
-              : (isUp ? 'bg-emerald-vein/10 text-emerald-vein' : 'bg-magma/10 text-magma')
+            'px-2.5 py-1 rounded text-xs font-mono font-bold uppercase shrink-0 ml-2',
+            isUp ? 'bg-emerald-vein/10 text-emerald-vein' : 'bg-magma/10 text-magma'
           )}>
             {isLiability ? (delta < 0 ? pctLabel : `+${Math.abs(pct).toFixed(2)}%`) : pctLabel}
           </span>
         </div>
         <div className="mt-auto">
-          <div className="text-3xl font-black text-white tracking-tight leading-none">
-            {currencySymbol}{whole}<span className="text-xl font-light opacity-30">.{dec}</span>
+          {/* Main value: 3.5rem as requested */}
+          <div className="font-black text-white tracking-tight leading-none" style={{ fontSize: '3.5rem' }}>
+            {currencySymbol}{whole}<span className="font-light opacity-30" style={{ fontSize: '2.2rem' }}>.{dec}</span>
           </div>
-          <div className={clsx('text-[10px] font-mono mt-1.5', isUp ? 'text-emerald-vein' : 'text-magma')}>
+          {/* Delta: ~40% bigger — was text-[10px], now text-sm (14px) */}
+          <div className={clsx('text-sm font-mono mt-2', isUp ? 'text-emerald-vein' : 'text-magma')}>
             {isUp ? (isLiability ? '-' : '+') : (isLiability ? '+' : '-')}{currencySymbol}{Math.abs(delta).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
@@ -306,116 +308,97 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] h-full overflow-hidden bg-[#0a0a0c]">
-      <div className="flex flex-col h-full overflow-y-auto p-12 custom-scrollbar">
+      {/* Main scroll area — max-width so it doesn't stretch too wide */}
+      <div className="flex flex-col h-full overflow-y-auto custom-scrollbar">
+        <div className="w-full max-w-[1200px] mx-auto px-12 py-12 flex flex-col">
 
-        {/* Header — Net Worth (15% bigger: was 6.5rem, now 7.5rem) */}
-        <div className="mb-4 mt-4 slide-up">
-          <div className="flex justify-between items-center mb-1">
-            <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
-                <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")} />
-                <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
-                  {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
-                </span>
+          {/* Header — Net Worth */}
+          <div className="mb-4 mt-4 slide-up">
+            <div className="flex justify-between items-center mb-1">
+              <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px]">Total Net Worth</span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-sm border border-white/5">
+                  <div className={clsx("w-2 h-2 rounded-full shadow-[0_0_8px] animate-pulse", loading ? "bg-yellow-400 shadow-yellow-400" : isStale ? "bg-red-500 shadow-red-500" : "bg-emerald-vein shadow-emerald-vein")} />
+                  <span className={clsx("text-[10px] font-bold uppercase tracking-widest", isStale ? "text-red-400" : loading ? "text-yellow-400" : "text-white")}>
+                    {loading ? 'SYNCING...' : isStale ? 'OFFLINE' : 'LIVE'}
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] text-iron-dust">Updated {format(lastUpdated, 'HH:mm')}</span>
+                <button onClick={() => refreshData()} disabled={loading}
+                  className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}>
+                  <RefreshCw size={12} />
+                </button>
               </div>
-              <span className="font-mono text-[10px] text-iron-dust">Updated {format(lastUpdated, 'HH:mm')}</span>
-              <button onClick={() => refreshData()} disabled={loading}
-                className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}>
-                <RefreshCw size={12} />
-              </button>
+            </div>
+            <h1 className={clsx("font-black leading-none tracking-[-4px] text-white", isPulsing && "animate-pulse-opacity")} style={{ fontSize: '7.5rem' }}>
+              {currentNetWorth < 0 ? '-' : ''}{currencySymbol}{Math.abs(parseInt(nwInt.replace(/[^0-9]/g, ''))).toLocaleString()}
+              <span className="font-light opacity-30 tracking-normal" style={{ fontSize: '4.6rem' }}>.{nwDec}</span>
+            </h1>
+          </div>
+
+          {/* Wealth Trajectory Chart */}
+          <div className="mb-6 slide-up" style={{ animationDelay: '0.1s' }}>
+            <h3 className="font-mono text-xs text-iron-dust uppercase tracking-[3px] mb-4">Wealth Trajectory</h3>
+            <div className="w-full bg-[#161618] border border-white/5 rounded-sm relative flex flex-col p-6" style={{ height: 460 }}>
+              {/* Single row: series toggles LEFT, range selector RIGHT — all inline */}
+              <div className="flex justify-between items-center mb-4 z-10 gap-4">
+                {/* Series toggles */}
+                <div className="flex gap-5 flex-wrap">
+                  {(['netWorth','assets','debts'] as const).map(key => (
+                    <button key={key} onClick={() => setVisibleSeries(p => ({ ...p, [key]: !p[key] }))}
+                      className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${
+                        visibleSeries[key] ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'
+                      }`}>
+                      <span className={`w-2 h-2 rounded-full ${
+                        visibleSeries[key]
+                          ? key === 'netWorth' ? 'bg-emerald-vein'
+                          : key === 'assets'   ? 'bg-gold-ore'
+                          : 'bg-magma'
+                          : 'bg-iron-dust'
+                      }`} />
+                      {key === 'netWorth' ? 'Net Worth' : key.charAt(0).toUpperCase() + key.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                {/* Range selector */}
+                <div className="flex bg-[#1a1c1e] rounded-sm p-1 border border-white/5 shrink-0">
+                  {RANGES.map(range => (
+                    <button key={range} onClick={() => setTimeRange(range)}
+                      className={`px-3 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all ${
+                        timeRange === range ? 'bg-white text-black' : 'text-iron-dust hover:text-white'
+                      }`}>{RANGE_LABELS[range]}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 w-full min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gradNW" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00f2ad" stopOpacity={0.2}/><stop offset="95%" stopColor="#00f2ad" stopOpacity={0}/></linearGradient>
+                      <linearGradient id="gradAsset" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d4af37" stopOpacity={0.2}/><stop offset="95%" stopColor="#d4af37" stopOpacity={0}/></linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" vertical={false} strokeOpacity={0.05} />
+                    <XAxis hide dataKey="date" />
+                    <YAxis tick={{fill:'#8e8e93',fontSize:10,fontFamily:'JetBrains Mono'}} tickLine={false} axisLine={false} tickFormatter={v => `${currencySymbol}${v/1000}k`} />
+                    <Tooltip contentStyle={{backgroundColor:'#1a1c1e',borderColor:'rgba(255,255,255,0.1)',color:'#fff',fontSize:'12px',fontFamily:'JetBrains Mono'}} itemStyle={{padding:0,textTransform:'capitalize'}} formatter={(v: number, n: string) => [`${currencySymbol}${v.toLocaleString()}`, n]} />
+                    {visibleSeries.assets   && <Area type="monotone" name="Assets"    dataKey="assets"   stroke="#d4af37" strokeWidth={2} fill="url(#gradAsset)" isAnimationActive />}
+                    {visibleSeries.debts    && <Area type="monotone" name="Debts"     dataKey="debts"    stroke="#ff4d00" strokeWidth={2} fill="transparent"   isAnimationActive />}
+                    {visibleSeries.netWorth && <Area type="monotone" name="Net Worth" dataKey="netWorth" stroke="#00f2ad" strokeWidth={3} fill="url(#gradNW)"  isAnimationActive />}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
-          <h1 className={clsx("font-black leading-none tracking-[-4px] text-white", isPulsing && "animate-pulse-opacity")} style={{ fontSize: '7.5rem' }}>
-            {currentNetWorth < 0 ? '-' : ''}{currencySymbol}{Math.abs(parseInt(nwInt.replace(/[^0-9]/g, ''))).toLocaleString()}
-            <span className="font-light opacity-30 tracking-normal" style={{ fontSize: '4.6rem' }}>.{nwDec}</span>
-          </h1>
-        </div>
 
-        {/* Wealth Trajectory Chart */}
-        <div className="mb-6 slide-up" style={{ animationDelay: '0.1s' }}>
-          <h3 className="font-mono text-xs text-iron-dust uppercase tracking-[3px] mb-4">Wealth Trajectory</h3>
-          <div className="w-full bg-[#161618] border border-white/5 rounded-sm relative flex flex-col p-6" style={{ height: 460 }}>
-            <div className="flex justify-between items-start mb-2 z-10">
-              <div className="flex gap-6">
-                {(['netWorth','assets','debts'] as const).map(key => (
-                  <button key={key} onClick={() => setVisibleSeries(p => ({ ...p, [key]: !p[key] }))}
-                    className={`flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-opacity hover:opacity-100 ${visibleSeries[key] ? 'opacity-100 text-white' : 'opacity-40 text-iron-dust'}`}>
-                    <span className={`w-2 h-2 rounded-full ${visibleSeries[key] ? (key === 'netWorth' ? 'bg-emerald-vein' : key === 'assets' ? 'bg-gold-ore' : 'bg-magma') : 'bg-iron-dust'}`} />
-                    {key === 'netWorth' ? 'Net Worth' : key.charAt(0).toUpperCase() + key.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <div className="flex bg-[#1a1c1e] rounded-sm p-1 border border-white/5">
-                {RANGES.map(range => (
-                  <button key={range} onClick={() => setTimeRange(range)}
-                    className={`px-3 py-1.5 text-[10px] font-mono font-bold rounded-sm transition-all ${
-                      timeRange === range ? 'bg-white text-black' : 'text-iron-dust hover:text-white'
-                    }`}>{RANGE_LABELS[range]}</button>
-                ))}
-              </div>
-            </div>
-            <div className="flex-1 w-full min-h-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gradNW" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00f2ad" stopOpacity={0.2}/><stop offset="95%" stopColor="#00f2ad" stopOpacity={0}/></linearGradient>
-                    <linearGradient id="gradAsset" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d4af37" stopOpacity={0.2}/><stop offset="95%" stopColor="#d4af37" stopOpacity={0}/></linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff" vertical={false} strokeOpacity={0.05} />
-                  <XAxis hide dataKey="date" />
-                  <YAxis tick={{fill:'#8e8e93',fontSize:10,fontFamily:'JetBrains Mono'}} tickLine={false} axisLine={false} tickFormatter={v => `${currencySymbol}${v/1000}k`} />
-                  <Tooltip contentStyle={{backgroundColor:'#1a1c1e',borderColor:'rgba(255,255,255,0.1)',color:'#fff',fontSize:'12px',fontFamily:'JetBrains Mono'}} itemStyle={{padding:0,textTransform:'capitalize'}} formatter={(v: number, n: string) => [`${currencySymbol}${v.toLocaleString()}`, n]} />
-                  {visibleSeries.assets   && <Area type="monotone" name="Assets"    dataKey="assets"   stroke="#d4af37" strokeWidth={2} fill="url(#gradAsset)" isAnimationActive />}
-                  {visibleSeries.debts    && <Area type="monotone" name="Debts"     dataKey="debts"    stroke="#ff4d00" strokeWidth={2} fill="transparent"   isAnimationActive />}
-                  {visibleSeries.netWorth && <Area type="monotone" name="Net Worth" dataKey="netWorth" stroke="#00f2ad" strokeWidth={3} fill="url(#gradNW)"  isAnimationActive />}
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          {/* 4 Metric Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 slide-up pb-2" style={{ animationDelay: '0.2s' }}>
+            <MetricCard label="Accounts"    value={totalCheckingBalance + totalSavingsBalance} history={historyData} dataKey="checking"  color="#00f2ad" icon={<Wallet size={16} />}    currencySymbol={currencySymbol} />
+            <MetricCard label="Savings"     value={totalSavingsBalance}                        history={historyData} dataKey="savings"   color="#d4af37" icon={<PiggyBank size={16} />} currencySymbol={currencySymbol} />
+            <MetricCard label="Stocks"      value={totalInvestmentBalance}                     history={historyData} dataKey="investing" color="#3b82f6" icon={<TrendingUp size={16} />} currencySymbol={currencySymbol} />
+            <MetricCard label="Liabilities" value={totalLiabilitiesBalance}                   history={historyData} dataKey="debts"     color="#ff4d00" icon={<CreditCard size={16} />} currencySymbol={currencySymbol} isLiability />
           </div>
-        </div>
 
-        {/* 4 Metric Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 slide-up pb-2" style={{ animationDelay: '0.2s' }}>
-          <MetricCard
-            label="Accounts"
-            value={totalCheckingBalance + totalSavingsBalance}
-            history={historyData}
-            dataKey="checking"
-            color="#00f2ad"
-            icon={<Wallet size={16} />}
-            currencySymbol={currencySymbol}
-          />
-          <MetricCard
-            label="Savings"
-            value={totalSavingsBalance}
-            history={historyData}
-            dataKey="savings"
-            color="#d4af37"
-            icon={<PiggyBank size={16} />}
-            currencySymbol={currencySymbol}
-          />
-          <MetricCard
-            label="Stocks"
-            value={totalInvestmentBalance}
-            history={historyData}
-            dataKey="investing"
-            color="#3b82f6"
-            icon={<TrendingUp size={16} />}
-            currencySymbol={currencySymbol}
-          />
-          <MetricCard
-            label="Liabilities"
-            value={totalLiabilitiesBalance}
-            history={historyData}
-            dataKey="debts"
-            color="#ff4d00"
-            icon={<CreditCard size={16} />}
-            currencySymbol={currencySymbol}
-            isLiability
-          />
         </div>
-
       </div>
 
       {/* Sidebar */}
