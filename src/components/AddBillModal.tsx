@@ -3,6 +3,7 @@ import { X, ChevronDown, Trash2 } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { Bill } from '../data/mockData';
 import { clsx } from 'clsx';
+import { CustomSelect, SelectGroup } from './CustomSelect';
 
 interface AddBillModalProps {
   isOpen: boolean;
@@ -11,6 +12,16 @@ interface AddBillModalProps {
 }
 
 const DEFAULT_CATEGORIES = ['Utilities', 'Insurance', 'Subscriptions', 'Rent', 'Loan', 'Medical', 'Housing', 'Software', 'Other'];
+
+const FREQUENCY_OPTIONS: SelectGroup[] = [
+  {
+    options: [
+      { value: 'weekly',  label: 'Weekly',  hint: 'every week' },
+      { value: 'monthly', label: 'Monthly', hint: 'every month' },
+      { value: 'yearly',  label: 'Yearly',  hint: 'once a year' },
+    ],
+  },
+];
 
 export const AddBillModal: React.FC<AddBillModalProps> = ({
   isOpen,
@@ -23,6 +34,9 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
+  // yearly-specific: day (1-31) and month (1-12)
+  const [yearlyDay,   setYearlyDay]   = useState('');
+  const [yearlyMonth, setYearlyMonth] = useState('');
   const [category, setCategory] = useState('');
   const [categoryInput, setCategoryInput] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
@@ -48,6 +62,8 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
     setName('');
     setAmount('');
     setDueDate('');
+    setYearlyDay('');
+    setYearlyMonth('');
     setCategory('');
     setCategoryInput('');
     setIsRecurring(false);
@@ -61,13 +77,30 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
     if (isEditing && billToEdit) {
       setName(billToEdit.name);
       setAmount(billToEdit.amount.toString());
-      setDueDate(billToEdit.dueDate);
-      setCategory(billToEdit.category);
-      setCategoryInput('');
+      const freq = billToEdit.frequency || 'monthly';
       setIsRecurring(billToEdit.isRecurring || false);
-      setFrequency(billToEdit.frequency || 'monthly');
+      setFrequency(freq);
       setRecurringEndDate(billToEdit.recurringEndDate || '');
       setAutoPay(billToEdit.autoPay);
+      setCategory(billToEdit.category);
+      setCategoryInput('');
+      // Populate due date fields
+      if (freq === 'yearly' && billToEdit.dueDate) {
+        // stored as "DD/MM" or "YYYY-MM-DD" — handle both
+        if (billToEdit.dueDate.includes('-') && billToEdit.dueDate.length === 10) {
+          const parts = billToEdit.dueDate.split('-');
+          setYearlyDay(parts[2]);
+          setYearlyMonth(parts[1]);
+        } else if (billToEdit.dueDate.includes('/')) {
+          const parts = billToEdit.dueDate.split('/');
+          setYearlyDay(parts[0]);
+          setYearlyMonth(parts[1]);
+        } else {
+          setDueDate(billToEdit.dueDate);
+        }
+      } else {
+        setDueDate(billToEdit.dueDate);
+      }
     } else if (!isOpen) {
       resetForm();
     }
@@ -75,14 +108,24 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Compute the final dueDate string to save
+  const computedDueDate = (): string => {
+    if (isRecurring && frequency === 'yearly') {
+      if (yearlyDay && yearlyMonth) return `${yearlyDay.padStart(2,'0')}/${yearlyMonth.padStart(2,'0')}`;
+      return '';
+    }
+    return dueDate;
+  };
+
   const handleSave = () => {
     const finalCategory = categoryInput || category;
-    if (!name || !amount || !dueDate || !finalCategory) return;
+    const finalDueDate = computedDueDate();
+    if (!name || !amount || !finalDueDate || !finalCategory) return;
 
     const billData = {
       name,
       amount: parseFloat(amount),
-      dueDate,
+      dueDate: finalDueDate,
       category: finalCategory,
       autoPay,
       isRecurring,
@@ -98,6 +141,20 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
 
     resetForm();
     onClose();
+  };
+
+  const dueDateLabel = () => {
+    if (!isRecurring) return 'Due Date';
+    if (frequency === 'weekly')  return 'Day of Week';
+    if (frequency === 'monthly') return 'Day of Month (1–31)';
+    return 'Due Day & Month';
+  };
+
+  const isSaveDisabled = () => {
+    const finalCategory = categoryInput || category;
+    if (!name || !amount || !finalCategory) return true;
+    if (isRecurring && frequency === 'yearly') return !yearlyDay || !yearlyMonth;
+    return !dueDate;
   };
 
   return (
@@ -126,6 +183,7 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
             />
           </div>
 
+          {/* Category — custom dropdown, max 5 visible rows */}
           <div className="relative">
             <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
               Category
@@ -145,21 +203,27 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
               <ChevronDown size={14} className="absolute right-3 top-3.5 text-iron-dust pointer-events-none" />
 
               {showCategoryDropdown && filteredCategories.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1c1e] border border-white/10 rounded-sm shadow-xl z-10">
-                  {filteredCategories.map(cat => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => {
-                        setCategory(cat);
-                        setCategoryInput('');
-                        setShowCategoryDropdown(false);
-                      }}
-                      className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                <div
+                  className="absolute top-full left-0 right-0 mt-1 bg-[#1a1c1e] border border-white/10 rounded-sm shadow-xl z-10 overflow-y-auto custom-scrollbar"
+                  style={{ maxHeight: '5 * 2.5rem', height: 'auto' }}
+                >
+                  {/* Inline style caps the list at 5 rows (each ~40px = 10rem) */}
+                  <div style={{ maxHeight: '12.5rem', overflowY: 'auto' }}>
+                    {filteredCategories.map(cat => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setCategory(cat);
+                          setCategoryInput('');
+                          setShowCategoryDropdown(false);
+                        }}
+                        className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -185,10 +249,10 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
 
             <div>
               <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
-                {isRecurring ? (
-                  frequency === 'weekly' ? 'Day of Week' : frequency === 'monthly' ? 'Day of Month' : 'Due Date'
-                ) : 'Due Date'}
+                {dueDateLabel()}
               </label>
+
+              {/* Weekly: day-of-week select */}
               {isRecurring && frequency === 'weekly' ? (
                 <select
                   value={dueDate}
@@ -196,14 +260,12 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
                   className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
                 >
                   <option value="">Select day</option>
-                  <option value="monday">Monday</option>
-                  <option value="tuesday">Tuesday</option>
-                  <option value="wednesday">Wednesday</option>
-                  <option value="thursday">Thursday</option>
-                  <option value="friday">Friday</option>
-                  <option value="saturday">Saturday</option>
-                  <option value="sunday">Sunday</option>
+                  {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => (
+                    <option key={d} value={d.toLowerCase()}>{d}</option>
+                  ))}
                 </select>
+
+              /* Monthly: numeric day */
               ) : isRecurring && frequency === 'monthly' ? (
                 <input
                   type="number"
@@ -211,9 +273,41 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
                   max="31"
                   value={dueDate}
                   onChange={e => setDueDate(e.target.value)}
-                  placeholder="1-31"
+                  placeholder="1–31"
                   className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono"
                 />
+
+              /* Yearly: two small inputs DD / MM */
+              ) : isRecurring && frequency === 'yearly' ? (
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={yearlyDay}
+                      onChange={e => setYearlyDay(e.target.value)}
+                      placeholder="DD"
+                      className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono text-center"
+                    />
+                    <p className="text-[9px] text-iron-dust/50 font-mono text-center mt-1">Day</p>
+                  </div>
+                  <span className="text-iron-dust self-center">/</span>
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="12"
+                      value={yearlyMonth}
+                      onChange={e => setYearlyMonth(e.target.value)}
+                      placeholder="MM"
+                      className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none font-mono text-center"
+                    />
+                    <p className="text-[9px] text-iron-dust/50 font-mono text-center mt-1">Month</p>
+                  </div>
+                </div>
+
+              /* Non-recurring or default: full date */
               ) : (
                 <input
                   type="date"
@@ -248,15 +342,12 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
                   <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">
                     Frequency
                   </label>
-                  <select
+                  <CustomSelect
                     value={frequency}
-                    onChange={e => setFrequency(e.target.value as 'weekly' | 'monthly' | 'yearly')}
-                    className="w-full bg-black/20 border border-white/10 p-2.5 text-sm text-white rounded-sm focus:border-magma outline-none"
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
+                    onChange={v => setFrequency(v as 'weekly' | 'monthly' | 'yearly')}
+                    groups={FREQUENCY_OPTIONS}
+                    placeholder="Select frequency..."
+                  />
                 </div>
 
                 <div>
@@ -316,7 +407,7 @@ export const AddBillModal: React.FC<AddBillModalProps> = ({
             </button>
             <button
               onClick={handleSave}
-              disabled={!name || !amount || !dueDate || !(categoryInput || category)}
+              disabled={isSaveDisabled()}
               className="px-6 py-3 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Save
