@@ -1022,7 +1022,7 @@ export const Categorize: React.FC = () => {
                       <input value={rule.contains}
                         onChange={e => updateMerchantRule(rule.id, { contains: e.target.value })}
                         placeholder="e.g. DENPLAN"
-                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                        className="w-full bg-black/30 border border-white/10 px-2 py-0 text-xs text-white rounded-sm focus:border-magma outline-none" />
                       <input value={rule.setDescription}
                         onChange={e => updateMerchantRule(rule.id, { setDescription: e.target.value })}
                         placeholder="e.g. Denplan"
