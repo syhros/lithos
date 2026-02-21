@@ -54,11 +54,11 @@ const TX_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'debt_paym
 
 const TX_TYPE_OPTIONS: SelectGroup[] = [{
   options: [
-    { value: 'expense',      label: 'Expense',      hint: 'money out' },
-    { value: 'income',       label: 'Income',       hint: 'money in' },
-    { value: 'transfer',     label: 'Transfer',     hint: 'between accounts' },
-    { value: 'debt_payment', label: 'Debt Payment', hint: 'paying off debt' },
-    { value: 'investing',    label: 'Investing',    hint: 'buy/sell assets' },
+    { value: 'expense',      label: 'Expense' },
+    { value: 'income',       label: 'Income' },
+    { value: 'transfer',     label: 'Transfer' },
+    { value: 'debt_payment', label: 'Debt Payment' },
+    { value: 'investing',    label: 'Investing' },
   ],
 }];
 
@@ -309,7 +309,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
 
   const isIncome = row.rawAmount >= 0;
 
-  // SelectGroup configs
   const typeOptions: SelectGroup[] = [{
     options: [
       { value: '',             label: '— keep current —' },
@@ -418,6 +417,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                   <datalist id="popup-cats">{categories.map((c,i) => <option key={i} value={c} />)}</datalist>
                 </div>
               </div>
+              {/* Rule popup dropdowns: px-3 py-2 text-xs to match the inputs above */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Type</label>
@@ -426,6 +426,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                     onChange={v => setSetType(v as TransactionType | '')}
                     groups={typeOptions}
                     placeholder="— keep current —"
+                    triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -436,6 +437,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                     onChange={setSetAccountId}
                     groups={acctFromGroups}
                     placeholder="— any account —"
+                    triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -448,6 +450,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                     onChange={setSetAccountToId}
                     groups={acctToGroups}
                     placeholder="— none —"
+                    triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -620,12 +623,14 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
               {cfg.csvName}
             </span>
             <ArrowRight size={12} className="text-iron-dust shrink-0" />
+            {/* Account select: px-2 py-1.5 text-xs to match surrounding elements */}
             <div className="w-48">
               <CustomSelect
                 value={cfg.accountId}
                 onChange={v => onChange(cfg.csvName, { accountId: v })}
                 groups={acctGroups}
                 placeholder="— select account —"
+                triggerClassName="px-2 py-1.5 text-xs"
                 maxVisibleItems={8}
               />
             </div>
@@ -648,12 +653,14 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
             {cfg.headers.length > 0 && cfg.amountColumns === 1 && (
               <>
                 <span className="text-[10px] text-iron-dust font-mono">Amount col:</span>
+                {/* Column selects: px-2 py-1.5 text-xs */}
                 <div className="w-36">
                   <CustomSelect
                     value={cfg.amountCol}
                     onChange={v => onChange(cfg.csvName, { amountCol: v })}
                     groups={[{ options: [{ value: '', label: '— select —' }, ...cfg.headers.map(h => ({ value: h, label: h }))] }]}
                     placeholder="— select —"
+                    triggerClassName="px-2 py-1.5 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -668,6 +675,7 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
                     onChange={v => onChange(cfg.csvName, { debitCol: v })}
                     groups={[{ options: [{ value: '', label: '— select —' }, ...cfg.headers.map(h => ({ value: h, label: h }))] }]}
                     placeholder="— select —"
+                    triggerClassName="px-2 py-1.5 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -678,6 +686,7 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
                     onChange={v => onChange(cfg.csvName, { creditCol: v })}
                     groups={[{ options: [{ value: '', label: '— select —' }, ...cfg.headers.map(h => ({ value: h, label: h }))] }]}
                     placeholder="— select —"
+                    triggerClassName="px-2 py-1.5 text-xs"
                     maxVisibleItems={8}
                   />
                 </div>
@@ -740,7 +749,6 @@ export const Categorize: React.FC = () => {
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
   const uniqueBankCodes  = useMemo(() => Array.from(new Set(rows.map(r => r.rawType))).filter(Boolean), [rows]);
 
-  // Pre-built SelectGroup arrays for dropdowns
   const filterTypeGroups = useMemo<SelectGroup[]>(() => [{
     options: [
       { value: 'all', label: 'All Types' },
@@ -957,6 +965,7 @@ export const Categorize: React.FC = () => {
         {activeTab === 'rules' && (
           <div className="space-y-4">
 
+            {/* TYPE CODE RULES — neighbouring input is px-2 py-2 text-xs */}
             <SectionCard
               title="Type Code → Transaction Type"
               subtitle="Map your bank's type codes (BAC, D/D, SO…) to Lithos types"
@@ -978,6 +987,7 @@ export const Categorize: React.FC = () => {
                         onChange={v => updateTypeRule(rule.id, { mapsTo: v as TransactionType })}
                         groups={TX_TYPE_OPTIONS}
                         placeholder="type…"
+                        triggerClassName="px-2 py-2 text-xs"
                         maxVisibleItems={8}
                       />
                     </div>
@@ -990,6 +1000,7 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
+            {/* DESCRIPTION RULES — neighbouring inputs are px-2 py-1.5 text-xs */}
             <SectionCard
               title="Description Rules"
               subtitle="Auto-set description, category, type, or accounts when a keyword is matched"
@@ -1026,6 +1037,7 @@ export const Categorize: React.FC = () => {
                         onChange={v => updateMerchantRule(rule.id, { setType: v as TransactionType | '' })}
                         groups={[{ options: [{ value: '', label: '— keep —' }, ...TX_TYPE_OPTIONS[0].options] }]}
                         placeholder="— keep —"
+                        triggerClassName="px-2 py-1.5 text-xs"
                         maxVisibleItems={8}
                       />
                       <CustomSelect
@@ -1033,6 +1045,7 @@ export const Categorize: React.FC = () => {
                         onChange={v => updateMerchantRule(rule.id, { setAccountId: v })}
                         groups={buildAccountGroups(data.assets, data.debts, '— any —')}
                         placeholder="— any —"
+                        triggerClassName="px-2 py-1.5 text-xs"
                         maxVisibleItems={8}
                       />
                       <CustomSelect
@@ -1040,6 +1053,7 @@ export const Categorize: React.FC = () => {
                         onChange={v => updateMerchantRule(rule.id, { setAccountToId: v })}
                         groups={buildAccountGroups(data.assets, data.debts, '— none —')}
                         placeholder="— none —"
+                        triggerClassName="px-2 py-1.5 text-xs"
                         maxVisibleItems={8}
                       />
                       <button onClick={() => removeMerchantRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors flex items-center justify-center">
@@ -1157,6 +1171,7 @@ export const Categorize: React.FC = () => {
                   onAddMore={handleAddMore}
                 />
 
+                {/* BULK OVERRIDE — px-2 py-1 text-xs (tightest context) */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -1169,8 +1184,9 @@ export const Categorize: React.FC = () => {
                             <CustomSelect
                               value=""
                               onChange={v => v && bulkSetType(code, v as TransactionType)}
-                              groups={[{ options: [{ value: '', label: 'bulk set…', hint: 'override all' }, ...TX_TYPE_OPTIONS[0].options] }]}
+                              groups={[{ options: [{ value: '', label: 'bulk set…' }, ...TX_TYPE_OPTIONS[0].options] }]}
                               placeholder="bulk set…"
+                              triggerClassName="px-2 py-1 text-xs"
                               maxVisibleItems={8}
                             />
                           </div>
@@ -1180,6 +1196,7 @@ export const Categorize: React.FC = () => {
                   </div>
                 )}
 
+                {/* FILTER BAR — default p-3 text-sm is fine here */}
                 <div className="flex items-center gap-3">
                   <Filter size={12} className="text-iron-dust" />
                   <div className="w-40">
@@ -1207,6 +1224,7 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
+                {/* PREVIEW TABLE — Acct From/To cells: px-2 py-1.5 text-xs */}
                 <div className="border border-white/10 rounded-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1269,8 +1287,8 @@ export const Categorize: React.FC = () => {
                                   onChange={v => updateRow(row.id, { resolvedAccountId: v })}
                                   groups={rowAccountGroups}
                                   placeholder="— assign —"
+                                  triggerClassName="px-2 py-1.5 text-xs"
                                   maxVisibleItems={8}
-                                  triggerClassName={!row.resolvedAccountId && row.rawAmount < 0 ? 'border-magma/40 text-magma/70' : undefined}
                                 />
                               </div>
                             </td>
@@ -1281,8 +1299,8 @@ export const Categorize: React.FC = () => {
                                   onChange={v => updateRow(row.id, { resolvedAccountToId: v })}
                                   groups={rowAccountGroups}
                                   placeholder="— assign —"
+                                  triggerClassName="px-2 py-1.5 text-xs"
                                   maxVisibleItems={8}
-                                  triggerClassName={!row.resolvedAccountToId && row.rawAmount >= 0 && row.resolvedType !== 'expense' ? 'border-magma/40 text-magma/70' : undefined}
                                 />
                               </div>
                             </td>

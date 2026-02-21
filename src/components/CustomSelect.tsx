@@ -9,7 +9,7 @@
 //   Compact (table rows, Categorize):     px-2 py-2 text-xs  ← matches neighbouring inputs
 //
 // Usage:
-//   <CustomSelect ... />                              // default p-3 text-sm
+//   <CustomSelect ... />                                        // default p-3 text-sm
 //   <CustomSelect ... triggerClassName="px-2 py-2 text-xs" />  // compact
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -129,13 +129,13 @@ export const CustomSelect: React.FC<Props> = ({
           error    ? 'border-magma/50' : 'border-white/10',
           open     ? 'border-magma/50' : 'hover:border-white/20',
           disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-          // padding + font-size — caller overrides via triggerClassName
+          // padding + font-size: caller overrides via triggerClassName
           triggerClassName ?? 'p-3 text-sm',
         )}
       >
         <span className={clsx(
           'truncate font-mono',
-          isBlank ? 'text-iron-dust/50' : 'text-white',
+          isBlank ? 'text-iron-dust/50' : 'text-magma font-bold',
         )}>
           {selected ? selected.label : placeholder}
         </span>
@@ -176,14 +176,14 @@ export const CustomSelect: React.FC<Props> = ({
                     onMouseDown={() => handleSelect(opt.value)}
                     className={clsx(
                       'w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors font-mono',
-                      isSel        ? 'bg-white/[0.06] text-magma'
-                      : isBlankOpt ? 'text-iron-dust/50 hover:bg-white/[0.03]'
-                      :              'text-white hover:bg-white/[0.03]',
+                      isSel        ? 'bg-magma/10'
+                      : isBlankOpt ? 'hover:bg-white/[0.03]'
+                      :              'hover:bg-white/[0.04]',
                     )}
                   >
                     <span className={clsx(
                       'font-mono',
-                      isSel        ? 'text-magma'
+                      isSel        ? 'text-magma font-bold'
                       : isBlankOpt ? 'text-iron-dust/50'
                       :              'text-white',
                     )}>
