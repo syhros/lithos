@@ -2,11 +2,17 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Upload, Plus, Trash2, Save, ChevronDown, ChevronUp,
   ArrowRight, Tag, Shuffle, RefreshCcw,
-  CheckCircle2, AlertCircle, X, Check, Filter, Link2
+  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType } from '../data/mockData';
+import {
+  useImportRules,
+  TypeMappingRule,
+  MerchantRule,
+  TransferRule,
+} from '../hooks/useImportRules';
 
 // ─────────────────────────────────────────────
 // Types
@@ -25,72 +31,17 @@ interface RawRow {
   resolvedDescription: string;
   resolvedCategory: string;
   resolvedAccountId: string;
-  resolvedAccountToId: string; // for transfers
+  resolvedAccountToId: string;
   resolvedNotes: string;
   matchedPairId?: string;
   isTransfer: boolean;
   skip: boolean;
 }
 
-interface TypeMappingRule {
-  id: string;
-  bankCode: string;
-  mapsTo: TransactionType;
-}
-
-interface MerchantRule {
-  id: string;
-  matchDescription: boolean;
-  matchType: boolean;
-  matchAmount: boolean;
-  contains: string;
-  setDescription: string;
-  setCategory: string;
-  setType: TransactionType | '';
-  setAccountId: string;
-  setAccountToId: string;
-  setNotes: string;
-}
-
-interface TransferRule {
-  id: string;
-  label: string;
-  fromDescContains: string;
-  toDescContains: string;
-  toleranceDays: number;
-}
-
 const TX_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'debt_payment', 'investing'];
 
-const DEFAULT_NATWEST_TYPES: TypeMappingRule[] = [
-  { id: 'nw1', bankCode: 'BAC',  mapsTo: 'income'   },
-  { id: 'nw2', bankCode: 'D/D',  mapsTo: 'expense'  },
-  { id: 'nw3', bankCode: 'S/O',  mapsTo: 'expense'  },
-  { id: 'nw4', bankCode: 'CHG',  mapsTo: 'expense'  },
-];
-
-const DEFAULT_HALIFAX_TYPES: TypeMappingRule[] = [
-  { id: 'hx1', bankCode: 'DEB',  mapsTo: 'expense'  },
-  { id: 'hx2', bankCode: 'FPI',  mapsTo: 'income'   },
-  { id: 'hx3', bankCode: 'FPO',  mapsTo: 'expense'  },
-  { id: 'hx4', bankCode: 'DD',   mapsTo: 'expense'  },
-  { id: 'hx5', bankCode: 'SO',   mapsTo: 'expense'  },
-  { id: 'hx6', bankCode: 'BGC',  mapsTo: 'income'   },
-  { id: 'hx7', bankCode: 'TFR',  mapsTo: 'transfer' },
-];
-
-const DEFAULT_TRANSFER_RULES: TransferRule[] = [
-  {
-    id: 'tr1',
-    label: 'Halifax → NatWest (weekly savings)',
-    fromDescContains: 'CAMERON REES',
-    toDescContains: 'C REES',
-    toleranceDays: 2,
-  },
-];
-
 // ─────────────────────────────────────────────
-// Parse helpers
+// CSV Parse helpers
 // ─────────────────────────────────────────────
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -200,8 +151,7 @@ function applyMerchantRules(rows: RawRow[], rules: MerchantRule[]): RawRow[] {
     let r = { ...row };
     for (const rule of rules) {
       if (!rule.contains) continue;
-      const descMatch = rule.matchDescription && r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase());
-      if (descMatch) {
+      if (rule.matchDescription && r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) {
         if (rule.setDescription) r.resolvedDescription = rule.setDescription;
         if (rule.setCategory)    r.resolvedCategory    = rule.setCategory;
         if (rule.setType)        r.resolvedType        = rule.setType as TransactionType;
@@ -246,22 +196,26 @@ interface CreateRulePopupProps {
   field: 'category' | 'description' | 'type' | 'notes';
   accounts: { id: string; name: string }[];
   categories: string[];
+  currencySymbol: string;
   onConfirm: (rule: MerchantRule) => void;
   onDismiss: () => void;
 }
 
-const CreateRulePopup: React.FC<CreateRulePopupProps> = ({ row, field, accounts, categories, onConfirm, onDismiss }) => {
+const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
+  row, field, accounts, categories, currencySymbol, onConfirm, onDismiss
+}) => {
   const [matchDescription, setMatchDescription] = useState(true);
   const [matchType,        setMatchType]        = useState(false);
   const [matchAmount,      setMatchAmount]       = useState(false);
-  const [setDescription,   setSetDescription]   = useState(field === 'description' ? row.resolvedDescription : '');
-  const [setCategory,      setSetCategory]      = useState(field === 'category'    ? row.resolvedCategory    : '');
-  const [setType,          setSetType]          = useState<TransactionType | ''>('');
+  // Pre-populate "Then Set" with the current row values
+  const [setDescription,   setSetDescription]   = useState(row.resolvedDescription || row.rawDescription);
+  const [setCategory,      setSetCategory]      = useState(field === 'category' ? row.resolvedCategory : '');
+  const [setType,          setSetType]          = useState<TransactionType | ''>(field === 'type' ? row.resolvedType : '');
   const [setAccountId,     setSetAccountId]     = useState('');
   const [setAccountToId,   setSetAccountToId]   = useState('');
   const [setNotes,         setSetNotes]         = useState(field === 'notes' ? row.resolvedNotes : '');
 
-  const containsValue = row.rawDescription;
+  const isIncome = row.rawAmount >= 0;
 
   const handleConfirm = () => {
     onConfirm({
@@ -269,7 +223,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({ row, field, accounts,
       matchDescription,
       matchType,
       matchAmount,
-      contains: containsValue,
+      contains:       row.rawDescription,
       setDescription,
       setCategory,
       setType,
@@ -297,12 +251,26 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({ row, field, accounts,
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-lg rounded-sm shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 bg-[#131517] border-b border-white/5 flex items-center justify-between">
-          <div>
+        <div className="px-6 py-4 bg-[#131517] border-b border-white/5 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
             <h3 className="text-xs font-bold uppercase tracking-[2px] text-white">Create Description Rule</h3>
-            <p className="text-[10px] text-iron-dust font-mono mt-0.5 truncate max-w-xs">{containsValue}</p>
+            <p className="text-[10px] text-iron-dust font-mono mt-0.5 truncate">{row.rawDescription}</p>
           </div>
-          <button onClick={onDismiss} className="text-iron-dust hover:text-white"><X size={16} /></button>
+          {/* Amount badge */}
+          <div className={clsx(
+            'shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-xs font-mono font-bold',
+            isIncome
+              ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+              : 'text-magma border-magma/30 bg-magma/10'
+          )}>
+            {isIncome ? '+' : ''}{currencySymbol}{Math.abs(row.rawAmount).toFixed(2)}
+            <span className={clsx('text-[9px] uppercase tracking-wider font-normal',
+              isIncome ? 'text-emerald-500' : 'text-magma/70'
+            )}>
+              {isIncome ? 'income' : 'expense'}
+            </span>
+          </div>
+          <button onClick={onDismiss} className="text-iron-dust hover:text-white shrink-0 mt-0.5"><X size={16} /></button>
         </div>
 
         <div className="p-6 space-y-5">
@@ -325,7 +293,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({ row, field, accounts,
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Description</label>
-                  <input value={setDescription} onChange={e => setSetDescription(e.target.value)} placeholder="e.g. Denplan"
+                  <input value={setDescription} onChange={e => setSetDescription(e.target.value)}
                     className="w-full bg-black/30 border border-white/10 px-3 py-2 text-xs text-white rounded-sm focus:border-magma outline-none" />
                 </div>
                 <div>
@@ -373,7 +341,10 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({ row, field, accounts,
         </div>
 
         <div className="px-6 py-4 bg-[#131517] border-t border-white/5 flex justify-end gap-3">
-          <button onClick={onDismiss} className="px-5 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors">Cancel</button>
+          <button onClick={onDismiss}
+            className="px-5 py-2.5 border border-white/10 text-white text-xs font-bold uppercase rounded-sm hover:bg-white/5 transition-colors">
+            Cancel
+          </button>
           <button onClick={handleConfirm} disabled={!matchDescription && !matchType && !matchAmount}
             className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 disabled:opacity-40 transition-colors">
             Create Rule
@@ -393,13 +364,16 @@ const SectionCard: React.FC<{
   icon: React.ReactNode;
   defaultOpen?: boolean;
   onSave?: () => void;
+  saving?: boolean;
+  saved?: boolean;
   children: React.ReactNode;
-}> = ({ title, subtitle, icon, defaultOpen = true, onSave, children }) => {
+}> = ({ title, subtitle, icon, defaultOpen = true, onSave, saving = false, saved = false, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border border-white/10 rounded-sm bg-[#131517] overflow-hidden">
       <div className="flex items-center bg-[#0f1012]">
-        <button onClick={() => setOpen(v => !v)} className="flex-1 flex items-center gap-3 px-5 py-4 hover:bg-white/[0.02] transition-colors text-left">
+        <button onClick={() => setOpen(v => !v)}
+          className="flex-1 flex items-center gap-3 px-5 py-4 hover:bg-white/[0.02] transition-colors text-left">
           <span className="text-magma">{icon}</span>
           <div className="flex-1">
             <span className="text-xs font-bold uppercase tracking-[2px] text-white block">{title}</span>
@@ -407,12 +381,20 @@ const SectionCard: React.FC<{
           </div>
         </button>
         {onSave && (
-          <button onClick={onSave}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-iron-dust hover:text-white border-l border-white/5 px-4 py-4 hover:bg-white/[0.02] transition-colors">
-            <Save size={11} /><span>Save</span>
+          <button onClick={onSave} disabled={saving}
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider border-l border-white/5 px-4 py-4 transition-colors disabled:opacity-50
+              hover:bg-white/[0.02]"
+            style={{ color: saved ? '#34d399' : undefined }}>
+            {saving
+              ? <Loader2 size={11} className="animate-spin text-iron-dust" />
+              : saved
+                ? <CheckCircle2 size={11} />
+                : <Save size={11} className="text-iron-dust" />}
+            <span className={saved ? 'text-emerald-400' : 'text-iron-dust'}>{saved ? 'Saved' : 'Save'}</span>
           </button>
         )}
-        <button onClick={() => setOpen(v => !v)} className="px-4 py-4 text-iron-dust hover:text-white border-l border-white/5 hover:bg-white/[0.02] transition-colors">
+        <button onClick={() => setOpen(v => !v)}
+          className="px-4 py-4 text-iron-dust hover:text-white border-l border-white/5 hover:bg-white/[0.02] transition-colors">
           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
@@ -422,7 +404,7 @@ const SectionCard: React.FC<{
 };
 
 // ─────────────────────────────────────────────
-// Inline editable cell with "Create rule?" prompt
+// Inline editable cell
 // ─────────────────────────────────────────────
 interface EditableCellProps {
   value: string;
@@ -437,9 +419,9 @@ interface EditableCellProps {
 const EditableCell: React.FC<EditableCellProps> = ({
   value, onSave, className, type = 'text', options = [], showRulePrompt = false, onCreateRule
 }) => {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [showPrompt, setShowPrompt] = useState(false);
+  const [editing,     setEditing]     = useState(false);
+  const [draft,       setDraft]       = useState(value);
+  const [showPrompt,  setShowPrompt]  = useState(false);
 
   const commit = (newVal: string) => {
     onSave(newVal);
@@ -490,14 +472,37 @@ const EditableCell: React.FC<EditableCellProps> = ({
 };
 
 // ─────────────────────────────────────────────
+// Column headers row for description rules
+const MerchantRuleHeaders: React.FC = () => (
+  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_2rem] gap-2 px-3 pb-1">
+    {['Contains', 'Set Description', 'Category', 'Type', 'Acct To', ''].map((h, i) => (
+      <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
+    ))}
+  </div>
+);
+
+// Column headers row for transfer rules
+const TransferRuleHeaders: React.FC = () => (
+  <div className="grid grid-cols-[1.5fr_1fr_1fr_4rem_2rem] gap-3 px-3 pb-1">
+    {['Label', 'Debit contains', 'Credit contains', '±Days', ''].map((h, i) => (
+      <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
+    ))}
+  </div>
+);
+
+// ─────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────
 export const Categorize: React.FC = () => {
   const { data, addTransaction, currencySymbol } = useFinance();
+  const {
+    typeRules, setTypeRules,
+    merchantRules, setMerchantRules,
+    transferRules, setTransferRules,
+    loading, saving, saved,
+    saveTypeRules, saveMerchantRules, saveTransferRules,
+  } = useImportRules();
 
-  const [typeRules,     setTypeRules]     = useState<TypeMappingRule[]>([...DEFAULT_NATWEST_TYPES, ...DEFAULT_HALIFAX_TYPES]);
-  const [merchantRules, setMerchantRules] = useState<MerchantRule[]>([]);
-  const [transferRules, setTransferRules] = useState<TransferRule[]>(DEFAULT_TRANSFER_RULES);
   const [rows,          setRows]          = useState<RawRow[]>([]);
   const [importing,     setImporting]     = useState(false);
   const [importDone,    setImportDone]    = useState(false);
@@ -506,14 +511,14 @@ export const Categorize: React.FC = () => {
   const [filterType,    setFilterType]    = useState<string>('all');
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [rulePopup,     setRulePopup]     = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
-  const [savedSections, setSavedSections] = useState<Record<string, boolean>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const allAccounts   = useMemo(() => [...data.assets, ...data.debts], [data.assets, data.debts]);
+  const allAccounts      = useMemo(() => [...data.assets, ...data.debts], [data.assets, data.debts]);
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
+  const uniqueBankCodes  = useMemo(() => Array.from(new Set(rows.map(r => r.rawType))).filter(Boolean), [rows]);
 
   const visibleRows = useMemo(() => rows.filter(r => {
-    if (filterType !== 'all' && r.resolvedType !== filterType) return false;
+    if (filterType    !== 'all' && r.resolvedType      !== filterType)    return false;
     if (filterAccount !== 'all' && r.resolvedAccountId !== filterAccount) return false;
     return true;
   }), [rows, filterType, filterAccount]);
@@ -525,14 +530,7 @@ export const Categorize: React.FC = () => {
     toImport:  rows.filter(r => !r.skip).length,
   }), [rows]);
 
-  const uniqueBankCodes = useMemo(() => Array.from(new Set(rows.map(r => r.rawType))).filter(Boolean), [rows]);
-
-  const flashSaved = (key: string) => {
-    setSavedSections(prev => ({ ...prev, [key]: true }));
-    setTimeout(() => setSavedSections(prev => ({ ...prev, [key]: false })), 1800);
-  };
-
-  // ── File upload ──
+  // ─ File upload ─
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || !files.length) return;
     const allRows: RawRow[] = [];
@@ -545,8 +543,7 @@ export const Categorize: React.FC = () => {
         allRows.push(...parsed);
         loaded++;
         if (loaded === files.length) {
-          const merged = applyTransferMatching(allRows, transferRules);
-          setRows(merged);
+          setRows(applyTransferMatching(allRows, transferRules));
           setActiveTab('preview');
           setImportDone(false);
         }
@@ -555,11 +552,11 @@ export const Categorize: React.FC = () => {
     });
   }, [typeRules, merchantRules, transferRules]);
 
-  // ── Re-apply rules ──
+  // ─ Reapply ─
   const reapplyRules = useCallback(() => {
     setRows(prev => {
       let updated = prev.map(r => {
-        const matchedRule = typeRules.find(tr => tr.bankCode.toUpperCase() === r.rawType.toUpperCase());
+        const matchedRule   = typeRules.find(tr => tr.bankCode.toUpperCase() === r.rawType.toUpperCase());
         const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (r.rawAmount >= 0 ? 'income' : 'expense');
         return { ...r, resolvedType };
       });
@@ -575,20 +572,20 @@ export const Categorize: React.FC = () => {
   const bulkSetType = (bankCode: string, newType: TransactionType) =>
     setRows(prev => prev.map(r => r.rawType.toUpperCase() === bankCode.toUpperCase() ? { ...r, resolvedType: newType } : r));
 
-  // ── Import ──
+  // ─ Import ─
   const handleImport = async () => {
     setImporting(true);
     const toImport = rows.filter(r => !r.skip && r.resolvedAccountId);
     let count = 0;
     for (const row of toImport) {
       await addTransaction({
-        date: new Date(row.rawDate).toISOString(),
+        date:        new Date(row.rawDate).toISOString(),
         description: row.resolvedDescription || row.rawDescription,
-        amount: row.rawAmount,
-        type: row.resolvedType,
-        category: row.resolvedCategory || 'General',
-        accountId: row.resolvedAccountId,
-        notes: row.resolvedNotes || undefined,
+        amount:      row.rawAmount,
+        type:        row.resolvedType,
+        category:    row.resolvedCategory || 'General',
+        accountId:   row.resolvedAccountId,
+        notes:       row.resolvedNotes || undefined,
       });
       count++;
     }
@@ -598,12 +595,13 @@ export const Categorize: React.FC = () => {
     setRows([]);
   };
 
-  // ── Rule CRUD helpers ──
+  // ─ Rule CRUD ─
   const addTypeRule    = () => setTypeRules(prev => [...prev, { id: `tr-${Date.now()}`, bankCode: '', mapsTo: 'expense' }]);
   const removeTypeRule = (id: string) => setTypeRules(prev => prev.filter(r => r.id !== id));
   const updateTypeRule = (id: string, patch: Partial<TypeMappingRule>) => setTypeRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  const addMerchantRule    = () => setMerchantRules(prev => [...prev, { id: `mr-${Date.now()}`, matchDescription: true, matchType: false, matchAmount: false, contains: '', setDescription: '', setCategory: '', setType: '', setAccountId: '', setAccountToId: '', setNotes: '' }]);
+  const BLANK_MERCHANT: MerchantRule = { id: '', matchDescription: true, matchType: false, matchAmount: false, contains: '', setDescription: '', setCategory: '', setType: '', setAccountId: '', setAccountToId: '', setNotes: '' };
+  const addMerchantRule    = () => setMerchantRules(prev => [...prev, { ...BLANK_MERCHANT, id: `mr-${Date.now()}` }]);
   const removeMerchantRule = (id: string) => setMerchantRules(prev => prev.filter(r => r.id !== id));
   const updateMerchantRule = (id: string, patch: Partial<MerchantRule>) => setMerchantRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
@@ -611,15 +609,23 @@ export const Categorize: React.FC = () => {
   const removeTransferRule = (id: string) => setTransferRules(prev => prev.filter(r => r.id !== id));
   const updateTransferRule = (id: string, patch: Partial<TransferRule>) => setTransferRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  // ── Handle create-rule popup confirm ──
   const handleRuleConfirm = (rule: MerchantRule) => {
     setMerchantRules(prev => [...prev, rule]);
     setRulePopup(null);
-    // Immediately apply to current rows
     setRows(prev => applyMerchantRules(prev, [...merchantRules, rule]));
   };
 
-  // ─────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-iron-dust">
+          <Loader2 size={20} className="animate-spin" />
+          <p className="text-xs font-mono">Loading rules…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto custom-scrollbar">
       <div className="p-8 max-w-7xl mx-auto pb-24">
@@ -647,12 +653,14 @@ export const Categorize: React.FC = () => {
         {activeTab === 'rules' && (
           <div className="space-y-4">
 
-            {/* ── Type Code Mapping – 3-col grid ── */}
+            {/* Type Code Mapping – 3-col grid */}
             <SectionCard
               title="Type Code → Transaction Type"
               subtitle="Map your bank's type codes (BAC, D/D, SO…) to Lithos types"
               icon={<Shuffle size={14} />}
-              onSave={() => flashSaved('type')}>
+              onSave={saveTypeRules}
+              saving={saving['type']}
+              saved={saved['type']}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-2">
                 {typeRules.map(rule => (
                   <div key={rule.id} className="flex items-center gap-2">
@@ -673,110 +681,113 @@ export const Categorize: React.FC = () => {
               <button onClick={addTypeRule} className="mt-3 flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
                 <Plus size={13} /><span>Add Rule</span>
               </button>
-              {savedSections['type'] && (
-                <p className="mt-2 text-[10px] text-emerald-400 font-mono flex items-center gap-1"><CheckCircle2 size={11} /> Saved</p>
-              )}
             </SectionCard>
 
-            {/* ── Merchant / Description Rules ── */}
+            {/* Description Rules – grouped rows, single outline */}
             <SectionCard
               title="Description Rules"
               subtitle="Auto-set description, category, type, or accounts when a keyword is matched"
               icon={<Tag size={14} />}
-              onSave={() => flashSaved('merchant')}>
-              {merchantRules.length === 0 && (
-                <p className="text-iron-dust text-xs font-mono mb-3">No rules yet — add one or create from the preview table.</p>
-              )}
-              <div className="space-y-2">
-                {merchantRules.map(rule => (
-                  <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_auto] gap-2 items-end bg-white/[0.02] border border-white/5 rounded-sm px-3 py-3">
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Contains</label>
-                      <input value={rule.contains} onChange={e => updateMerchantRule(rule.id, { contains: e.target.value })}
-                        placeholder="e.g. DENPLAN" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Set Description</label>
-                      <input value={rule.setDescription} onChange={e => updateMerchantRule(rule.id, { setDescription: e.target.value })}
-                        placeholder="e.g. Denplan" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Category</label>
-                      <input list="cats-list" value={rule.setCategory} onChange={e => updateMerchantRule(rule.id, { setCategory: e.target.value })}
-                        placeholder="e.g. Health" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                      <datalist id="cats-list">{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Type</label>
-                      <select value={rule.setType} onChange={e => updateMerchantRule(rule.id, { setType: e.target.value as TransactionType | '' })}
+              onSave={saveMerchantRules}
+              saving={saving['merchant']}
+              saved={saved['merchant']}>
+              {merchantRules.length === 0 ? (
+                <p className="text-iron-dust text-xs font-mono mb-2">No rules yet — add one or create from the preview table.</p>
+              ) : (
+                <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
+                  {/* Single header row */}
+                  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_2rem] gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
+                    {['Contains', 'Set Description', 'Category', 'Type', 'Acct To', ''].map((h, i) => (
+                      <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
+                    ))}
+                  </div>
+                  {/* Rule rows — no borders between them */}
+                  {merchantRules.map(rule => (
+                    <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_2rem] gap-2 items-center px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
+                      <input value={rule.contains}
+                        onChange={e => updateMerchantRule(rule.id, { contains: e.target.value })}
+                        placeholder="e.g. DENPLAN"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input value={rule.setDescription}
+                        onChange={e => updateMerchantRule(rule.id, { setDescription: e.target.value })}
+                        placeholder="e.g. Denplan"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input list={`cats-${rule.id}`} value={rule.setCategory}
+                        onChange={e => updateMerchantRule(rule.id, { setCategory: e.target.value })}
+                        placeholder="e.g. Health"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <datalist id={`cats-${rule.id}`}>{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
+                      <select value={rule.setType}
+                        onChange={e => updateMerchantRule(rule.id, { setType: e.target.value as TransactionType | '' })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none">
                         <option value="">— keep —</option>
                         {TX_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Acct To</label>
-                      <select value={rule.setAccountToId} onChange={e => updateMerchantRule(rule.id, { setAccountToId: e.target.value })}
+                      <select value={rule.setAccountToId}
+                        onChange={e => updateMerchantRule(rule.id, { setAccountToId: e.target.value })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none">
                         <option value="">— none —</option>
                         {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </select>
+                      <button onClick={() => removeMerchantRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors flex items-center justify-center">
+                        <Trash2 size={12} />
+                      </button>
                     </div>
-                    <button onClick={() => removeMerchantRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors mb-0.5"><Trash2 size={12} /></button>
-                  </div>
-                ))}
-                <button onClick={addMerchantRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
-                  <Plus size={13} /><span>Add Rule</span>
-                </button>
-              </div>
-              {savedSections['merchant'] && (
-                <p className="mt-2 text-[10px] text-emerald-400 font-mono flex items-center gap-1"><CheckCircle2 size={11} /> Saved</p>
+                  ))}
+                </div>
               )}
+              <button onClick={addMerchantRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
+                <Plus size={13} /><span>Add Rule</span>
+              </button>
             </SectionCard>
 
-            {/* ── Transfer Matching ── */}
+            {/* Transfer Matching Rules – grouped rows, single outline */}
             <SectionCard
               title="Transfer Matching Rules"
               subtitle="Match debits + credits by description pattern, amount & date tolerance"
               icon={<Link2 size={14} />}
-              onSave={() => flashSaved('transfer')}>
-              <div className="space-y-2">
-                {transferRules.map(rule => (
-                  <div key={rule.id} className="grid grid-cols-[1.5fr_1fr_1fr_auto_auto] gap-3 items-end bg-white/[0.02] border border-white/5 rounded-sm px-3 py-3">
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Label</label>
-                      <input value={rule.label} onChange={e => updateTransferRule(rule.id, { label: e.target.value })}
-                        placeholder="e.g. Halifax → NatWest Savings" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Debit contains</label>
-                      <input value={rule.fromDescContains} onChange={e => updateTransferRule(rule.id, { fromDescContains: e.target.value })}
-                        placeholder="e.g. CAMERON REES" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Credit contains</label>
-                      <input value={rule.toDescContains} onChange={e => updateTransferRule(rule.id, { toDescContains: e.target.value })}
-                        placeholder="e.g. C REES" className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                    </div>
-                    <div className="w-16">
-                      <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">±Days</label>
+              onSave={saveTransferRules}
+              saving={saving['transfer']}
+              saved={saved['transfer']}>
+              {transferRules.length === 0 ? (
+                <p className="text-iron-dust text-xs font-mono mb-2">No rules yet.</p>
+              ) : (
+                <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
+                  <div className="grid grid-cols-[1.5fr_1fr_1fr_4rem_2rem] gap-3 px-3 py-2 bg-[#0f1012] border-b border-white/10">
+                    {['Label', 'Debit contains', 'Credit contains', '±Days', ''].map((h, i) => (
+                      <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
+                    ))}
+                  </div>
+                  {transferRules.map(rule => (
+                    <div key={rule.id} className="grid grid-cols-[1.5fr_1fr_1fr_4rem_2rem] gap-3 items-center px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
+                      <input value={rule.label}
+                        onChange={e => updateTransferRule(rule.id, { label: e.target.value })}
+                        placeholder="e.g. Halifax → NatWest"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input value={rule.fromDescContains}
+                        onChange={e => updateTransferRule(rule.id, { fromDescContains: e.target.value })}
+                        placeholder="e.g. CAMERON REES"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input value={rule.toDescContains}
+                        onChange={e => updateTransferRule(rule.id, { toDescContains: e.target.value })}
+                        placeholder="e.g. C REES"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
                       <input type="number" min={0} max={7} value={rule.toleranceDays}
                         onChange={e => updateTransferRule(rule.id, { toleranceDays: parseInt(e.target.value) || 0 })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none font-mono" />
+                      <button onClick={() => removeTransferRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors flex items-center justify-center">
+                        <Trash2 size={12} />
+                      </button>
                     </div>
-                    <button onClick={() => removeTransferRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors"><Trash2 size={12} /></button>
-                  </div>
-                ))}
-                <button onClick={addTransferRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
-                  <Plus size={13} /><span>Add Rule</span>
-                </button>
-              </div>
-              {savedSections['transfer'] && (
-                <p className="mt-2 text-[10px] text-emerald-400 font-mono flex items-center gap-1"><CheckCircle2 size={11} /> Saved</p>
+                  ))}
+                </div>
               )}
+              <button onClick={addTransferRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
+                <Plus size={13} /><span>Add Rule</span>
+              </button>
             </SectionCard>
 
-            {/* ── Upload ── */}
+            {/* Upload */}
             <SectionCard title="Upload Bank CSV(s)" subtitle="Drop one or more files — NatWest & Halifax auto-detected" icon={<Upload size={14} />}>
               <div
                 onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
@@ -828,7 +839,7 @@ export const Categorize: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Bulk override by bank code */}
+                {/* Bulk override */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -868,7 +879,7 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Assign all to account */}
+                {/* Assign all */}
                 <div className="flex items-center gap-3 bg-white/[0.02] border border-white/5 rounded-sm p-3">
                   <span className="text-xs text-iron-dust font-mono">Assign all rows to account:</span>
                   <select onChange={e => { if (!e.target.value) return; setRows(prev => prev.map(r => ({ ...r, resolvedAccountId: e.target.value }))); }} defaultValue=""
@@ -915,55 +926,28 @@ export const Categorize: React.FC = () => {
                             <td className="px-3 py-2">
                               <span className="px-1.5 py-0.5 bg-black/40 border border-white/10 rounded-sm font-mono text-[10px] text-iron-dust">{row.rawType}</span>
                             </td>
-
-                            {/* Description */}
                             <td className="px-3 py-2 max-w-[220px]">
-                              <EditableCell
-                                value={row.resolvedDescription}
-                                onSave={v => updateRow(row.id, { resolvedDescription: v })}
-                                className="text-white text-[11px]"
-                                showRulePrompt
-                                onCreateRule={() => setRulePopup({ row, field: 'description' })}
-                              />
-                              {row.isTransfer && (
-                                <span className="text-[9px] font-mono text-blue-400 block mt-0.5">↔ transfer match</span>
-                              )}
+                              <EditableCell value={row.resolvedDescription} onSave={v => updateRow(row.id, { resolvedDescription: v })}
+                                className="text-white text-[11px]" showRulePrompt onCreateRule={() => setRulePopup({ row, field: 'description' })} />
+                              {row.isTransfer && <span className="text-[9px] font-mono text-blue-400 block mt-0.5">↔ transfer match</span>}
                             </td>
-
-                            {/* Category */}
                             <td className="px-3 py-2">
-                              <EditableCell
-                                value={row.resolvedCategory}
-                                onSave={v => updateRow(row.id, { resolvedCategory: v })}
-                                className="text-iron-dust text-[11px]"
-                                showRulePrompt
-                                onCreateRule={() => setRulePopup({ row, field: 'category' })}
-                              />
+                              <EditableCell value={row.resolvedCategory} onSave={v => updateRow(row.id, { resolvedCategory: v })}
+                                className="text-iron-dust text-[11px]" showRulePrompt onCreateRule={() => setRulePopup({ row, field: 'category' })} />
                             </td>
-
-                            {/* Type */}
                             <td className="px-3 py-2">
-                              <EditableCell
-                                value={row.resolvedType}
-                                onSave={v => updateRow(row.id, { resolvedType: v as TransactionType })}
-                                type="select"
-                                options={TX_TYPES}
-                                showRulePrompt
-                                onCreateRule={() => setRulePopup({ row, field: 'type' })}
+                              <EditableCell value={row.resolvedType} onSave={v => updateRow(row.id, { resolvedType: v as TransactionType })}
+                                type="select" options={TX_TYPES} showRulePrompt onCreateRule={() => setRulePopup({ row, field: 'type' })}
                                 className={clsx('font-mono text-[10px] px-1.5 py-0.5 rounded-sm border',
                                   row.resolvedType === 'income'       ? 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' :
                                   row.resolvedType === 'expense'      ? 'text-magma border-magma/20 bg-magma/10' :
                                   row.resolvedType === 'transfer'     ? 'text-blue-400 border-blue-400/20 bg-blue-400/10' :
                                   row.resolvedType === 'debt_payment' ? 'text-amber-400 border-amber-400/20 bg-amber-400/10' :
                                                                         'text-purple-400 border-purple-400/20 bg-purple-400/10'
-                                )}
-                              />
+                                )} />
                             </td>
-
-                            {/* Account From */}
                             <td className="px-3 py-2">
-                              <select value={row.resolvedAccountId}
-                                onChange={e => updateRow(row.id, { resolvedAccountId: e.target.value })}
+                              <select value={row.resolvedAccountId} onChange={e => updateRow(row.id, { resolvedAccountId: e.target.value })}
                                 className={clsx('bg-black/30 border px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none',
                                   !row.resolvedAccountId ? 'border-magma/40 text-magma/70' : 'border-white/10'
                                 )}>
@@ -972,12 +956,9 @@ export const Categorize: React.FC = () => {
                                 <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
                               </select>
                             </td>
-
-                            {/* Account To (transfers/debt payments) */}
                             <td className="px-3 py-2">
                               {(row.resolvedType === 'transfer' || row.resolvedType === 'debt_payment') ? (
-                                <select value={row.resolvedAccountToId}
-                                  onChange={e => updateRow(row.id, { resolvedAccountToId: e.target.value })}
+                                <select value={row.resolvedAccountToId} onChange={e => updateRow(row.id, { resolvedAccountToId: e.target.value })}
                                   className="bg-black/30 border border-white/10 px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none">
                                   <option value="">— assign —</option>
                                   <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
@@ -987,22 +968,16 @@ export const Categorize: React.FC = () => {
                                 <span className="text-iron-dust/20 text-[10px] font-mono">—</span>
                               )}
                             </td>
-
-                            {/* Amount */}
                             <td className={clsx('px-3 py-2 text-right font-mono font-bold text-[11px]',
                               row.rawAmount >= 0 ? 'text-emerald-400' : 'text-magma'
                             )}>
                               {row.rawAmount >= 0 ? '+' : ''}{currencySymbol}{Math.abs(row.rawAmount).toFixed(2)}
                             </td>
-
-                            {/* Skip */}
                             <td className="px-3 py-2 text-center">
                               <button onClick={() => updateRow(row.id, { skip: !row.skip })}
                                 className={clsx('w-5 h-5 rounded-sm border flex items-center justify-center mx-auto transition-colors',
                                   row.skip ? 'bg-white/10 border-white/20 text-iron-dust' : 'border-white/10 text-transparent hover:border-white/30'
-                                )}>
-                                <X size={10} />
-                              </button>
+                                )}><X size={10} /></button>
                             </td>
                           </tr>
                         ))}
@@ -1041,6 +1016,7 @@ export const Categorize: React.FC = () => {
           field={rulePopup.field}
           accounts={allAccounts}
           categories={uniqueCategories}
+          currencySymbol={currencySymbol}
           onConfirm={handleRuleConfirm}
           onDismiss={() => setRulePopup(null)}
         />
