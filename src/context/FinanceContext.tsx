@@ -35,6 +35,8 @@ interface HistoricalPoint {
   investing: number;
 }
 
+export type HistoryRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'all';
+
 interface FinanceContextType {
   data: MockData;
   loading: boolean;
@@ -45,7 +47,7 @@ interface FinanceContextType {
   currentBalances: { [key: string]: number };
   historicalPrices: Record<string, Record<string, number>>;
 
-  getHistory: (range: '1W' | '1M' | '1Y') => HistoricalPoint[];
+  getHistory: (range: HistoryRange) => HistoricalPoint[];
   getTotalNetWorth: () => number;
 
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
@@ -182,12 +184,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         supabase.from('bills').select('*').eq('user_id', userId)
       ]);
 
-      // Load sort orders from profile
       if (profile?.sort_orders) {
         try {
-          const saved = typeof profile.sort_orders === 'string'
-            ? JSON.parse(profile.sort_orders)
-            : profile.sort_orders;
+          const saved = typeof profile.sort_orders === 'string' ? JSON.parse(profile.sort_orders) : profile.sort_orders;
           setSortOrders({ ...DEFAULT_SORT_ORDERS, ...saved });
         } catch (_) {}
       }
@@ -348,24 +347,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const cachedHistory = localStorage.getItem('lithos_historical_prices');
     if (cachedHistory) { try { setHistoricalPrices(JSON.parse(cachedHistory)); } catch (e) {} }
 
-    // Initial load
     (async () => { await fetchFxRate(); await loadUserData(true); })();
 
-    // FX hourly refresh
     const msUntilNextHour = (60 - new Date().getMinutes()) * 60 * 1000 - new Date().getSeconds() * 1000;
     const firstTimeout = setTimeout(() => { fetchFxRate(); const i = setInterval(fetchFxRate, 60 * 60 * 1000); return () => clearInterval(i); }, msUntilNextHour);
 
-    // Listen for auth state changes — reload data immediately after login
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
-        loadUserData(false);
-      }
+      if (event === 'SIGNED_IN') { loadUserData(false); }
     });
 
-    return () => {
-      clearTimeout(firstTimeout);
-      subscription.unsubscribe();
-    };
+    return () => { clearTimeout(firstTimeout); subscription.unsubscribe(); };
   }, []);
 
   const getHoldingsByAccount = (accountId: string) => {
@@ -418,13 +409,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return balances;
   }, [data.assets, data.transactions, data.debts, currentPrices, gbpUsdRate]);
 
-  const getHistory = (range: '1W' | '1M' | '1Y'): HistoricalPoint[] => {
-    const days = range === '1W' ? 7 : range === '1M' ? 30 : 365;
+  const getHistory = (range: HistoryRange): HistoricalPoint[] => {
+    // For 'all', find earliest transaction date
+    let days: number;
+    if (range === 'all') {
+      const allDates = data.transactions.map(t => t.date).filter(Boolean).sort();
+      if (allDates.length === 0) {
+        days = 365;
+      } else {
+        const earliest = new Date(allDates[0]);
+        const today = new Date();
+        days = Math.ceil((today.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24));
+        days = Math.max(days, 1);
+      }
+    } else {
+      days = range === '1W' ? 7 : range === '1M' ? 30 : range === '3M' ? 90 : range === '6M' ? 180 : 365;
+    }
+
     const points: HistoricalPoint[] = [];
     const userCurrency = data.user.currency || 'GBP';
     const debtIdSet = new Set(data.debts.map(d => d.id));
 
-    for (let i = days; i >= 0; i--) {
+    // Subsample for large ranges to keep performance snappy
+    const totalDays = days + 1;
+    const maxPoints = 90;
+    const step = totalDays > maxPoints ? Math.ceil(totalDays / maxPoints) : 1;
+
+    for (let i = days; i >= 0; i -= step) {
       const d = subDays(new Date(), i);
       const dateStr = format(d, 'yyyy-MM-dd');
       let checking = 0, savings = 0, investing = 0;
@@ -474,7 +485,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       });
 
-      // ✅ FIXED: replay debt transactions up to this date so the chart matches real balances
+      // Replay debt transactions per-day
       let debts = 0;
       data.debts.forEach(debt => {
         let balance = debt.startingValue;
@@ -486,6 +497,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       points.push({ date: dateStr, netWorth: checking + savings + investing - debts, assets: checking + savings + investing, debts, checking, savings, investing });
     }
+
+    // Always ensure the final point is today's real data
+    const lastPoint = points[points.length - 1];
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    if (!lastPoint || lastPoint.date !== todayStr) {
+      // Compute today's values
+      let checking = 0, savings = 0, investing = 0;
+      data.assets.forEach(asset => {
+        if (asset.type !== 'investment') {
+          const val = currentBalances[asset.id] || 0;
+          if (asset.type === 'checking') checking += val;
+          else if (asset.type === 'savings') savings += val;
+        } else {
+          investing += currentBalances[asset.id] || 0;
+        }
+      });
+      let debts = 0;
+      data.debts.forEach(d => { debts += currentBalances[d.id] || 0; });
+      points.push({ date: todayStr, netWorth: checking + savings + investing - debts, assets: checking + savings + investing, debts, checking, savings, investing });
+    }
+
     return points;
   };
 
@@ -619,9 +651,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      await supabase.from('user_profiles')
-        .update({ sort_orders: next })
-        .eq('id', session.user.id);
+      await supabase.from('user_profiles').update({ sort_orders: next }).eq('id', session.user.id);
     } catch (e) { console.error('Failed to save sort order:', e); }
   };
 
