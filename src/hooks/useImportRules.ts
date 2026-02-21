@@ -8,20 +8,34 @@ export interface TypeMappingRule {
   mapsTo: TransactionType;
 }
 
+/**
+ * A merchant/description rule.
+ *
+ * Match fields (AND-gated):
+ *   matchDescription  — row.rawDescription must contain `contains`
+ *   matchType         — row.resolvedType must equal `matchTypeValue`
+ *   matchAmount       — Math.abs(row.rawAmount) must equal `matchAmountValue`
+ *
+ * Set fields (applied when ALL enabled match conditions pass):
+ *   setDescription, setCategory, setType,
+ *   setAccountId, setAccountToId, setNotes
+ */
 export interface MerchantRule {
   id: string;
+  // ── match conditions ──
   matchDescription: boolean;
-  matchType: boolean;
-  matchAmount: boolean;
-  contains: string;
+  matchType:        boolean;
+  matchAmount:      boolean;
+  contains:         string;           // used when matchDescription === true
+  matchTypeValue:   TransactionType | '';  // used when matchType === true
+  matchAmountValue: number | '';      // used when matchAmount === true (absolute value)
+  // ── set actions ──
   setDescription: string;
-  setCategory: string;
-  setType: TransactionType | '';
-  // setAccountId: if set, the rule only applies when resolvedAccountId matches this account.
-  // When empty, the rule applies to all accounts.
-  setAccountId: string;
+  setCategory:    string;
+  setType:        TransactionType | '';
+  setAccountId:   string;
   setAccountToId: string;
-  setNotes: string;
+  setNotes:       string;
 }
 
 export interface TransferRule {
@@ -32,21 +46,24 @@ export interface TransferRule {
   toleranceDays: number;
 }
 
+// ─────────────────────────────────────────────
+// Defaults
+// ─────────────────────────────────────────────
 const DEFAULT_NATWEST_TYPES: TypeMappingRule[] = [
-  { id: 'nw1', bankCode: 'BAC',  mapsTo: 'income'   },
-  { id: 'nw2', bankCode: 'D/D',  mapsTo: 'expense'  },
-  { id: 'nw3', bankCode: 'S/O',  mapsTo: 'expense'  },
-  { id: 'nw4', bankCode: 'CHG',  mapsTo: 'expense'  },
+  { id: 'nw1', bankCode: 'BAC', mapsTo: 'income'  },
+  { id: 'nw2', bankCode: 'D/D', mapsTo: 'expense' },
+  { id: 'nw3', bankCode: 'S/O', mapsTo: 'expense' },
+  { id: 'nw4', bankCode: 'CHG', mapsTo: 'expense' },
 ];
 
 const DEFAULT_HALIFAX_TYPES: TypeMappingRule[] = [
-  { id: 'hx1', bankCode: 'DEB',  mapsTo: 'expense'  },
-  { id: 'hx2', bankCode: 'FPI',  mapsTo: 'income'   },
-  { id: 'hx3', bankCode: 'FPO',  mapsTo: 'expense'  },
-  { id: 'hx4', bankCode: 'DD',   mapsTo: 'expense'  },
-  { id: 'hx5', bankCode: 'SO',   mapsTo: 'expense'  },
-  { id: 'hx6', bankCode: 'BGC',  mapsTo: 'income'   },
-  { id: 'hx7', bankCode: 'TFR',  mapsTo: 'transfer' },
+  { id: 'hx1', bankCode: 'DEB', mapsTo: 'expense'  },
+  { id: 'hx2', bankCode: 'FPI', mapsTo: 'income'   },
+  { id: 'hx3', bankCode: 'FPO', mapsTo: 'expense'  },
+  { id: 'hx4', bankCode: 'DD',  mapsTo: 'expense'  },
+  { id: 'hx5', bankCode: 'SO',  mapsTo: 'expense'  },
+  { id: 'hx6', bankCode: 'BGC', mapsTo: 'income'   },
+  { id: 'hx7', bankCode: 'TFR', mapsTo: 'transfer' },
 ];
 
 const DEFAULT_TRANSFER_RULES: TransferRule[] = [
@@ -59,6 +76,127 @@ const DEFAULT_TRANSFER_RULES: TransferRule[] = [
   },
 ];
 
+// ─────────────────────────────────────────────
+// Helper — blank rule skeleton
+// ─────────────────────────────────────────────
+export const BLANK_MERCHANT_RULE: Omit<MerchantRule, 'id'> = {
+  matchDescription: true,
+  matchType:        false,
+  matchAmount:      false,
+  contains:         '',
+  matchTypeValue:   '',
+  matchAmountValue: '',
+  setDescription:   '',
+  setCategory:      '',
+  setType:          '',
+  setAccountId:     '',
+  setAccountToId:   '',
+  setNotes:         '',
+};
+
+// ─────────────────────────────────────────────
+// applyMerchantRules  (AND-gate)
+// ─────────────────────────────────────────────
+/**
+ * Each rule has up to three independent match conditions.
+ * ALL enabled conditions must pass for the rule to fire.
+ *
+ * @param rows      The parsed CSV rows
+ * @param rules     The merchant rules
+ */
+export function applyMerchantRules(
+  rows: Array<{
+    rawDescription: string;
+    resolvedType: TransactionType;
+    rawAmount: number;
+    resolvedDescription: string;
+    resolvedCategory: string;
+    resolvedAccountId: string;
+    resolvedAccountToId: string;
+    resolvedNotes: string;
+    [key: string]: unknown;
+  }>,
+  rules: MerchantRule[],
+) {
+  return rows.map(row => {
+    let r = { ...row };
+    for (const rule of rules) {
+      // Every enabled condition must pass (AND gate)
+      if (rule.matchDescription) {
+        if (!rule.contains) continue;
+        if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
+      }
+      if (rule.matchType) {
+        if (!rule.matchTypeValue) continue;
+        if (r.resolvedType !== rule.matchTypeValue) continue;
+      }
+      if (rule.matchAmount) {
+        if (rule.matchAmountValue === '' || rule.matchAmountValue === undefined) continue;
+        if (Math.abs(r.rawAmount) !== Number(rule.matchAmountValue)) continue;
+      }
+      // At least one condition must be enabled — skip no-op rules
+      if (!rule.matchDescription && !rule.matchType && !rule.matchAmount) continue;
+
+      // All enabled conditions passed — apply set actions
+      if (rule.setDescription) r.resolvedDescription = rule.setDescription;
+      if (rule.setCategory)    r.resolvedCategory    = rule.setCategory;
+      if (rule.setType)        r.resolvedType        = rule.setType as TransactionType;
+      if (rule.setAccountId)   r.resolvedAccountId   = rule.setAccountId;
+      if (rule.setAccountToId) r.resolvedAccountToId = rule.setAccountToId;
+      if (rule.setNotes)       r.resolvedNotes       = rule.setNotes;
+      break; // first matching rule wins
+    }
+    return r;
+  });
+}
+
+// ─────────────────────────────────────────────
+// DB row ↔ MerchantRule helpers
+// ─────────────────────────────────────────────
+function dbRowToMerchantRule(r: Record<string, unknown>): MerchantRule {
+  return {
+    id:               r.id as string,
+    matchDescription: (r.match_description as boolean) ?? true,
+    matchType:        (r.match_type        as boolean) ?? false,
+    matchAmount:      (r.match_amount      as boolean) ?? false,
+    contains:         (r.contains          as string)  || '',
+    matchTypeValue:   (r.match_type_value  as TransactionType | '') || '',
+    matchAmountValue: r.match_amount_value != null ? (r.match_amount_value as number) : '',
+    setDescription:   (r.set_description   as string)  || '',
+    setCategory:      (r.set_category      as string)  || '',
+    setType:          (r.set_type          as TransactionType | '') || '',
+    setAccountId:     (r.set_account_id    as string)  || '',
+    setAccountToId:   (r.set_account_to_id as string)  || '',
+    setNotes:         (r.set_notes         as string)  || '',
+  };
+}
+
+function merchantRuleToDbRow(
+  rule: MerchantRule,
+  userId: string,
+  sortOrder: number,
+) {
+  return {
+    user_id:            userId,
+    contains:           rule.contains,
+    match_description:  rule.matchDescription,
+    match_type:         rule.matchType,
+    match_amount:       rule.matchAmount,
+    match_type_value:   rule.matchTypeValue   || null,
+    match_amount_value: rule.matchAmountValue !== '' ? Number(rule.matchAmountValue) : null,
+    set_description:    rule.setDescription   || null,
+    set_category:       rule.setCategory      || null,
+    set_type:           rule.setType          || null,
+    set_account_id:     rule.setAccountId     || null,
+    set_account_to_id:  rule.setAccountToId   || null,
+    set_notes:          rule.setNotes         || null,
+    sort_order:         sortOrder,
+  };
+}
+
+// ─────────────────────────────────────────────
+// Hook
+// ─────────────────────────────────────────────
 export function useImportRules() {
   const [typeRules,     setTypeRules]     = useState<TypeMappingRule[]>([...DEFAULT_NATWEST_TYPES, ...DEFAULT_HALIFAX_TYPES]);
   const [merchantRules, setMerchantRules] = useState<MerchantRule[]>([]);
@@ -85,24 +223,12 @@ export function useImportRules() {
         })));
       }
       if (merchantRes.data && merchantRes.data.length > 0) {
-        setMerchantRules(merchantRes.data.map((r: any) => ({
-          id:               r.id,
-          matchDescription: r.match_description,
-          matchType:        r.match_type,
-          matchAmount:      r.match_amount,
-          contains:         r.contains,
-          setDescription:   r.set_description   || '',
-          setCategory:      r.set_category      || '',
-          setType:          r.set_type          || '',
-          setAccountId:     r.set_account_id    || '',
-          setAccountToId:   r.set_account_to_id || '',
-          setNotes:         r.set_notes         || '',
-        })));
+        setMerchantRules(merchantRes.data.map((r: any) => dbRowToMerchantRule(r)));
       }
       if (transferRes.data && transferRes.data.length > 0) {
         setTransferRules(transferRes.data.map((r: any) => ({
           id:               r.id,
-          label:            r.label            || '',
+          label:            r.label             || '',
           fromDescContains: r.from_desc_contains,
           toDescContains:   r.to_desc_contains,
           toleranceDays:    r.tolerance_days,
@@ -118,8 +244,7 @@ export function useImportRules() {
     setTimeout(() => setSaved(prev => ({ ...prev, [key]: false })), 2000);
   };
 
-  // ─ Manual bulk save (Save button in Rules tab) ─
-
+  // ─ Bulk save — type rules ─
   const saveTypeRules = useCallback(async () => {
     setSaving(prev => ({ ...prev, type: true }));
     const { data: { user } } = await supabase.auth.getUser();
@@ -133,6 +258,7 @@ export function useImportRules() {
     flashSaved('type');
   }, [typeRules]);
 
+  // ─ Bulk save — merchant rules ─
   const saveMerchantRules = useCallback(async () => {
     setSaving(prev => ({ ...prev, merchant: true }));
     const { data: { user } } = await supabase.auth.getUser();
@@ -140,25 +266,13 @@ export function useImportRules() {
     await supabase.from('import_merchant_rules').delete().eq('user_id', user.id);
     const rows = merchantRules
       .filter(r => r.contains)
-      .map((r, i) => ({
-        user_id:           user.id,
-        contains:          r.contains,
-        match_description: r.matchDescription,
-        match_type:        r.matchType,
-        match_amount:      r.matchAmount,
-        set_description:   r.setDescription   || null,
-        set_category:      r.setCategory      || null,
-        set_type:          r.setType          || null,
-        set_account_id:    r.setAccountId     || null,
-        set_account_to_id: r.setAccountToId   || null,
-        set_notes:         r.setNotes         || null,
-        sort_order:        i,
-      }));
+      .map((r, i) => merchantRuleToDbRow(r, user.id, i));
     if (rows.length) await supabase.from('import_merchant_rules').insert(rows);
     setSaving(prev => ({ ...prev, merchant: false }));
     flashSaved('merchant');
   }, [merchantRules]);
 
+  // ─ Bulk save — transfer rules ─
   const saveTransferRules = useCallback(async () => {
     setSaving(prev => ({ ...prev, transfer: true }));
     const { data: { user } } = await supabase.auth.getUser();
@@ -168,7 +282,7 @@ export function useImportRules() {
       .filter(r => r.fromDescContains)
       .map((r, i) => ({
         user_id:            user.id,
-        label:              r.label            || null,
+        label:              r.label             || null,
         from_desc_contains: r.fromDescContains,
         to_desc_contains:   r.toDescContains,
         tolerance_days:     r.toleranceDays,
@@ -180,19 +294,13 @@ export function useImportRules() {
   }, [transferRules]);
 
   /**
-   * Auto-persist a single new merchant rule immediately to Supabase.
-   * Called by the "Create Rule" popup in the Preview tab so rules are
-   * saved without the user needing to manually press the Save button.
-   *
-   * The rule is inserted with sort_order = current length so it goes
-   * to the end of the list. The returned id from Supabase replaces the
-   * temporary client-side id so local state stays in sync.
+   * Auto-persist a single new merchant rule to Supabase immediately.
+   * Called from the CreateRule popup in the Preview tab.
    */
   const persistMerchantRule = useCallback(async (rule: MerchantRule): Promise<MerchantRule> => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return rule; // not authed — rule still lives in local state
+    if (!user) return rule;
 
-    // Use the current count as sort_order so the new rule goes last
     const { data: existing } = await supabase
       .from('import_merchant_rules')
       .select('id')
@@ -201,30 +309,58 @@ export function useImportRules() {
 
     const { data, error } = await supabase
       .from('import_merchant_rules')
-      .insert({
-        user_id:           user.id,
-        contains:          rule.contains,
-        match_description: rule.matchDescription,
-        match_type:        rule.matchType,
-        match_amount:      rule.matchAmount,
-        set_description:   rule.setDescription   || null,
-        set_category:      rule.setCategory      || null,
-        set_type:          rule.setType          || null,
-        set_account_id:    rule.setAccountId     || null,
-        set_account_to_id: rule.setAccountToId   || null,
-        set_notes:         rule.setNotes         || null,
-        sort_order:        sortOrder,
-      })
+      .insert(merchantRuleToDbRow(rule, user.id, sortOrder))
       .select()
       .single();
 
     if (error) {
-      console.error('[useImportRules] failed to persist merchant rule:', error);
+      console.error('[useImportRules] persistMerchantRule:', error);
       return rule;
     }
-
-    // Return the rule with the real DB id so React state is consistent
     return { ...rule, id: data.id };
+  }, []);
+
+  /**
+   * Update (upsert) a single existing merchant rule in Supabase.
+   * Called from EditRuleModal after the user saves edits.
+   */
+  const updateMerchantRule = useCallback(async (rule: MerchantRule): Promise<void> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Get current sort_order for this rule so we don't reset it
+    const { data: existing } = await supabase
+      .from('import_merchant_rules')
+      .select('sort_order')
+      .eq('id', rule.id)
+      .single();
+    const sortOrder = (existing as any)?.sort_order ?? 0;
+
+    const { error } = await supabase
+      .from('import_merchant_rules')
+      .update(merchantRuleToDbRow(rule, user.id, sortOrder))
+      .eq('id', rule.id)
+      .eq('user_id', user.id);
+
+    if (error) {
+      console.error('[useImportRules] updateMerchantRule:', error);
+    }
+  }, []);
+
+  /**
+   * Delete a single merchant rule from Supabase by id.
+   */
+  const deleteMerchantRule = useCallback(async (id: string): Promise<void> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from('import_merchant_rules')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+    if (error) {
+      console.error('[useImportRules] deleteMerchantRule:', error);
+    }
   }, []);
 
   return {
@@ -234,5 +370,7 @@ export function useImportRules() {
     loading, saving, saved,
     saveTypeRules, saveMerchantRules, saveTransferRules,
     persistMerchantRule,
+    updateMerchantRule,
+    deleteMerchantRule,
   };
 }
