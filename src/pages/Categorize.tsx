@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Upload, Plus, Trash2, Save, ChevronDown, ChevronUp,
   ArrowRight, Tag, Shuffle, RefreshCcw,
-  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2
+  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2, Pencil
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
@@ -12,8 +12,11 @@ import {
   TypeMappingRule,
   MerchantRule,
   TransferRule,
+  applyMerchantRules,
+  BLANK_MERCHANT_RULE,
 } from '../hooks/useImportRules';
 import { CustomSelect, SelectGroup } from '../components/CustomSelect';
+import { EditRuleModal } from '../components/EditRuleModal';
 
 // ─────────────────────────────────────────────
 // Types
@@ -64,7 +67,6 @@ const TX_TYPE_OPTIONS: SelectGroup[] = [{
   ],
 }];
 
-// Build account SelectGroup from a flat account list
 function buildAccountGroups(
   assets: { id: string; name: string }[],
   debts: { id: string; name: string }[],
@@ -125,21 +127,14 @@ function parseHalifaxDate(raw: string): string {
   return raw;
 }
 
-/**
- * Sets the From/To accounts based on the sign of the amount and the
- * CSV-level account assignment.  Merchant rules that run afterwards will
- * override these values when a rule has setAccountId / setAccountToId set.
- */
 function assignAccountByDirection(
   rawAmount: number,
   csvAccountId: string,
 ): { resolvedAccountId: string; resolvedAccountToId: string } {
   if (!csvAccountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
   if (rawAmount >= 0) {
-    // Money coming IN to this account
     return { resolvedAccountId: '', resolvedAccountToId: csvAccountId };
   } else {
-    // Money going OUT of this account
     return { resolvedAccountId: csvAccountId, resolvedAccountToId: '' };
   }
 }
@@ -229,38 +224,6 @@ function parseCSV(
   return rows;
 }
 
-/**
- * Apply description-based merchant rules.
- * Rules can set accountId (From) AND accountToId (To) independently, which
- * is the primary fix for credit-card transfer rows not getting accounts.
- */
-function applyMerchantRules(rows: RawRow[], rules: MerchantRule[]): RawRow[] {
-  return rows.map(row => {
-    let r = { ...row };
-    for (const rule of rules) {
-      if (!rule.contains) continue;
-      const descMatch = rule.matchDescription && r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase());
-      if (descMatch) {
-        if (rule.setDescription) r.resolvedDescription = rule.setDescription;
-        if (rule.setCategory)    r.resolvedCategory    = rule.setCategory;
-        if (rule.setType)        r.resolvedType        = rule.setType as TransactionType;
-        if (rule.setAccountId)   r.resolvedAccountId   = rule.setAccountId;
-        if (rule.setAccountToId) r.resolvedAccountToId = rule.setAccountToId;
-        if (rule.setNotes)       r.resolvedNotes       = rule.setNotes;
-        break;
-      }
-    }
-    return r;
-  });
-}
-
-/**
- * Match debit/credit pairs across CSVs into a single logical transfer.
- * The DEBIT side is the canonical record: it gets accountId = source,
- * accountToId = destination, and isTransferCredit = false.
- * The CREDIT side gets isTransferCredit = true so handleImport will skip it
- * — that way only ONE transaction is saved per transfer.
- */
 function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] {
   const updated = rows.map(r => ({
     ...r,
@@ -284,8 +247,6 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
       if (match) {
         const di = updated.findIndex(r => r.id === debit.id);
         const ci = updated.findIndex(r => r.id === match.id);
-
-        // Debit side = the transfer record we keep
         updated[di] = {
           ...updated[di],
           isTransfer: true,
@@ -294,13 +255,9 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
           resolvedType: 'transfer',
           resolvedCategory: 'Transfer',
           resolvedDescription: `Transfer to ${match.bankType === 'natwest' ? 'NatWest' : 'Halifax'}`,
-          // From = the account the debit belongs to
           resolvedAccountId: updated[di].resolvedAccountId || updated[di].resolvedAccountToId,
-          // To = the account the credit belongs to
           resolvedAccountToId: updated[ci].resolvedAccountToId || updated[ci].resolvedAccountId,
         };
-
-        // Credit side = mirror row — mark for skipping on import
         updated[ci] = {
           ...updated[ci],
           isTransfer: true,
@@ -364,6 +321,8 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
       matchType,
       matchAmount,
       contains,
+      matchTypeValue:   '',
+      matchAmountValue: '',
       setDescription,
       setCategory,
       setType,
@@ -455,7 +414,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
                   <datalist id="popup-cats">{categories.map((c,i) => <option key={i} value={c} />)}</datalist>
                 </div>
               </div>
-              {/* Rule popup dropdowns: px-3 py-2 text-xs to match the inputs above */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">Type</label>
@@ -661,7 +619,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
               {cfg.csvName}
             </span>
             <ArrowRight size={12} className="text-iron-dust shrink-0" />
-            {/* Account select: px-2 py-1.5 text-xs to match surrounding elements */}
             <div className="w-48">
               <CustomSelect
                 value={cfg.accountId}
@@ -691,7 +648,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
             {cfg.headers.length > 0 && cfg.amountColumns === 1 && (
               <>
                 <span className="text-[10px] text-iron-dust font-mono">Amount col:</span>
-                {/* Column selects: px-2 py-1.5 text-xs */}
                 <div className="w-36">
                   <CustomSelect
                     value={cfg.amountCol}
@@ -734,8 +690,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
           {cfgIdx < csvConfigs.length - 1 && <hr className="border-white/5" />}
         </div>
       ))}
-
-      {/* Add more CSVs */}
       <div
         onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) onAddMore(e.dataTransfer.files); }}
         onDragOver={e => { e.preventDefault(); setDragging(true); }}
@@ -750,7 +704,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
         <input ref={addMoreRef} type="file" accept=".csv" multiple className="hidden"
           onChange={e => { if (e.target.files?.length) { onAddMore(e.target.files); e.target.value = ''; } }} />
       </div>
-
       <p className="text-[10px] text-iron-dust/50 font-mono">(you can still override account per-row in the preview below)</p>
     </div>
   );
@@ -768,6 +721,8 @@ export const Categorize: React.FC = () => {
     loading, saving, saved,
     saveTypeRules, saveMerchantRules, saveTransferRules,
     persistMerchantRule,
+    updateMerchantRule:  dbUpdateMerchantRule,
+    deleteMerchantRule:  dbDeleteMerchantRule,
   } = useImportRules();
 
   const [rows,          setRows]          = useState<RawRow[]>([]);
@@ -778,6 +733,7 @@ export const Categorize: React.FC = () => {
   const [filterType,    setFilterType]    = useState<string>('all');
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [rulePopup,     setRulePopup]     = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
+  const [editingRule,   setEditingRule]   = useState<MerchantRule | null>(null);
   const [csvConfigs,    setCsvConfigs]    = useState<CsvConfig[]>([]);
   const pendingCsvsRef = useRef<Map<string, string>>(new Map());
   const [pendingCsvs,  setPendingCsvs]   = useState<{ name: string; text: string }[]>([]);
@@ -811,9 +767,7 @@ export const Categorize: React.FC = () => {
   const stats = useMemo(() => ({
     total:     rows.length,
     skipped:   rows.filter(r => r.skip).length,
-    // Only count the debit-side of matched pairs in the transfer stat
     transfers: rows.filter(r => r.isTransfer && !r.isTransferCredit).length,
-    // Importable = not manually skipped AND not the credit mirror of a transfer pair
     toImport:  rows.filter(r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId)).length,
   }), [rows]);
 
@@ -848,7 +802,7 @@ export const Categorize: React.FC = () => {
     for (const csv of csvs) {
       const cfg = configs.find(c => c.csvName === csv.name) || null;
       let parsed = parseCSV(csv.text, csv.name, typeRulesRef.current, cfg);
-      parsed = applyMerchantRules(parsed, merchantRulesRef.current);
+      parsed = applyMerchantRules(parsed as any, merchantRulesRef.current) as RawRow[];
       allRowsArr.push(...parsed);
     }
     return applyTransferMatching(allRowsArr, transferRulesRef.current);
@@ -909,7 +863,7 @@ export const Categorize: React.FC = () => {
         const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (r.rawAmount >= 0 ? 'income' : 'expense');
         return { ...r, resolvedType };
       });
-      updated = applyMerchantRules(updated, merchantRules);
+      updated = applyMerchantRules(updated as any, merchantRules) as RawRow[];
       updated = applyTransferMatching(updated, transferRules);
       return updated;
     });
@@ -923,12 +877,6 @@ export const Categorize: React.FC = () => {
 
   const handleImport = async () => {
     setImporting(true);
-    /**
-     * Only import rows that:
-     *  - are not manually skipped
-     *  - are NOT the credit mirror of a matched transfer pair (isTransferCredit)
-     *  - have at least one account (From or To)
-     */
     const toImport = rows.filter(
       r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId),
     );
@@ -940,8 +888,6 @@ export const Categorize: React.FC = () => {
         amount:      row.rawAmount,
         type:        row.resolvedType,
         category:    row.resolvedCategory || 'General',
-        // accountId is the FROM account; for income-only rows it may be blank
-        // and accountToId carries the destination.
         accountId:    row.resolvedAccountId || '',
         accountToId:  row.resolvedAccountToId || undefined,
         notes:        row.resolvedNotes || undefined,
@@ -961,10 +907,28 @@ export const Categorize: React.FC = () => {
   const removeTypeRule = (id: string) => setTypeRules(prev => prev.filter(r => r.id !== id));
   const updateTypeRule = (id: string, patch: Partial<TypeMappingRule>) => setTypeRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  const BLANK_MERCHANT: MerchantRule = { id: '', matchDescription: true, matchType: false, matchAmount: false, contains: '', setDescription: '', setCategory: '', setType: '', setAccountId: '', setAccountToId: '', setNotes: '' };
-  const addMerchantRule    = () => setMerchantRules(prev => [...prev, { ...BLANK_MERCHANT, id: `mr-${Date.now()}` }]);
-  const removeMerchantRule = (id: string) => setMerchantRules(prev => prev.filter(r => r.id !== id));
-  const updateMerchantRule = (id: string, patch: Partial<MerchantRule>) => setMerchantRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  // ── Description rule helpers ──────────────────────────────────────────
+  const addMerchantRule = () =>
+    setMerchantRules(prev => [...prev, { ...BLANK_MERCHANT_RULE, id: `mr-${Date.now()}` }]);
+
+  const removeMerchantRule = async (id: string) => {
+    setMerchantRules(prev => prev.filter(r => r.id !== id));
+    await dbDeleteMerchantRule(id);
+  };
+
+  const patchMerchantRule = (id: string, patch: Partial<MerchantRule>) =>
+    setMerchantRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+
+  /** Called by EditRuleModal → saves full rule locally + to DB */
+  const handleEditRuleSave = useCallback(async (updated: MerchantRule) => {
+    setMerchantRules(prev => prev.map(r => r.id === updated.id ? updated : r));
+    setEditingRule(null);
+    await dbUpdateMerchantRule(updated);
+    // re-apply rules to live preview rows if any are loaded
+    if (rows.length > 0) {
+      setRows(prev => applyMerchantRules(prev as any, [updated, ...merchantRules.filter(r => r.id !== updated.id)]) as RawRow[]);
+    }
+  }, [dbUpdateMerchantRule, rows.length, merchantRules]);
 
   const addTransferRule    = () => setTransferRules(prev => [...prev, { id: `tfr-${Date.now()}`, label: '', fromDescContains: '', toDescContains: '', toleranceDays: 2 }]);
   const removeTransferRule = (id: string) => setTransferRules(prev => prev.filter(r => r.id !== id));
@@ -974,7 +938,7 @@ export const Categorize: React.FC = () => {
     const updatedRules = [...merchantRules, rule];
     setMerchantRules(updatedRules);
     setRulePopup(null);
-    setRows(prev => applyMerchantRules(prev, updatedRules));
+    setRows(prev => applyMerchantRules(prev as any, updatedRules) as RawRow[]);
     const persisted = await persistMerchantRule(rule);
     if (persisted.id !== rule.id) {
       setMerchantRules(prev => prev.map(r => r.id === rule.id ? { ...r, id: persisted.id } : r));
@@ -1016,7 +980,6 @@ export const Categorize: React.FC = () => {
         {activeTab === 'rules' && (
           <div className="space-y-4">
 
-            {/* TYPE CODE RULES — neighbouring input is px-2 py-2 text-xs */}
             <SectionCard
               title="Type Code → Transaction Type"
               subtitle="Map your bank's type codes (BAC, D/D, SO…) to Lithos types"
@@ -1051,10 +1014,10 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            {/* DESCRIPTION RULES — neighbouring inputs are px-2 py-1.5 text-xs */}
+            {/* DESCRIPTION RULES */}
             <SectionCard
               title="Description Rules"
-              subtitle="Auto-set description, category, type, or accounts when a keyword is matched"
+              subtitle="Auto-set description, category, type, or accounts when conditions are matched"
               icon={<Tag size={14} />}
               onSave={saveMerchantRules}
               saving={saving['merchant']}
@@ -1063,55 +1026,86 @@ export const Categorize: React.FC = () => {
                 <p className="text-iron-dust text-xs font-mono mb-2">No rules yet — add one or create from the preview table.</p>
               ) : (
                 <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
-                  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] mb-2 gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
+                  {/* Table header */}
+                  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_3.5rem] gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
                     {['Contains', 'Set Description', 'Category', 'Type', 'Acct From', 'Acct To', ''].map((h, i) => (
                       <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
                     ))}
                   </div>
-                  {merchantRules.map(rule => (
-                    <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] gap-2 items-center px-3 pb-2 hover:bg-white/[0.02] transition-colors">
-                      <input value={rule.contains}
-                        onChange={e => updateMerchantRule(rule.id, { contains: e.target.value })}
-                        placeholder="e.g. DENPLAN"
-                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                      <input value={rule.setDescription}
-                        onChange={e => updateMerchantRule(rule.id, { setDescription: e.target.value })}
-                        placeholder="e.g. Denplan"
-                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                      <input list={`cats-${rule.id}`} value={rule.setCategory}
-                        onChange={e => updateMerchantRule(rule.id, { setCategory: e.target.value })}
-                        placeholder="e.g. Health"
-                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                      <datalist id={`cats-${rule.id}`}>{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
-                      <CustomSelect
-                        value={rule.setType}
-                        onChange={v => updateMerchantRule(rule.id, { setType: v as TransactionType | '' })}
-                        groups={[{ options: [{ value: '', label: '— keep —' }, ...TX_TYPE_OPTIONS[0].options] }]}
-                        placeholder="— keep —"
-                        triggerClassName="px-2 py-1.5 text-xs"
-                        maxVisibleItems={8}
-                      />
-                      <CustomSelect
-                        value={rule.setAccountId}
-                        onChange={v => updateMerchantRule(rule.id, { setAccountId: v })}
-                        groups={buildAccountGroups(data.assets, data.debts, '— any —')}
-                        placeholder="— any —"
-                        triggerClassName="px-2 py-1.5 text-xs"
-                        maxVisibleItems={8}
-                      />
-                      <CustomSelect
-                        value={rule.setAccountToId}
-                        onChange={v => updateMerchantRule(rule.id, { setAccountToId: v })}
-                        groups={buildAccountGroups(data.assets, data.debts, '— none —')}
-                        placeholder="— none —"
-                        triggerClassName="px-2 py-1.5 text-xs"
-                        maxVisibleItems={8}
-                      />
-                      <button onClick={() => removeMerchantRule(rule.id)} className="text-iron-dust hover:text-magma transition-colors flex items-center justify-center">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
+                  {merchantRules.map(rule => {
+                    // Build a readable summary of active match conditions
+                    const conditions: string[] = [];
+                    if (rule.matchDescription) conditions.push(`desc∋"${rule.contains}"`);
+                    if (rule.matchType && rule.matchTypeValue) conditions.push(`type=${rule.matchTypeValue}`);
+                    if (rule.matchAmount && rule.matchAmountValue !== '') conditions.push(`amt=${rule.matchAmountValue}`);
+
+                    return (
+                      <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_3.5rem] gap-2 items-center px-3 pb-2 pt-1 hover:bg-white/[0.02] transition-colors">
+                        {/* Contains — show conditions badge if more than just desc */}
+                        <div>
+                          <input value={rule.contains}
+                            onChange={e => patchMerchantRule(rule.id, { contains: e.target.value })}
+                            placeholder="e.g. DENPLAN"
+                            className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                          {conditions.length > 1 && (
+                            <div className="flex flex-wrap gap-1 mt-0.5">
+                              {conditions.map((c, i) => (
+                                <span key={i} className="text-[8px] font-mono px-1 py-0.5 bg-magma/10 border border-magma/20 text-magma/80 rounded-sm">{c}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <input value={rule.setDescription}
+                          onChange={e => patchMerchantRule(rule.id, { setDescription: e.target.value })}
+                          placeholder="e.g. Denplan"
+                          className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                        <input list={`cats-${rule.id}`} value={rule.setCategory}
+                          onChange={e => patchMerchantRule(rule.id, { setCategory: e.target.value })}
+                          placeholder="e.g. Health"
+                          className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                        <datalist id={`cats-${rule.id}`}>{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
+                        <CustomSelect
+                          value={rule.setType}
+                          onChange={v => patchMerchantRule(rule.id, { setType: v as TransactionType | '' })}
+                          groups={[{ options: [{ value: '', label: '— keep —' }, ...TX_TYPE_OPTIONS[0].options] }]}
+                          placeholder="— keep —"
+                          triggerClassName="px-2 py-1.5 text-xs"
+                          maxVisibleItems={8}
+                        />
+                        <CustomSelect
+                          value={rule.setAccountId}
+                          onChange={v => patchMerchantRule(rule.id, { setAccountId: v })}
+                          groups={buildAccountGroups(data.assets, data.debts, '— any —')}
+                          placeholder="— any —"
+                          triggerClassName="px-2 py-1.5 text-xs"
+                          maxVisibleItems={8}
+                        />
+                        <CustomSelect
+                          value={rule.setAccountToId}
+                          onChange={v => patchMerchantRule(rule.id, { setAccountToId: v })}
+                          groups={buildAccountGroups(data.assets, data.debts, '— none —')}
+                          placeholder="— none —"
+                          triggerClassName="px-2 py-1.5 text-xs"
+                          maxVisibleItems={8}
+                        />
+                        {/* Action buttons: pencil (edit) + trash (delete) */}
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            onClick={() => setEditingRule(rule)}
+                            title="Edit rule"
+                            className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-white border border-white/10 hover:border-white/20 rounded-sm transition-colors">
+                            <Pencil size={10} />
+                          </button>
+                          <button
+                            onClick={() => removeMerchantRule(rule.id)}
+                            title="Delete rule"
+                            className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-magma border border-white/10 hover:border-magma/30 rounded-sm transition-colors">
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <button onClick={addMerchantRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
@@ -1222,7 +1216,6 @@ export const Categorize: React.FC = () => {
                   onAddMore={handleAddMore}
                 />
 
-                {/* BULK OVERRIDE — px-2 py-1 text-xs (tightest context) */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -1247,26 +1240,13 @@ export const Categorize: React.FC = () => {
                   </div>
                 )}
 
-                {/* FILTER BAR — default p-3 text-sm is fine here */}
                 <div className="flex items-center gap-3">
                   <Filter size={12} className="text-iron-dust" />
                   <div className="w-40">
-                    <CustomSelect
-                      value={filterType}
-                      onChange={setFilterType}
-                      groups={filterTypeGroups}
-                      placeholder="All Types"
-                      maxVisibleItems={8}
-                    />
+                    <CustomSelect value={filterType} onChange={setFilterType} groups={filterTypeGroups} placeholder="All Types" maxVisibleItems={8} />
                   </div>
                   <div className="w-48">
-                    <CustomSelect
-                      value={filterAccount}
-                      onChange={setFilterAccount}
-                      groups={filterAccountGroups}
-                      placeholder="All Accounts"
-                      maxVisibleItems={8}
-                    />
+                    <CustomSelect value={filterAccount} onChange={setFilterAccount} groups={filterAccountGroups} placeholder="All Accounts" maxVisibleItems={8} />
                   </div>
                   <span className="text-xs text-iron-dust font-mono ml-auto">{visibleRows.length} rows shown</span>
                   <button onClick={reapplyRules}
@@ -1275,7 +1255,6 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
-                {/* PREVIEW TABLE — Acct From/To cells: px-2 py-1.5 text-xs */}
                 <div className="border border-white/10 rounded-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1303,7 +1282,7 @@ export const Categorize: React.FC = () => {
                             className={clsx(
                               'border-b border-white/5 transition-colors',
                               row.skip            ? 'opacity-30 bg-black/20' :
-                              row.isTransferCredit? 'opacity-40 bg-white/[0.01]' : // mirror row — dimmed
+                              row.isTransferCredit? 'opacity-40 bg-white/[0.01]' :
                               row.isTransfer      ? 'bg-blue-500/5 hover:bg-blue-500/10' :
                               idx % 2 === 0       ? 'bg-transparent hover:bg-white/[0.02]' : 'bg-white/[0.01] hover:bg-white/[0.03]'
                             )}>
@@ -1335,26 +1314,14 @@ export const Categorize: React.FC = () => {
                             </td>
                             <td className="px-3 py-2">
                               <div className="w-32">
-                                <CustomSelect
-                                  value={row.resolvedAccountId}
-                                  onChange={v => updateRow(row.id, { resolvedAccountId: v })}
-                                  groups={rowAccountGroups}
-                                  placeholder="— assign —"
-                                  triggerClassName="px-2 py-1.5 text-xs"
-                                  maxVisibleItems={8}
-                                />
+                                <CustomSelect value={row.resolvedAccountId} onChange={v => updateRow(row.id, { resolvedAccountId: v })}
+                                  groups={rowAccountGroups} placeholder="— assign —" triggerClassName="px-2 py-1.5 text-xs" maxVisibleItems={8} />
                               </div>
                             </td>
                             <td className="px-3 py-2">
                               <div className="w-32">
-                                <CustomSelect
-                                  value={row.resolvedAccountToId}
-                                  onChange={v => updateRow(row.id, { resolvedAccountToId: v })}
-                                  groups={rowAccountGroups}
-                                  placeholder="— assign —"
-                                  triggerClassName="px-2 py-1.5 text-xs"
-                                  maxVisibleItems={8}
-                                />
+                                <CustomSelect value={row.resolvedAccountToId} onChange={v => updateRow(row.id, { resolvedAccountToId: v })}
+                                  groups={rowAccountGroups} placeholder="— assign —" triggerClassName="px-2 py-1.5 text-xs" maxVisibleItems={8} />
                               </div>
                             </td>
                             <td className={clsx('px-3 py-2 text-right font-mono font-bold text-[11px]',
@@ -1397,6 +1364,7 @@ export const Categorize: React.FC = () => {
         )}
       </div>
 
+      {/* Create Rule popup (from preview table) */}
       {rulePopup && (
         <CreateRulePopup
           row={rulePopup.row}
@@ -1408,6 +1376,18 @@ export const Categorize: React.FC = () => {
           currencySymbol={currencySymbol}
           onConfirm={handleRuleConfirm}
           onDismiss={() => setRulePopup(null)}
+        />
+      )}
+
+      {/* Edit Rule modal (from Description Rules table pencil button) */}
+      {editingRule && (
+        <EditRuleModal
+          rule={editingRule}
+          assets={data.assets}
+          debts={data.debts}
+          categories={uniqueCategories}
+          onSave={handleEditRuleSave}
+          onDismiss={() => setEditingRule(null)}
         />
       )}
     </div>
