@@ -36,6 +36,8 @@ interface RawRow {
   resolvedNotes: string;
   matchedPairId?: string;
   isTransfer: boolean;
+  /** Credit-side of a matched transfer pair — will be skipped on import */
+  isTransferCredit: boolean;
   skip: boolean;
   sourceCsvName: string;
 }
@@ -123,14 +125,21 @@ function parseHalifaxDate(raw: string): string {
   return raw;
 }
 
+/**
+ * Sets the From/To accounts based on the sign of the amount and the
+ * CSV-level account assignment.  Merchant rules that run afterwards will
+ * override these values when a rule has setAccountId / setAccountToId set.
+ */
 function assignAccountByDirection(
   rawAmount: number,
   csvAccountId: string,
 ): { resolvedAccountId: string; resolvedAccountToId: string } {
   if (!csvAccountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
   if (rawAmount >= 0) {
+    // Money coming IN to this account
     return { resolvedAccountId: '', resolvedAccountToId: csvAccountId };
   } else {
+    // Money going OUT of this account
     return { resolvedAccountId: csvAccountId, resolvedAccountToId: '' };
   }
 }
@@ -212,6 +221,7 @@ function parseCSV(
       resolvedAccountToId,
       resolvedNotes: '',
       isTransfer: false,
+      isTransferCredit: false,
       skip: false,
       sourceCsvName: fileName,
     });
@@ -219,6 +229,11 @@ function parseCSV(
   return rows;
 }
 
+/**
+ * Apply description-based merchant rules.
+ * Rules can set accountId (From) AND accountToId (To) independently, which
+ * is the primary fix for credit-card transfer rows not getting accounts.
+ */
 function applyMerchantRules(rows: RawRow[], rules: MerchantRule[]): RawRow[] {
   return rows.map(row => {
     let r = { ...row };
@@ -239,11 +254,25 @@ function applyMerchantRules(rows: RawRow[], rules: MerchantRule[]): RawRow[] {
   });
 }
 
+/**
+ * Match debit/credit pairs across CSVs into a single logical transfer.
+ * The DEBIT side is the canonical record: it gets accountId = source,
+ * accountToId = destination, and isTransferCredit = false.
+ * The CREDIT side gets isTransferCredit = true so handleImport will skip it
+ * — that way only ONE transaction is saved per transfer.
+ */
 function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] {
-  const updated = rows.map(r => ({ ...r, isTransfer: false, matchedPairId: undefined as string | undefined }));
+  const updated = rows.map(r => ({
+    ...r,
+    isTransfer: false,
+    isTransferCredit: false,
+    matchedPairId: undefined as string | undefined,
+  }));
+
   for (const rule of rules) {
-    const debits  = updated.filter(r => r.rawAmount < 0  && r.rawDescription.toUpperCase().includes(rule.fromDescContains.toUpperCase()));
-    const credits = updated.filter(r => r.rawAmount > 0  && r.rawDescription.toUpperCase().includes(rule.toDescContains.toUpperCase()));
+    const debits  = updated.filter(r => r.rawAmount < 0 && r.rawDescription.toUpperCase().includes(rule.fromDescContains.toUpperCase()));
+    const credits = updated.filter(r => r.rawAmount > 0 && r.rawDescription.toUpperCase().includes(rule.toDescContains.toUpperCase()));
+
     for (const debit of debits) {
       const debitDate = new Date(debit.rawDate).getTime();
       const match = credits.find(credit => {
@@ -251,26 +280,35 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
         const daysDiff = Math.abs(debitDate - new Date(credit.rawDate).getTime()) / 86400000;
         return Math.abs(Math.abs(credit.rawAmount) - Math.abs(debit.rawAmount)) < 0.02 && daysDiff <= rule.toleranceDays;
       });
+
       if (match) {
         const di = updated.findIndex(r => r.id === debit.id);
         const ci = updated.findIndex(r => r.id === match.id);
+
+        // Debit side = the transfer record we keep
         updated[di] = {
           ...updated[di],
           isTransfer: true,
+          isTransferCredit: false,
           matchedPairId: match.id,
           resolvedType: 'transfer',
           resolvedCategory: 'Transfer',
           resolvedDescription: `Transfer to ${match.bankType === 'natwest' ? 'NatWest' : 'Halifax'}`,
+          // From = the account the debit belongs to
+          resolvedAccountId: updated[di].resolvedAccountId || updated[di].resolvedAccountToId,
+          // To = the account the credit belongs to
           resolvedAccountToId: updated[ci].resolvedAccountToId || updated[ci].resolvedAccountId,
         };
+
+        // Credit side = mirror row — mark for skipping on import
         updated[ci] = {
           ...updated[ci],
           isTransfer: true,
+          isTransferCredit: true,
           matchedPairId: debit.id,
           resolvedType: 'transfer',
           resolvedCategory: 'Transfer',
           resolvedDescription: `Transfer from ${debit.bankType === 'halifax' ? 'Halifax' : 'NatWest'}`,
-          resolvedAccountId: updated[di].resolvedAccountId || updated[di].resolvedAccountToId,
         };
       }
     }
@@ -304,7 +342,7 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   const [setCategory,      setSetCategory]      = useState(field === 'category' ? row.resolvedCategory : '');
   const [setType,          setSetType]          = useState<TransactionType | ''>(field === 'type' ? row.resolvedType : '');
   const [setAccountId,     setSetAccountId]     = useState(row.resolvedAccountId || '');
-  const [setAccountToId,   setSetAccountToId]   = useState('');
+  const [setAccountToId,   setSetAccountToId]   = useState(row.resolvedAccountToId || '');
   const [setNotes,         setSetNotes]         = useState(field === 'notes' ? row.resolvedNotes : '');
 
   const isIncome = row.rawAmount >= 0;
@@ -773,8 +811,10 @@ export const Categorize: React.FC = () => {
   const stats = useMemo(() => ({
     total:     rows.length,
     skipped:   rows.filter(r => r.skip).length,
-    transfers: rows.filter(r => r.isTransfer).length,
-    toImport:  rows.filter(r => !r.skip).length,
+    // Only count the debit-side of matched pairs in the transfer stat
+    transfers: rows.filter(r => r.isTransfer && !r.isTransferCredit).length,
+    // Importable = not manually skipped AND not the credit mirror of a transfer pair
+    toImport:  rows.filter(r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId)).length,
   }), [rows]);
 
   const buildInitialConfig = (name: string, text: string): CsvConfig => {
@@ -883,7 +923,15 @@ export const Categorize: React.FC = () => {
 
   const handleImport = async () => {
     setImporting(true);
-    const toImport = rows.filter(r => !r.skip && (r.resolvedAccountId || r.resolvedAccountToId));
+    /**
+     * Only import rows that:
+     *  - are not manually skipped
+     *  - are NOT the credit mirror of a matched transfer pair (isTransferCredit)
+     *  - have at least one account (From or To)
+     */
+    const toImport = rows.filter(
+      r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId),
+    );
     let count = 0;
     for (const row of toImport) {
       await addTransaction({
@@ -892,8 +940,11 @@ export const Categorize: React.FC = () => {
         amount:      row.rawAmount,
         type:        row.resolvedType,
         category:    row.resolvedCategory || 'General',
-        accountId:   row.resolvedAccountId || row.resolvedAccountToId,
-        notes:       row.resolvedNotes || undefined,
+        // accountId is the FROM account; for income-only rows it may be blank
+        // and accountToId carries the destination.
+        accountId:    row.resolvedAccountId || '',
+        accountToId:  row.resolvedAccountToId || undefined,
+        notes:        row.resolvedNotes || undefined,
       });
       count++;
     }
@@ -1251,9 +1302,10 @@ export const Categorize: React.FC = () => {
                           <tr key={row.id}
                             className={clsx(
                               'border-b border-white/5 transition-colors',
-                              row.skip       ? 'opacity-30 bg-black/20' :
-                              row.isTransfer ? 'bg-blue-500/5 hover:bg-blue-500/10' :
-                              idx % 2 === 0  ? 'bg-transparent hover:bg-white/[0.02]' : 'bg-white/[0.01] hover:bg-white/[0.03]'
+                              row.skip            ? 'opacity-30 bg-black/20' :
+                              row.isTransferCredit? 'opacity-40 bg-white/[0.01]' : // mirror row — dimmed
+                              row.isTransfer      ? 'bg-blue-500/5 hover:bg-blue-500/10' :
+                              idx % 2 === 0       ? 'bg-transparent hover:bg-white/[0.02]' : 'bg-white/[0.01] hover:bg-white/[0.03]'
                             )}>
                             <td className="px-3 py-2 text-iron-dust/40 font-mono text-[10px]">{idx + 1}</td>
                             <td className="px-3 py-2 font-mono text-iron-dust text-[11px] whitespace-nowrap">{row.rawDate}</td>
@@ -1263,7 +1315,8 @@ export const Categorize: React.FC = () => {
                             <td className="px-3 py-2 max-w-[220px]">
                               <EditableCell value={row.resolvedDescription} onSave={v => updateRow(row.id, { resolvedDescription: v })}
                                 className="text-white text-[11px]" showRulePrompt onCreateRule={() => setRulePopup({ row, field: 'description' })} />
-                              {row.isTransfer && <span className="text-[9px] font-mono text-blue-400 block mt-0.5">↔ transfer match</span>}
+                              {row.isTransfer && !row.isTransferCredit && <span className="text-[9px] font-mono text-blue-400 block mt-0.5">↔ transfer (debit side)</span>}
+                              {row.isTransferCredit && <span className="text-[9px] font-mono text-white/30 block mt-0.5">↔ mirror — will be skipped</span>}
                             </td>
                             <td className="px-3 py-2">
                               <EditableCell value={row.resolvedCategory} onSave={v => updateRow(row.id, { resolvedCategory: v })}
@@ -1325,7 +1378,7 @@ export const Categorize: React.FC = () => {
                 <div className="flex items-center justify-between bg-[#131517] border border-white/10 rounded-sm p-4">
                   <div>
                     <p className="text-sm font-bold text-white">{stats.toImport} transactions ready to import</p>
-                    {rows.some(r => !r.skip && !r.resolvedAccountId && !r.resolvedAccountToId) && (
+                    {rows.some(r => !r.skip && !r.isTransferCredit && !r.resolvedAccountId && !r.resolvedAccountToId) && (
                       <p className="text-xs text-amber-400 flex items-center gap-1.5 mt-1">
                         <AlertCircle size={11} /> Some rows have no account assigned and will be skipped.
                       </p>
