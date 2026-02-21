@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { AssetType, Currency, DebtType, MinPaymentType, Debt, Asset } from '../data/mockData';
 import { clsx } from 'clsx';
+import { CustomSelect, SelectGroup } from './CustomSelect';
 
 type ModalMode = 'asset' | 'debt';
 
@@ -16,6 +17,16 @@ interface AddAccountModalProps {
 }
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
+
+const CURRENCY_OPTIONS: SelectGroup[] = [
+  {
+    options: [
+      { value: 'GBP', label: 'GBP', hint: '£' },
+      { value: 'USD', label: 'USD', hint: '$' },
+      { value: 'EUR', label: 'EUR', hint: '€' },
+    ],
+  },
+];
 
 export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   isOpen,
@@ -254,15 +265,12 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
             {mode === 'asset' && (
               <div>
                 <label className="block text-[10px] font-mono text-iron-dust uppercase tracking-[2px] mb-2">Currency</label>
-                <select
+                <CustomSelect
                   value={currency}
-                  onChange={e => setCurrency(e.target.value as Currency)}
-                  className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none"
-                >
-                  <option value="GBP">GBP (£)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                </select>
+                  onChange={v => setCurrency(v as Currency)}
+                  groups={CURRENCY_OPTIONS}
+                  placeholder="Select currency..."
+                />
               </div>
             )}
 
