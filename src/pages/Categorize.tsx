@@ -1018,11 +1018,11 @@ export const Categorize: React.FC = () => {
                     ))}
                   </div>
                   {merchantRules.map(rule => (
-                    <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] gap-2 items-center px-3 py-2 hover:bg-white/[0.02] transition-colors">
+                    <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] gap-2 items-center px-3 py-1 hover:bg-white/[0.02] transition-colors">
                       <input value={rule.contains}
                         onChange={e => updateMerchantRule(rule.id, { contains: e.target.value })}
                         placeholder="e.g. DENPLAN"
-                        className="w-full bg-black/30 border border-white/10 px-2 py-0 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
                       <input value={rule.setDescription}
                         onChange={e => updateMerchantRule(rule.id, { setDescription: e.target.value })}
                         placeholder="e.g. Denplan"
