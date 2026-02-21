@@ -893,13 +893,19 @@ export const Categorize: React.FC = () => {
       const debtIdSet = new Set(data.debts.map(d => d.id));
 
       const records = toImport.map(row => {
-        const isDebt = debtIdSet.has(row.resolvedAccountId);
+        // Income rows have resolvedAccountId='' and resolvedAccountToId=csvAccountId
+        // (set by assignAccountByDirection). Fall back to resolvedAccountToId so that
+        // account_id / debt_id is always populated and satisfies the DB check constraint
+        // transactions_account_or_debt_required.
+        const primaryId = row.resolvedAccountId || row.resolvedAccountToId;
+        const isPrimaryDebt = debtIdSet.has(primaryId);
+
         // Dates from CSV parsers are already yyyy-MM-dd — slice to be safe
         const date = row.rawDate ? row.rawDate.substring(0, 10) : row.rawDate;
         return {
           user_id:        session.user.id,
-          account_id:     isDebt ? null : (row.resolvedAccountId || null),
-          debt_id:        isDebt ? row.resolvedAccountId : null,
+          account_id:     isPrimaryDebt ? null : (primaryId || null),
+          debt_id:        isPrimaryDebt ? primaryId : null,
           account_to_id:  row.resolvedAccountToId || null,
           date,
           description:    row.resolvedDescription || row.rawDescription,
