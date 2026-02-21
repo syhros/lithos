@@ -1,11 +1,9 @@
-/**
- * SmartSearchBar
- *
- * A search input with live autocomplete for field prefixes,
- * account names, type values, and operator tokens (*& and */).
- *
- * Pressing Tab / clicking a suggestion inserts it into the query.
- */
+// SmartSearchBar
+//
+// A search input with live autocomplete for field prefixes,
+// account names, type values, and operator tokens (*& and */).
+//
+// Pressing Tab / clicking a suggestion inserts it into the query.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -25,7 +23,7 @@ const OPERATORS = [
 const TYPE_VALUES = ['income', 'expense', 'investing', 'transfer', 'debt_payment'];
 
 interface Suggestion {
-  insert: string;   // text to insert / replace the current word
+  insert: string;
   label:  string;
   hint?:  string;
   kind:   'field' | 'value' | 'operator' | 'account';
@@ -40,41 +38,32 @@ interface Props {
 }
 
 export const SmartSearchBar: React.FC<Props> = ({
-  value, onChange, accounts, categories, placeholder = 'Search or use account: type: category: amount: *& */ …'
+  value, onChange, accounts, categories, placeholder = 'Search… account: type: category: amount: *& */'
 }) => {
   const [open,        setOpen]        = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [highlighted, setHighlighted] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  /* ---------- suggestion engine ---------- */
   const buildSuggestions = useCallback((raw: string): Suggestion[] => {
     const suggs: Suggestion[] = [];
-
-    // Find the current word (from last space to caret)
-    const cursorPos   = inputRef.current?.selectionStart ?? raw.length;
+    const cursorPos    = inputRef.current?.selectionStart ?? raw.length;
     const beforeCursor = raw.slice(0, cursorPos);
     const wordStart    = beforeCursor.lastIndexOf(' ') + 1;
     const currentWord  = beforeCursor.slice(wordStart).toLowerCase();
-
     if (!currentWord) return [];
 
-    // Operators
     OPERATORS.forEach(op => {
-      if (op.label.startsWith(currentWord)) {
+      if (op.label.startsWith(currentWord))
         suggs.push({ insert: op.label, label: op.label, hint: op.hint, kind: 'operator' });
-      }
     });
 
-    // Field prefixes
     FIELD_PREFIXES.forEach(fp => {
-      if (fp.label.startsWith(currentWord) && currentWord !== fp.label) {
+      if (fp.label.startsWith(currentWord) && currentWord !== fp.label)
         suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field' });
-      }
     });
 
-    // Values after a known field:
     const fieldMatch = beforeCursor.match(/(?:^|\s)(account|type|category|amount):(\S*)$/);
     if (fieldMatch) {
       const field   = fieldMatch[1];
@@ -83,11 +72,7 @@ export const SmartSearchBar: React.FC<Props> = ({
         accounts
           .filter(a => a.name.toLowerCase().includes(partial))
           .slice(0, 8)
-          .forEach(a => suggs.push({
-            insert: `account:"${a.name}"`,
-            label:  a.name,
-            kind:   'account',
-          }));
+          .forEach(a => suggs.push({ insert: `account:"${a.name}"`, label: a.name, kind: 'account' }));
       } else if (field === 'type') {
         TYPE_VALUES
           .filter(t => t.includes(partial))
@@ -99,7 +84,6 @@ export const SmartSearchBar: React.FC<Props> = ({
           .forEach(c => suggs.push({ insert: `category:"${c}"`, label: c, kind: 'value' }));
       }
     }
-
     return suggs;
   }, [accounts, categories]);
 
@@ -110,38 +94,25 @@ export const SmartSearchBar: React.FC<Props> = ({
     setOpen(s.length > 0);
   }, [value, buildSuggestions]);
 
-  /* ---------- insertion ---------- */
   const insertSuggestion = (sugg: Suggestion) => {
     const cursorPos    = inputRef.current?.selectionStart ?? value.length;
     const beforeCursor = value.slice(0, cursorPos);
     const afterCursor  = value.slice(cursorPos);
     const wordStart    = beforeCursor.lastIndexOf(' ') + 1;
-
-    // If inserting a full field:value, replace just the field portion
-    const fieldMatch = beforeCursor.match(/(?:^|\s)(account|type|category|amount):(\S*)$/);
-    const replaceFrom = fieldMatch
-      ? wordStart  // replace from the start of `field:partial`
-      : wordStart; // replace from the start of the current partial word
-
-    const newVal = value.slice(0, replaceFrom) + sugg.insert + ' ' + afterCursor.trimStart();
+    const newVal = value.slice(0, wordStart) + sugg.insert + ' ' + afterCursor.trimStart();
     onChange(newVal.trimEnd() + ' ');
     setOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  /* ---------- keyboard ---------- */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open || suggestions.length === 0) return;
     if (e.key === 'ArrowDown')  { e.preventDefault(); setHighlighted(h => Math.min(h + 1, suggestions.length - 1)); }
     if (e.key === 'ArrowUp')    { e.preventDefault(); setHighlighted(h => Math.max(h - 1, 0)); }
-    if (e.key === 'Tab' || e.key === 'Enter') {
-      e.preventDefault();
-      insertSuggestion(suggestions[highlighted]);
-    }
+    if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); insertSuggestion(suggestions[highlighted]); }
     if (e.key === 'Escape') setOpen(false);
   };
 
-  /* ---------- click outside ---------- */
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
@@ -173,8 +144,7 @@ export const SmartSearchBar: React.FC<Props> = ({
       {value && (
         <button
           onClick={() => { onChange(''); inputRef.current?.focus(); }}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-iron-dust hover:text-white transition-colors"
-        >
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-iron-dust hover:text-white transition-colors">
           <X size={13} />
         </button>
       )}
@@ -192,8 +162,7 @@ export const SmartSearchBar: React.FC<Props> = ({
                   className={clsx(
                     'w-full flex items-center gap-3 px-3 py-2 text-xs text-left transition-colors',
                     i === highlighted ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
-                  )}
-                >
+                  )}>
                   <span className={clsx('font-mono font-bold', kindColour[s.kind])}>{s.label}</span>
                   {s.hint && <span className="text-iron-dust/60 text-[10px]">{s.hint}</span>}
                 </button>

@@ -1,21 +1,19 @@
-/**
- * useSmartSearch
- *
- * Parses a smart search string into structured tokens, then filters a
- * transaction list against them.
- *
- * Syntax:
- *   plain text          → fuzzy match description or category
- *   account:value       → match account name (partial)
- *   type:value          → match transaction type
- *   category:value      → match category (partial)
- *   amount:value        → match absolute amount (e.g. amount:12.50)
- *   *& token            → AND – next token must ALSO match
- *   */ token            → NOT – next token must NOT match
- *
- * Multiple tokens are ANDed by default.
- * Wrap multi-word values in quotes: account:"Halifax Current"
- */
+// useSmartSearch
+//
+// Parses a smart search string into structured tokens, then filters a
+// transaction list against them.
+//
+// Syntax:
+//   plain text          -> fuzzy match description, category, or account name
+//   account:value       -> match account name (partial)
+//   type:value          -> match transaction type
+//   category:value      -> match category (partial)
+//   amount:value        -> match absolute amount (e.g. amount:12.50)
+//   *& token            -> AND - next token must ALSO match
+//   */ token            -> NOT - next token must NOT match
+//
+// Multiple tokens are ANDed by default.
+// Wrap multi-word values in quotes: account:"Halifax Current"
 import { useMemo } from 'react';
 import { Transaction } from '../data/mockData';
 
@@ -23,15 +21,13 @@ export type TokenType = 'text' | 'account' | 'type' | 'category' | 'amount';
 export type Modifier  = 'and' | 'not' | null;
 
 export interface SearchToken {
-  modifier: Modifier;   // null = plain AND
+  modifier: Modifier;
   field:    TokenType;
   value:    string;
 }
 
-/** Tokenise a smart search query string. */
 export function parseSearchQuery(raw: string): SearchToken[] {
   const tokens: SearchToken[] = [];
-  // Lex: split on spaces but respect quoted strings
   const parts: string[] = [];
   const lexRe = /"[^"]*"|\S+/g;
   let m: RegExpExecArray | null;
@@ -40,18 +36,12 @@ export function parseSearchQuery(raw: string): SearchToken[] {
   let i = 0;
   while (i < parts.length) {
     const part = parts[i];
-
-    // Modifier sentinel
     if (part === '*&' || part === '*/') {
       const mod: Modifier = part === '*&' ? 'and' : 'not';
       i++;
-      if (i < parts.length) {
-        tokens.push(buildToken(mod, parts[i]));
-        i++;
-      }
+      if (i < parts.length) { tokens.push(buildToken(mod, parts[i])); i++; }
       continue;
     }
-
     tokens.push(buildToken(null, part));
     i++;
   }
@@ -71,7 +61,6 @@ function buildToken(modifier: Modifier, raw: string): SearchToken {
   return { modifier, field: 'text', value: unquote(raw) };
 }
 
-/** Apply parsed tokens to a single transaction. Returns true if it passes all filters. */
 function matchToken(
   token: SearchToken,
   tx: Transaction,
@@ -79,12 +68,9 @@ function matchToken(
 ): boolean {
   const v = token.value.toLowerCase();
   switch (token.field) {
-    case 'account':
-      return accountName.toLowerCase().includes(v);
-    case 'type':
-      return tx.type.toLowerCase().includes(v);
-    case 'category':
-      return tx.category.toLowerCase().includes(v);
+    case 'account':  return accountName.toLowerCase().includes(v);
+    case 'type':     return tx.type.toLowerCase().includes(v);
+    case 'category': return tx.category.toLowerCase().includes(v);
     case 'amount': {
       const n = parseFloat(v);
       return !isNaN(n) && Math.abs(tx.amount) === n;
@@ -105,22 +91,17 @@ export function filterByTokens(
   accountMap: Record<string, string>,
 ): Transaction[] {
   if (tokens.length === 0) return transactions;
-
   return transactions.filter(tx => {
     const accountName = accountMap[tx.accountId ?? ''] ?? '';
     for (const token of tokens) {
       const matches = matchToken(token, tx, accountName);
-      if (token.modifier === 'not') {
-        if (matches) return false; // NOT – must NOT match
-      } else {
-        if (!matches) return false; // AND (default) – must match
-      }
+      if (token.modifier === 'not') { if (matches) return false; }
+      else { if (!matches) return false; }
     }
     return true;
   });
 }
 
-/** Hook: returns filtered + sorted transactions. */
 export function useSmartSearch(
   transactions: Transaction[],
   accountMap: Record<string, string>,
