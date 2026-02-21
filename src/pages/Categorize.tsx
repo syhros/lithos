@@ -1012,7 +1012,7 @@ export const Categorize: React.FC = () => {
                 <p className="text-iron-dust text-xs font-mono mb-2">No rules yet — add one or create from the preview table.</p>
               ) : (
                 <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
-                  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] mb-2 gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
+                  <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] my-2 gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
                     {['Contains', 'Set Description', 'Category', 'Type', 'Acct From', 'Acct To', ''].map((h, i) => (
                       <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
                     ))}
