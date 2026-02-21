@@ -1,13 +1,14 @@
 // useSmartSearch
 //
 // Syntax:
-//   plain text                       -> fuzzy match description, category, or account
-//   account:"Halifax Main",Natwest   -> OR across comma-separated values (quotes respected)
-//   type:expense,income              -> OR across types
-//   category:groceries               -> category filter
-//   amount:12.50                     -> exact absolute amount
-//   #  token                         -> AND  (next token must also match)
-//   /  token                         -> EXCLUDE (next token must not match)
+//   plain text                         -> fuzzy match description, category, or account
+//   account: "Halifax Main", Natwest   -> spaces around : and , are ignored
+//   account:"Halifax Main",Natwest     -> same result
+//   type:expense,income                -> OR across types
+//   category:groceries                 -> category filter
+//   amount:12.50                       -> exact absolute amount
+//   #  token                           -> AND  (next token must also match)
+//   /  token                           -> EXCLUDE (next token must not match)
 import { useMemo } from 'react';
 import { Transaction } from '../data/mockData';
 
@@ -18,6 +19,38 @@ export interface SearchToken {
   modifier: Modifier;
   field:    TokenType;
   values:   string[];   // OR list — any value matching = token matches
+}
+
+// Normalise the raw query string before lexing:
+//   1. Strip spaces after colons that follow a known field name
+//      e.g. "account: halifax" -> "account:halifax"
+//   2. Strip spaces around commas inside a field:value token
+//      e.g. "account:halifax , natwest" -> "account:halifax,natwest"
+//
+// We only collapse spaces inside tokens, not between them, so free-text
+// searches with spaces still work.
+function normaliseQuery(raw: string): string {
+  // Step 1: remove spaces immediately after a field colon
+  // Matches: (account|type|category|amount) : <spaces>
+  let out = raw.replace(
+    /\b(account|type|category|amount)\s*:\s*/gi,
+    (_, field) => field.toLowerCase() + ':'
+  );
+
+  // Step 2: inside each field:... token (up to the next space that is NOT
+  // inside quotes), strip spaces around commas.
+  // We do this by processing the string token-by-token.
+  const knownFields = ['account', 'type', 'category', 'amount'];
+  out = out.replace(
+    /(account|type|category|amount):([^\s]*(?:"[^"]*"[^\s]*)*)/gi,
+    (match, field, rest) => {
+      // Remove spaces around commas in the value portion
+      const cleaned = rest.replace(/\s*,\s*/g, ',');
+      return field.toLowerCase() + ':' + cleaned;
+    }
+  );
+
+  return out;
 }
 
 // Split a comma-separated string but respect double-quoted segments.
@@ -44,12 +77,12 @@ function splitCommaRespectingQuotes(raw: string): string[] {
 }
 
 export function parseSearchQuery(raw: string): SearchToken[] {
+  const normalised = normaliseQuery(raw);
   const tokens: SearchToken[] = [];
-  // Lex: split on whitespace but keep quoted strings together
   const parts: string[] = [];
   const lexRe = /"[^"]*"|\S+/g;
   let m: RegExpExecArray | null;
-  while ((m = lexRe.exec(raw)) !== null) parts.push(m[0]);
+  while ((m = lexRe.exec(normalised)) !== null) parts.push(m[0]);
 
   let i = 0;
   while (i < parts.length) {
@@ -78,7 +111,6 @@ function buildToken(modifier: Modifier, raw: string): SearchToken {
       return { modifier, field: matched, values: values.length ? values : [''] };
     }
   }
-  // Plain text — strip surrounding quotes if present
   const plain = raw.replace(/^"|"$/g, '').trim();
   return { modifier, field: 'text', values: [plain] };
 }
@@ -88,7 +120,6 @@ function matchToken(
   tx: Transaction,
   accountName: string,
 ): boolean {
-  // OR within a token: any value matching = passes
   return token.values.some(v => matchSingleValue(token.field, v.toLowerCase(), tx, accountName));
 }
 
