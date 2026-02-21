@@ -2,15 +2,20 @@
 //
 // Portal-rendered dropdown — always floats above overflow:hidden parents.
 //
+// Props:
+//   size  'sm' | 'md' | 'lg'
+//         sm  — px-2.5 py-1.5  text-[11px]  (inline / table cells, Categorize rows)
+//         md  — px-3   py-2.5  text-sm       (modal form fields, matches native p-3 inputs)
+//         lg  — px-3   py-3    text-sm       (full-width Settings-style selects)
+//   triggerClassName — extra classes merged onto the trigger button
+//
 // Behaviour:
-//   - Dropdown is appended to <body> via createPortal, positioned with
-//     getBoundingClientRect so it never gets clipped.
-//   - Auto-flips above the trigger if there isn’t enough space below.
-//   - Trigger shows only the plain label (no hint) at a compact size.
-//   - Options with value==='' or value==='all' (blank / placeholder rows)
-//     render in iron-dust grey so they’re visually distinct.
-//   - A group heading is only rendered when SelectGroup.label is set.
-//   - hints are still shown inside the dropdown for non-blank options.
+//   - Dropdown rendered via createPortal onto <body>; never clipped.
+//   - Auto-flips above trigger when insufficient space below.
+//   - Blank-value options (value === '' | 'all') rendered in iron-dust grey.
+//   - Real selections shown in magma orange in the trigger.
+//   - Group heading only rendered when SelectGroup.label is set.
+//   - hints shown inside the dropdown only (not in trigger).
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -27,11 +32,14 @@ export interface SelectGroup {
   options: SelectOption[];
 }
 
+type SelectSize = 'sm' | 'md' | 'lg';
+
 interface Props {
   value:             string;
   onChange:          (v: string) => void;
   groups:            SelectGroup[];
   placeholder?:      string;
+  size?:             SelectSize;
   className?:        string;
   triggerClassName?: string;
   error?:            boolean;
@@ -39,24 +47,32 @@ interface Props {
   maxVisibleItems?:  number;
 }
 
-// Approximate px height of one option row (py-1.5 * 2 + 16px text)
-const ROW_H    = 26;
-const GROUP_H  = 22;
+// row height used to estimate list pixel height before it renders
+const ROW_H   = 28;
+const GROUP_H = 22;
+
+const SIZES: Record<SelectSize, string> = {
+  sm: 'px-2.5 py-1.5 text-[11px]',
+  md: 'px-3   py-2.5 text-sm',
+  lg: 'px-3   py-3   text-sm',
+};
 
 export const CustomSelect: React.FC<Props> = ({
   value, onChange, groups, placeholder = 'Select…',
-  className, triggerClassName, error, disabled, maxVisibleItems = 8,
+  size = 'sm', className, triggerClassName,
+  error, disabled, maxVisibleItems = 8,
 }) => {
   const [open,    setOpen]    = useState(false);
   const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropRef    = useRef<HTMLDivElement>(null);
 
-  const allOptions  = groups.flatMap(g => g.options);
-  const selected    = allOptions.find(o => o.value === value);
-  const isBlankSel  = !value || value === 'all';
+  const allOptions = groups.flatMap(g => g.options);
+  const selected   = allOptions.find(o => o.value === value);
+  // blank = placeholder-style value (no real selection)
+  const isBlank    = !value || value === 'all';
 
-  // —— estimate list height ——
+  // estimate dropdown pixel height
   const estimateH = useCallback(() => {
     let h = 0;
     groups.forEach(g => {
@@ -66,15 +82,14 @@ export const CustomSelect: React.FC<Props> = ({
     return Math.min(h, maxVisibleItems * ROW_H + 8);
   }, [groups, maxVisibleItems]);
 
-  // —— position portal ——
   const calcPos = useCallback(() => {
     if (!triggerRef.current) return;
-    const r        = triggerRef.current.getBoundingClientRect();
-    const maxH     = estimateH();
-    const below    = window.innerHeight - r.bottom - 8;
-    const useAbove = below < maxH && r.top > maxH;
+    const r    = triggerRef.current.getBoundingClientRect();
+    const maxH = estimateH();
+    const spaceBelow = window.innerHeight - r.bottom - 8;
+    const above = spaceBelow < maxH && r.top > maxH;
     setDropPos({
-      top:   useAbove ? r.top - maxH - 4 : r.bottom + 4,
+      top:   above ? r.top - maxH - 4 : r.bottom + 4,
       left:  r.left,
       width: r.width,
     });
@@ -100,7 +115,7 @@ export const CustomSelect: React.FC<Props> = ({
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  // re-calc on scroll / resize while open
+  // re-position on scroll / resize
   useEffect(() => {
     if (!open) return;
     const u = () => calcPos();
@@ -118,30 +133,34 @@ export const CustomSelect: React.FC<Props> = ({
 
   return (
     <div className={clsx('relative', className)}>
-      {/* trigger */}
+      {/* ── Trigger ── */}
       <button
         ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={openDropdown}
         className={clsx(
-          'w-full flex items-center justify-between bg-black/20 border px-2 py-2 text-[11px] rounded-sm focus:outline-none transition-colors font-mono text-left',
+          'w-full flex items-center justify-between bg-black/20 border rounded-sm focus:outline-none transition-colors font-mono text-left',
+          SIZES[size],
           error    ? 'border-magma/50' : 'border-white/10',
           open     ? 'border-magma/40' : 'hover:border-white/20',
           disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
           triggerClassName,
         )}
       >
-        <span className={clsx('truncate font-mono', isBlankSel ? 'text-iron-dust/50' : 'text-white')}>
+        <span className={clsx(
+          'truncate font-mono',
+          isBlank ? 'text-iron-dust/50' : 'text-magma font-bold',
+        )}>
           {selected ? selected.label : placeholder}
         </span>
         <ChevronDown
-          size={11}
+          size={size === 'sm' ? 11 : 13}
           className={clsx('shrink-0 ml-1 text-iron-dust/50 transition-transform', open && 'rotate-180')}
         />
       </button>
 
-      {/* portal dropdown */}
+      {/* ── Portal dropdown ── */}
       {open && dropPos && createPortal(
         <div
           ref={dropRef}
@@ -163,8 +182,8 @@ export const CustomSelect: React.FC<Props> = ({
                 </p>
               )}
               {group.options.map(opt => {
-                const isSel   = opt.value === value;
-                const isBlank = !opt.value || opt.value === 'all';
+                const isSel      = opt.value === value;
+                const isBlankOpt = !opt.value || opt.value === 'all';
                 return (
                   <button
                     key={opt.value}
@@ -172,22 +191,20 @@ export const CustomSelect: React.FC<Props> = ({
                     onMouseDown={() => handleSelect(opt.value)}
                     className={clsx(
                       'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors font-mono',
-                      isSel
-                        ? 'bg-magma/10'
-                        : isBlank
-                          ? 'hover:bg-white/[0.03]'
-                          : 'hover:bg-white/[0.04]',
+                      isSel      ? 'bg-magma/10'
+                      : isBlankOpt ? 'hover:bg-white/[0.03]'
+                      :              'hover:bg-white/[0.04]',
                     )}
                   >
                     <span className={clsx(
                       'font-mono',
-                      isSel   ? 'text-magma font-bold'
-                      : isBlank ? 'text-iron-dust/50'
-                      : 'text-white',
+                      isSel      ? 'text-magma font-bold'
+                      : isBlankOpt ? 'text-iron-dust/50'
+                      :              'text-white',
                     )}>
                       {opt.label}
                     </span>
-                    {opt.hint && !isBlank && (
+                    {opt.hint && !isBlankOpt && (
                       <span className="text-iron-dust/40 text-[10px] font-mono">{opt.hint}</span>
                     )}
                   </button>

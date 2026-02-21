@@ -212,10 +212,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const isTransfer    = type === 'transfer';
   const isDebtPayment = type === 'debt_payment';
   const isFeeCategory = isInvesting && investCategory === 'Fee';
-  const priceSymbol   = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
+  const priceSymbol   = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '€' : investCurrency === 'GBX' ? 'p' : '£';
   const nativeTotal   = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
 
-  // ── Option builders ───────────────────────────────────────────────────────
+  // ── Option builders ──────────────────────────────────────────────────────
   const assetOptions = (filter?: (a: { type: string }) => boolean) =>
     data.assets
       .filter(a => !filter || filter(a))
@@ -251,7 +251,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           {validationErrors.length > 0 && (
             <div className="bg-magma/10 border border-magma/50 rounded-sm p-3">
               <ul className="text-xs text-magma space-y-1">
-                {validationErrors.map((e, i) => <li key={i}>\u2022 {e}</li>)}
+                {validationErrors.map((e, i) => <li key={i}>• {e}</li>)}
               </ul>
             </div>
           )}
@@ -261,6 +261,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             <div className="col-span-12 md:col-span-4">
               <label className="block text-xs font-mono text-iron-dust mb-2">Type</label>
               <CustomSelect
+                size="md"
                 value={type}
                 onChange={v => { setType(v as TransactionType); setAccountId(''); setAccountToId(''); }}
                 disabled={!!editTransaction}
@@ -306,6 +307,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div className="col-span-6 md:col-span-3">
                   <label className="block text-xs font-mono text-iron-dust mb-2">Currency</label>
                   <CustomSelect
+                    size="md"
                     value={investCurrency}
                     onChange={v => setInvestCurrency(v as Currency)}
                     groups={[{ options: [
@@ -326,6 +328,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div className="col-span-12 md:col-span-3">
                   <label className="block text-xs font-mono text-iron-dust mb-2">Asset Type</label>
                   <CustomSelect
+                    size="md"
                     value={assetType}
                     onChange={setAssetType}
                     groups={[{ options: [
@@ -342,6 +345,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
                   <CustomSelect
+                    size="md"
                     value={accountId}
                     onChange={setAccountId}
                     placeholder="Select Account..."
@@ -379,6 +383,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Account From</label>
                   <CustomSelect
+                    size="md"
                     value={accountId}
                     onChange={setAccountId}
                     placeholder="Select Source..."
@@ -391,6 +396,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">{isDebtPayment ? 'Debt Account' : 'Account To'}</label>
                   <CustomSelect
+                    size="md"
                     value={accountToId}
                     onChange={setAccountToId}
                     placeholder="Select Destination..."
@@ -449,6 +455,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
               <div>
                 <label className="block text-xs font-mono text-iron-dust mb-2">Account</label>
                 <CustomSelect
+                  size="md"
                   value={accountId}
                   onChange={setAccountId}
                   placeholder="Select Account..."
@@ -485,8 +492,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">
                   {isFeeCategory ? 'Fee Cost (GBP) — recorded as loss' : 'Estimated Cost (GBP)'}
                 </span>
-                {investCurrency === 'USD' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">${nativeTotal.toFixed(2)} USD \u00f7 {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}</span>}
-                {investCurrency === 'GBX' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">{nativeTotal.toFixed(0)}p \u00f7 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}</span>}
+                {investCurrency === 'USD' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">${nativeTotal.toFixed(2)} USD ÷ {gbpUsdRate.toFixed(4)} = {currencySymbol}{(nativeTotal / gbpUsdRate).toFixed(2)}</span>}
+                {investCurrency === 'GBX' && shares && pricePerShare && <span className="text-[10px] font-mono text-iron-dust mt-0.5 block">{nativeTotal.toFixed(0)}p ÷ 100 = {currencySymbol}{(nativeTotal / 100).toFixed(2)}</span>}
               </div>
               <div className="flex items-center gap-2">
                 <Calculator size={14} className={isFeeCategory ? 'text-amber-500' : 'text-magma'} />
