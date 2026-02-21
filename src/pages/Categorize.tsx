@@ -39,15 +39,14 @@ interface RawRow {
   sourceCsvName: string;
 }
 
-// Per-CSV config stored locally (not saved to DB, just in session)
 export interface CsvConfig {
   csvName: string;
-  accountId: string;     // resolvedAccountId to assign to all rows from this CSV
-  amountColumns: 1 | 2;  // 1 = single amount col, 2 = separate debit/credit cols
-  amountCol: string;     // header name when amountColumns === 1
-  debitCol: string;      // header name when amountColumns === 2
-  creditCol: string;     // header name when amountColumns === 2
-  headers: string[];     // all CSV headers (for the dropdowns)
+  accountId: string;
+  amountColumns: 1 | 2;
+  amountCol: string;
+  debitCol: string;
+  creditCol: string;
+  headers: string[];
 }
 
 const TX_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'debt_payment', 'investing'];
@@ -101,6 +100,30 @@ function parseHalifaxDate(raw: string): string {
   return raw;
 }
 
+/**
+ * Assign account based on transaction direction:
+ *   credit (rawAmount >= 0, income) → money arrives INTO the account  → resolvedAccountToId
+ *   debit  (rawAmount <  0, expense)→ money leaves FROM the account   → resolvedAccountId
+ *
+ * This means:
+ *   - For a Halifax/NatWest CSV where accountId = "Halifax Current":
+ *       a salary credit  → acctTo  = Halifax Current  (money going in)
+ *       a direct debit   → acctFrom = Halifax Current (money going out)
+ */
+function assignAccountByDirection(
+  rawAmount: number,
+  csvAccountId: string,
+): { resolvedAccountId: string; resolvedAccountToId: string } {
+  if (!csvAccountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
+  if (rawAmount >= 0) {
+    // Credit / income — destination account
+    return { resolvedAccountId: '', resolvedAccountToId: csvAccountId };
+  } else {
+    // Debit / expense — source account
+    return { resolvedAccountId: csvAccountId, resolvedAccountToId: '' };
+  }
+}
+
 function parseCSV(
   text: string,
   fileName: string,
@@ -123,13 +146,12 @@ function parseCSV(
 
     let rawDate = '', rawType = '', rawDescription = '', rawAmount = 0, balance: number | undefined;
 
-    // If a CSV config overrides amount columns, use those
     if (csvConfig && csvConfig.amountColumns === 2 && csvConfig.debitCol && csvConfig.creditCol) {
       rawDate        = get('date') || get('Date') || get('Transaction Date');
       rawType        = get('type') || get('Type') || get('Transaction Type');
       rawDescription = get('description') || get('Description') || get('Transaction Description');
-      if (bankType === 'natwest')  rawDate = parseNatwestDate(rawDate);
-      if (bankType === 'halifax')  rawDate = parseHalifaxDate(rawDate);
+      if (bankType === 'natwest') rawDate = parseNatwestDate(rawDate);
+      if (bankType === 'halifax') rawDate = parseHalifaxDate(rawDate);
       const debit  = parseFloat(get(csvConfig.debitCol))  || 0;
       const credit = parseFloat(get(csvConfig.creditCol)) || 0;
       rawAmount = credit > 0 ? credit : -debit;
@@ -137,8 +159,8 @@ function parseCSV(
       rawDate        = get('date') || get('Date') || get('Transaction Date');
       rawType        = get('type') || get('Type') || get('Transaction Type');
       rawDescription = get('description') || get('Description') || get('Transaction Description');
-      if (bankType === 'natwest')  rawDate = parseNatwestDate(rawDate);
-      if (bankType === 'halifax')  rawDate = parseHalifaxDate(rawDate);
+      if (bankType === 'natwest') rawDate = parseNatwestDate(rawDate);
+      if (bankType === 'halifax') rawDate = parseHalifaxDate(rawDate);
       rawAmount = parseFloat(get(csvConfig.amountCol)) || 0;
     } else if (bankType === 'natwest') {
       rawDate        = parseNatwestDate(get('Date'));
@@ -164,14 +186,20 @@ function parseCSV(
     const matchedRule = typeRules.find(r => r.bankCode.toUpperCase() === rawType.toUpperCase());
     const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (rawAmount >= 0 ? 'income' : 'expense');
 
+    // Route account assignment based on money direction
+    const { resolvedAccountId, resolvedAccountToId } = assignAccountByDirection(
+      rawAmount,
+      csvConfig?.accountId || '',
+    );
+
     rows.push({
       id: `row-${i}-${Date.now()}`,
       rawDate, rawType, rawDescription, rawAmount, balance, bankType,
       resolvedType,
       resolvedDescription: rawDescription,
       resolvedCategory: '',
-      resolvedAccountId: csvConfig?.accountId || '',
-      resolvedAccountToId: '',
+      resolvedAccountId,
+      resolvedAccountToId,
       resolvedNotes: '',
       isTransfer: false,
       skip: false,
@@ -191,7 +219,6 @@ function applyMerchantRules(rows: RawRow[], rules: MerchantRule[]): RawRow[] {
         if (rule.setDescription) r.resolvedDescription = rule.setDescription;
         if (rule.setCategory)    r.resolvedCategory    = rule.setCategory;
         if (rule.setType)        r.resolvedType        = rule.setType as TransactionType;
-        // Only override accountId if the rule specifies one (non-empty)
         if (rule.setAccountId)   r.resolvedAccountId   = rule.setAccountId;
         if (rule.setAccountToId) r.resolvedAccountToId = rule.setAccountToId;
         if (rule.setNotes)       r.resolvedNotes       = rule.setNotes;
@@ -217,8 +244,26 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
       if (match) {
         const di = updated.findIndex(r => r.id === debit.id);
         const ci = updated.findIndex(r => r.id === match.id);
-        updated[di] = { ...updated[di], isTransfer: true, matchedPairId: match.id,  resolvedType: 'transfer', resolvedCategory: 'Transfer', resolvedDescription: `Transfer to ${match.bankType === 'natwest' ? 'NatWest' : 'Halifax'}` };
-        updated[ci] = { ...updated[ci], isTransfer: true, matchedPairId: debit.id, resolvedType: 'transfer', resolvedCategory: 'Transfer', resolvedDescription: `Transfer from ${debit.bankType === 'halifax' ? 'Halifax' : 'NatWest'}` };
+        // For matched transfers: debit row = money leaving debit.accountId → going to credit.accountId
+        // Keep each side's own account assignment, just mark as transfer and set accountToId cross-reference
+        updated[di] = {
+          ...updated[di],
+          isTransfer: true,
+          matchedPairId: match.id,
+          resolvedType: 'transfer',
+          resolvedCategory: 'Transfer',
+          resolvedDescription: `Transfer to ${match.bankType === 'natwest' ? 'NatWest' : 'Halifax'}`,
+          resolvedAccountToId: updated[ci].resolvedAccountToId || updated[ci].resolvedAccountId,
+        };
+        updated[ci] = {
+          ...updated[ci],
+          isTransfer: true,
+          matchedPairId: debit.id,
+          resolvedType: 'transfer',
+          resolvedCategory: 'Transfer',
+          resolvedDescription: `Transfer from ${debit.bankType === 'halifax' ? 'Halifax' : 'NatWest'}`,
+          resolvedAccountId: updated[di].resolvedAccountId || updated[di].resolvedAccountToId,
+        };
       }
     }
   }
@@ -286,13 +331,11 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-[#1a1c1e] border border-white/10 w-full max-w-lg rounded-sm shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="px-6 py-4 bg-[#131517] border-b border-white/5 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <h3 className="text-xs font-bold uppercase tracking-[2px] text-white">Create Description Rule</h3>
             <p className="text-[10px] text-iron-dust font-mono mt-0.5 truncate">{row.rawDescription}</p>
           </div>
-          {/* Amount + income/expense badge */}
           <div className={clsx(
             'shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-xs font-mono font-bold',
             isIncome
@@ -310,7 +353,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Match conditions */}
           <div>
             <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Match when…</p>
             <div className="flex flex-wrap gap-2">
@@ -322,7 +364,6 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
 
           <hr className="border-white/5" />
 
-          {/* Then set… */}
           <div>
             <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-3">Then set…</p>
             <div className="space-y-3">
@@ -522,7 +563,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
       <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-1">Assign CSVs to Account</p>
       {csvConfigs.map(cfg => (
         <div key={cfg.csvName} className="space-y-2">
-          {/* Row 1: filename → account */}
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs font-mono text-iron-dust bg-black/30 border border-white/10 px-2.5 py-1.5 rounded-sm shrink-0 max-w-[200px] truncate">
               {cfg.csvName}
@@ -536,7 +576,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
               {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
 
-            {/* Amount column toggle: 1 or 2 */}
             <div className="flex items-center gap-1 ml-auto">
               <Columns2 size={12} className="text-iron-dust" />
               <span className="text-[10px] text-iron-dust font-mono">Amount cols:</span>
@@ -559,7 +598,6 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, a
             </div>
           </div>
 
-          {/* Row 2: column selector(s) */}
           {cfg.headers.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap pl-1">
               {cfg.amountColumns === 1 ? (
@@ -626,7 +664,6 @@ export const Categorize: React.FC = () => {
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [rulePopup,     setRulePopup]     = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
   const [csvConfigs,    setCsvConfigs]    = useState<CsvConfig[]>([]);
-  // Store raw CSV texts + names so we can re-parse when configs change
   const [pendingCsvs,   setPendingCsvs]  = useState<{ name: string; text: string }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -647,11 +684,9 @@ export const Categorize: React.FC = () => {
     toImport:  rows.filter(r => !r.skip).length,
   }), [rows]);
 
-  // Build initial CsvConfig from CSV text
   const buildInitialConfig = (name: string, text: string): CsvConfig => {
     const firstLine = text.split('\n').find(l => l.trim());
     const headers   = firstLine ? parseCSVLine(firstLine).map(h => h.replace(/'/g,'').trim()) : [];
-    // Auto-detect NatWest single-amount vs Halifax two-column
     const hLower = headers.map(h => h.toLowerCase());
     const isHalifax = hLower.includes('sort code');
     return {
@@ -665,7 +700,6 @@ export const Categorize: React.FC = () => {
     };
   };
 
-  // Rebuild rows from raw CSVs whenever configs change
   const rebuildRows = useCallback((csvs: { name: string; text: string }[], configs: CsvConfig[]) => {
     const allRows: RawRow[] = [];
     for (const csv of csvs) {
@@ -677,7 +711,6 @@ export const Categorize: React.FC = () => {
     return applyTransferMatching(allRows, transferRules);
   }, [typeRules, merchantRules, transferRules]);
 
-  // ─ File upload ─
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || !files.length) return;
     const newCsvs: { name: string; text: string }[] = [];
@@ -700,18 +733,14 @@ export const Categorize: React.FC = () => {
     });
   }, [rebuildRows]);
 
-  // When csvConfigs change (user updates account/columns), re-parse rows
   const updateCsvConfig = useCallback((csvName: string, patch: Partial<CsvConfig>) => {
     setCsvConfigs(prev => {
       const updated = prev.map(c => c.csvName === csvName ? { ...c, ...patch } : c);
-      // Re-parse all rows and apply account assignments from config
-      const rebuilt = rebuildRows(pendingCsvs, updated);
-      setRows(rebuilt);
+      setRows(rebuildRows(pendingCsvs, updated));
       return updated;
     });
   }, [pendingCsvs, rebuildRows]);
 
-  // ─ Reapply ─
   const reapplyRules = useCallback(() => {
     setRows(prev => {
       let updated = prev.map(r => {
@@ -731,10 +760,9 @@ export const Categorize: React.FC = () => {
   const bulkSetType = (bankCode: string, newType: TransactionType) =>
     setRows(prev => prev.map(r => r.rawType.toUpperCase() === bankCode.toUpperCase() ? { ...r, resolvedType: newType } : r));
 
-  // ─ Import ─
   const handleImport = async () => {
     setImporting(true);
-    const toImport = rows.filter(r => !r.skip && r.resolvedAccountId);
+    const toImport = rows.filter(r => !r.skip && (r.resolvedAccountId || r.resolvedAccountToId));
     let count = 0;
     for (const row of toImport) {
       await addTransaction({
@@ -743,7 +771,7 @@ export const Categorize: React.FC = () => {
         amount:      row.rawAmount,
         type:        row.resolvedType,
         category:    row.resolvedCategory || 'General',
-        accountId:   row.resolvedAccountId,
+        accountId:   row.resolvedAccountId || row.resolvedAccountToId,
         notes:       row.resolvedNotes || undefined,
       });
       count++;
@@ -756,7 +784,6 @@ export const Categorize: React.FC = () => {
     setCsvConfigs([]);
   };
 
-  // ─ Rule CRUD ─
   const addTypeRule    = () => setTypeRules(prev => [...prev, { id: `tr-${Date.now()}`, bankCode: '', mapsTo: 'expense' }]);
   const removeTypeRule = (id: string) => setTypeRules(prev => prev.filter(r => r.id !== id));
   const updateTypeRule = (id: string, patch: Partial<TypeMappingRule>) => setTypeRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
@@ -791,14 +818,12 @@ export const Categorize: React.FC = () => {
     <div className="h-full overflow-y-auto custom-scrollbar">
       <div className="p-8 max-w-7xl mx-auto pb-24">
 
-        {/* Header */}
         <div className="mb-8">
           <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Tools</span>
           <h1 className="text-3xl font-bold text-white tracking-tight">Categorize & Import</h1>
           <p className="text-iron-dust text-sm mt-2">Set rules for cleaning bank CSVs, match transfers, then import in bulk.</p>
         </div>
 
-        {/* Tab bar */}
         <div className="flex gap-1 mb-6 border-b border-white/10">
           {(['rules', 'preview'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
@@ -814,7 +839,6 @@ export const Categorize: React.FC = () => {
         {activeTab === 'rules' && (
           <div className="space-y-4">
 
-            {/* Type Code Mapping */}
             <SectionCard
               title="Type Code → Transaction Type"
               subtitle="Map your bank's type codes (BAC, D/D, SO…) to Lithos types"
@@ -844,7 +868,6 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            {/* Description Rules – single outline, no dividers between rows */}
             <SectionCard
               title="Description Rules"
               subtitle="Auto-set description, category, type, or accounts when a keyword is matched"
@@ -856,13 +879,11 @@ export const Categorize: React.FC = () => {
                 <p className="text-iron-dust text-xs font-mono mb-2">No rules yet — add one or create from the preview table.</p>
               ) : (
                 <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
-                  {/* Single header row */}
                   <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
                     {['Contains', 'Set Description', 'Category', 'Type', 'Acct From', 'Acct To', ''].map((h, i) => (
                       <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
                     ))}
                   </div>
-                  {/* Rule rows — no inner borders */}
                   {merchantRules.map(rule => (
                     <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_2rem] gap-2 items-center px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
                       <input value={rule.contains}
@@ -884,14 +905,12 @@ export const Categorize: React.FC = () => {
                         <option value="">— keep —</option>
                         {TX_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
-                      {/* ACCT FROM — if none, rule runs for all accounts */}
                       <select value={rule.setAccountId}
                         onChange={e => updateMerchantRule(rule.id, { setAccountId: e.target.value })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none">
                         <option value="">— all —</option>
                         {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </select>
-                      {/* ACCT TO */}
                       <select value={rule.setAccountToId}
                         onChange={e => updateMerchantRule(rule.id, { setAccountToId: e.target.value })}
                         className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none">
@@ -910,7 +929,6 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            {/* Transfer Matching Rules – single outline, no dividers */}
             <SectionCard
               title="Transfer Matching Rules"
               subtitle="Match debits + credits by description pattern, amount & date tolerance"
@@ -956,7 +974,6 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            {/* Upload */}
             <SectionCard title="Upload Bank CSV(s)" subtitle="Drop one or more files — NatWest & Halifax auto-detected" icon={<Upload size={14} />}>
               <div
                 onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
@@ -993,7 +1010,6 @@ export const Categorize: React.FC = () => {
 
             {rows.length > 0 && (
               <>
-                {/* Stats */}
                 <div className="grid grid-cols-4 gap-3">
                   {[
                     { label: 'Total Rows',  value: stats.total,     color: 'text-white' },
@@ -1008,14 +1024,12 @@ export const Categorize: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Assign CSVs to Account */}
                 <CsvAssignPanel
                   csvConfigs={csvConfigs}
                   onChange={updateCsvConfig}
                   accounts={allAccounts}
                 />
 
-                {/* Bulk override */}
                 {uniqueBankCodes.length > 0 && (
                   <div className="bg-[#131517] border border-white/10 rounded-sm p-4">
                     <p className="text-xs font-bold uppercase tracking-[2px] text-white mb-3">Bulk Override by Bank Code</p>
@@ -1035,7 +1049,6 @@ export const Categorize: React.FC = () => {
                   </div>
                 )}
 
-                {/* Filters */}
                 <div className="flex items-center gap-3">
                   <Filter size={12} className="text-iron-dust" />
                   <select value={filterType} onChange={e => setFilterType(e.target.value)}
@@ -1055,7 +1068,6 @@ export const Categorize: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Table */}
                 <div className="border border-white/10 rounded-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1111,27 +1123,29 @@ export const Categorize: React.FC = () => {
                                                                         'text-purple-400 border-purple-400/20 bg-purple-400/10'
                                 )} />
                             </td>
+                            {/* Acct From — source, highlighted if empty on an expense */}
                             <td className="px-3 py-2">
                               <select value={row.resolvedAccountId} onChange={e => updateRow(row.id, { resolvedAccountId: e.target.value })}
                                 className={clsx('bg-black/30 border px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none',
-                                  !row.resolvedAccountId ? 'border-magma/40 text-magma/70' : 'border-white/10'
+                                  !row.resolvedAccountId && row.rawAmount < 0 ? 'border-magma/40 text-magma/70' : 'border-white/10'
                                 )}>
                                 <option value="">— assign —</option>
                                 <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
                                 <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
                               </select>
                             </td>
+                            {/* Acct To — destination, highlighted if empty on an income */}
                             <td className="px-3 py-2">
-                              {(row.resolvedType === 'transfer' || row.resolvedType === 'debt_payment') ? (
-                                <select value={row.resolvedAccountToId} onChange={e => updateRow(row.id, { resolvedAccountToId: e.target.value })}
-                                  className="bg-black/30 border border-white/10 px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none">
-                                  <option value="">— assign —</option>
-                                  <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
-                                  <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
-                                </select>
-                              ) : (
-                                <span className="text-iron-dust/20 text-[10px] font-mono">—</span>
-                              )}
+                              <select value={row.resolvedAccountToId} onChange={e => updateRow(row.id, { resolvedAccountToId: e.target.value })}
+                                className={clsx('bg-black/30 border px-2 py-1 text-[11px] text-white rounded-sm focus:border-magma outline-none',
+                                  !row.resolvedAccountToId && row.rawAmount >= 0 && row.resolvedType !== 'expense'
+                                    ? 'border-magma/40 text-magma/70'
+                                    : 'border-white/10'
+                                )}>
+                                <option value="">— assign —</option>
+                                <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+                                <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
+                              </select>
                             </td>
                             <td className={clsx('px-3 py-2 text-right font-mono font-bold text-[11px]',
                               row.rawAmount >= 0 ? 'text-emerald-400' : 'text-magma'
@@ -1151,11 +1165,10 @@ export const Categorize: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Import bar */}
                 <div className="flex items-center justify-between bg-[#131517] border border-white/10 rounded-sm p-4">
                   <div>
                     <p className="text-sm font-bold text-white">{stats.toImport} transactions ready to import</p>
-                    {rows.some(r => !r.skip && !r.resolvedAccountId) && (
+                    {rows.some(r => !r.skip && !r.resolvedAccountId && !r.resolvedAccountToId) && (
                       <p className="text-xs text-amber-400 flex items-center gap-1.5 mt-1">
                         <AlertCircle size={11} /> Some rows have no account assigned and will be skipped.
                       </p>
@@ -1174,7 +1187,6 @@ export const Categorize: React.FC = () => {
         )}
       </div>
 
-      {/* Create Rule Popup */}
       {rulePopup && (
         <CreateRulePopup
           row={rulePopup.row}
