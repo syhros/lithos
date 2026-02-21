@@ -17,10 +17,11 @@ import {
 } from '../hooks/useImportRules';
 import { CustomSelect, SelectGroup } from '../components/CustomSelect';
 import { EditRuleModal } from '../components/EditRuleModal';
+import { supabase } from '../lib/supabase';
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // Types
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 type BankType = 'natwest' | 'halifax' | 'generic';
 
 interface RawRow {
@@ -78,9 +79,9 @@ function buildAccountGroups(
   return groups;
 }
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // CSV Parse helpers
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = '';
@@ -273,9 +274,9 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
   return updated;
 }
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // Create Rule Popup
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 interface CreateRulePopupProps {
   row: RawRow;
   field: 'category' | 'description' | 'type' | 'notes';
@@ -475,9 +476,9 @@ const CreateRulePopup: React.FC<CreateRulePopupProps> = ({
   );
 };
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // SectionCard
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 const SectionCard: React.FC<{
   title: string;
   subtitle?: string;
@@ -522,9 +523,9 @@ const SectionCard: React.FC<{
   );
 };
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // Inline editable cell
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 interface EditableCellProps {
   value: string;
   onSave: (v: string) => void;
@@ -590,9 +591,9 @@ const EditableCell: React.FC<EditableCellProps> = ({
   );
 };
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // Assign CSVs to Account panel
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 interface CsvAssignPanelProps {
   csvConfigs: CsvConfig[];
   onChange: (name: string, patch: Partial<CsvConfig>) => void;
@@ -709,11 +710,11 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
   );
 };
 
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 // Main Page
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────
 export const Categorize: React.FC = () => {
-  const { data, addTransaction, currencySymbol } = useFinance();
+  const { data, currencySymbol } = useFinance();
   const {
     typeRules, setTypeRules,
     merchantRules, setMerchantRules,
@@ -877,37 +878,71 @@ export const Categorize: React.FC = () => {
 
   const handleImport = async () => {
     setImporting(true);
-    const toImport = rows.filter(
-      r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId),
-    );
-    let count = 0;
-    for (const row of toImport) {
-      await addTransaction({
-        date:        new Date(row.rawDate).toISOString(),
-        description: row.resolvedDescription || row.rawDescription,
-        amount:      row.rawAmount,
-        type:        row.resolvedType,
-        category:    row.resolvedCategory || 'General',
-        accountId:    row.resolvedAccountId || '',
-        accountToId:  row.resolvedAccountToId || undefined,
-        notes:        row.resolvedNotes || undefined,
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.error('handleImport: no active session');
+        setImporting(false);
+        return;
+      }
+
+      const toImport = rows.filter(
+        r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId),
+      );
+
+      const debtIdSet = new Set(data.debts.map(d => d.id));
+
+      const records = toImport.map(row => {
+        const isDebt = debtIdSet.has(row.resolvedAccountId);
+        // Dates from CSV parsers are already yyyy-MM-dd — slice to be safe
+        const date = row.rawDate ? row.rawDate.substring(0, 10) : row.rawDate;
+        return {
+          user_id:        session.user.id,
+          account_id:     isDebt ? null : (row.resolvedAccountId || null),
+          debt_id:        isDebt ? row.resolvedAccountId : null,
+          account_to_id:  row.resolvedAccountToId || null,
+          date,
+          description:    row.resolvedDescription || row.rawDescription,
+          amount:         row.rawAmount,
+          type:           row.resolvedType,
+          category:       row.resolvedCategory || 'General',
+          notes:          row.resolvedNotes || null,
+          symbol:         null,
+          quantity:       null,
+          price:          null,
+          currency:       null,
+        };
       });
-      count++;
+
+      const { data: inserted, error } = await supabase
+        .from('transactions')
+        .insert(records)
+        .select();
+
+      if (error) {
+        console.error('handleImport: batch insert failed:', error);
+        setImporting(false);
+        return;
+      }
+
+      setImportCount(inserted?.length ?? records.length);
+    } catch (err) {
+      console.error('handleImport: unexpected error:', err);
+    } finally {
+      setImporting(false);
+      setImportDone(true);
+      setRows([]);
+      setPendingCsvs([]);
+      setCsvConfigs([]);
+      pendingCsvsRef.current = new Map();
     }
-    setImportCount(count);
-    setImporting(false);
-    setImportDone(true);
-    setRows([]);
-    setPendingCsvs([]);
-    setCsvConfigs([]);
-    pendingCsvsRef.current = new Map();
   };
 
   const addTypeRule    = () => setTypeRules(prev => [...prev, { id: `tr-${Date.now()}`, bankCode: '', mapsTo: 'expense' }]);
   const removeTypeRule = (id: string) => setTypeRules(prev => prev.filter(r => r.id !== id));
   const updateTypeRule = (id: string, patch: Partial<TypeMappingRule>) => setTypeRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  // ── Description rule helpers ──────────────────────────────────────────
+  // ── Description rule helpers ───────────────────────────────────────────────────────
   const addMerchantRule = () =>
     setMerchantRules(prev => [...prev, { ...BLANK_MERCHANT_RULE, id: `mr-${Date.now()}` }]);
 
