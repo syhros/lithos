@@ -1,7 +1,12 @@
 // SmartSearchBar
 //
 // A search input with live autocomplete for field prefixes,
-// account names, type values, and operator tokens (*& and */).
+// account names, type values, and operator tokens.
+//
+// Operators:
+//   &  OR      - show results matching either term
+//   #  AND     - show results matching both terms
+//   /  EXCLUDE - show results matching the first, not the second
 //
 // Pressing Tab / clicking a suggestion inserts it into the query.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -16,8 +21,9 @@ const FIELD_PREFIXES = [
 ];
 
 const OPERATORS = [
-  { label: '*&', hint: 'AND – next term must also match' },
-  { label: '*/', hint: 'NOT – next term must not match' },
+  { label: '&', hint: 'OR \u2013 show results matching either term' },
+  { label: '#', hint: 'AND \u2013 show results matching both terms' },
+  { label: '/', hint: 'EXCLUDE \u2013 show first, exclude second' },
 ];
 
 const TYPE_VALUES = ['income', 'expense', 'investing', 'transfer', 'debt_payment'];
@@ -38,7 +44,8 @@ interface Props {
 }
 
 export const SmartSearchBar: React.FC<Props> = ({
-  value, onChange, accounts, categories, placeholder = 'Search… account: type: category: amount: *& */'
+  value, onChange, accounts, categories,
+  placeholder = 'Search\u2026  account:  type:  category:  amount:  & # /'
 }) => {
   const [open,        setOpen]        = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -54,16 +61,19 @@ export const SmartSearchBar: React.FC<Props> = ({
     const currentWord  = beforeCursor.slice(wordStart).toLowerCase();
     if (!currentWord) return [];
 
+    // Single-char operators (&, #, /)
     OPERATORS.forEach(op => {
-      if (op.label.startsWith(currentWord))
+      if (op.label === currentWord)
         suggs.push({ insert: op.label, label: op.label, hint: op.hint, kind: 'operator' });
     });
 
+    // Field prefixes  (account:, type:, …)
     FIELD_PREFIXES.forEach(fp => {
       if (fp.label.startsWith(currentWord) && currentWord !== fp.label)
         suggs.push({ insert: fp.label, label: fp.label, hint: fp.hint, kind: 'field' });
     });
 
+    // Values after a known field
     const fieldMatch = beforeCursor.match(/(?:^|\s)(account|type|category|amount):(\S*)$/);
     if (fieldMatch) {
       const field   = fieldMatch[1];
@@ -152,7 +162,7 @@ export const SmartSearchBar: React.FC<Props> = ({
       {open && suggestions.length > 0 && (
         <div className="absolute top-full left-0 mt-1 w-full bg-[#1a1c1e] border border-white/10 rounded-sm shadow-2xl z-50 overflow-hidden">
           <div className="px-3 pt-2 pb-1">
-            <p className="text-[9px] font-mono text-iron-dust/60 uppercase tracking-widest">Suggestions · Tab or click to insert</p>
+            <p className="text-[9px] font-mono text-iron-dust/60 uppercase tracking-widest">Suggestions \u00b7 Tab or click to insert</p>
           </div>
           <ul>
             {suggestions.map((s, i) => (
@@ -163,7 +173,7 @@ export const SmartSearchBar: React.FC<Props> = ({
                     'w-full flex items-center gap-3 px-3 py-2 text-xs text-left transition-colors',
                     i === highlighted ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
                   )}>
-                  <span className={clsx('font-mono font-bold', kindColour[s.kind])}>{s.label}</span>
+                  <span className={clsx('font-mono font-bold w-4', kindColour[s.kind])}>{s.label}</span>
                   {s.hint && <span className="text-iron-dust/60 text-[10px]">{s.hint}</span>}
                 </button>
               </li>
