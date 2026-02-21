@@ -3,6 +3,8 @@ import { X, Calculator, ArrowRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { TransactionType, Currency, Transaction } from '../data/mockData';
+import { CustomSelect } from './CustomSelect';
+import { CustomComboBox } from './CustomComboBox';
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -77,7 +79,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
   useEffect(() => {
     if (!editTransaction || !isOpen) { if (!editTransaction) resetForm(); return; }
-
     const tx = editTransaction;
     setType(tx.type);
     const [datePart, timePart] = tx.date.split('T');
@@ -86,7 +87,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     setAmount(Math.abs(tx.amount).toFixed(2));
     setAccountId(tx.accountId || '');
     setNotes(tx.notes || '');
-
     if (tx.type === 'investing') {
       setTicker(tx.symbol || '');
       setAssetName(tx.description);
@@ -97,9 +97,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       setInvestCurrency(tx.currency || 'GBP');
     } else if (tx.type === 'transfer') {
       const paired = data.transactions.find(t =>
-        t.type === 'transfer' &&
-        t.id !== tx.id &&
-        t.amount > 0 &&
+        t.type === 'transfer' && t.id !== tx.id && t.amount > 0 &&
         Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
         Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
       );
@@ -111,9 +109,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       if (isDebtSide) {
         setAccountToId(tx.accountId || '');
         const paired = data.transactions.find(t =>
-          t.type === 'debt_payment' &&
-          t.id !== tx.id &&
-          !debtIds.has(t.accountId || '') &&
+          t.type === 'debt_payment' && t.id !== tx.id && !debtIds.has(t.accountId || '') &&
           Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
           Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
         );
@@ -121,9 +117,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
       } else {
         setAccountId(tx.accountId || '');
         const paired = data.transactions.find(t =>
-          t.type === 'debt_payment' &&
-          t.id !== tx.id &&
-          debtIds.has(t.accountId || '') &&
+          t.type === 'debt_payment' && t.id !== tx.id && debtIds.has(t.accountId || '') &&
           Math.abs(Math.abs(t.amount) - Math.abs(tx.amount)) < 0.01 &&
           Math.abs(new Date(t.date).getTime() - new Date(tx.date).getTime()) < 5000
         );
@@ -138,11 +132,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
 
   if (!isOpen) return null;
 
-  const getAccountName = (id: string) => {
-    return data.assets.find(x => x.id === id)?.name ||
-           data.debts.find(x => x.id === id)?.name ||
-           'Unknown Account';
-  };
+  const getAccountName = (id: string) =>
+    data.assets.find(x => x.id === id)?.name ||
+    data.debts.find(x => x.id === id)?.name ||
+    'Unknown Account';
 
   const validate = () => {
     const errors: string[] = [];
@@ -164,7 +157,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
     const debtIds = new Set(data.debts.map(d => d.id));
     const trimmedNotes = notes.trim() || undefined;
 
-    // ── EDIT PATH ──────────────────────────────────────────────────
     if (editTransaction) {
       if (editTransaction.type === 'transfer') {
         const outflowTx = editTransaction;
@@ -174,7 +166,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         );
         await updateTransaction(outflowTx.id, { date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), category: 'Transfer', accountId, notes: trimmedNotes });
         if (paired) await updateTransaction(paired.id, { date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
-
       } else if (editTransaction.type === 'debt_payment') {
         const isDebtSide = debtIds.has(editTransaction.accountId || '');
         const sourceId = isDebtSide ? accountId : editTransaction.accountId!;
@@ -185,50 +176,35 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         );
         await updateTransaction(editTransaction.id, { date: fullDate, description: isDebtSide ? `Payment from ${getAccountName(sourceId)}` : `Payment to ${getAccountName(debtId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: editTransaction.accountId!, notes: trimmedNotes });
         if (paired) await updateTransaction(paired.id, { date: fullDate, description: isDebtSide ? `Payment to ${getAccountName(debtId)}` : `Payment from ${getAccountName(sourceId)}`, amount: -Math.abs(amountNum), category: category || 'Debt Payment', accountId: paired.accountId!, notes: trimmedNotes });
-
       } else if (editTransaction.type === 'investing') {
         const isFee = investCategory === 'Fee';
-        const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
-        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: savedAmount, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
-
+        await updateTransaction(editTransaction.id, { date: fullDate, description: assetName, amount: isFee ? -Math.abs(amountNum) : amountNum, category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
       } else {
         const isDebtAccount = debtIds.has(accountId);
-        let finalAmount: number;
-        if (isDebtAccount) {
-          finalAmount = editTransaction.type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
-        } else {
-          finalAmount = editTransaction.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
-        }
+        const finalAmount = isDebtAccount
+          ? (editTransaction.type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum))
+          : (editTransaction.type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum));
         await updateTransaction(editTransaction.id, { date: fullDate, description: merchant, amount: finalAmount, category, accountId, notes: trimmedNotes });
       }
       resetForm(); onClose(); return;
     }
 
-    // ── CREATE PATH ────────────────────────────────────────────────
     if (type === 'transfer') {
       addTransaction({ date: fullDate, description: merchant || `Transfer to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId, notes: trimmedNotes });
       addTransaction({ date: fullDate, description: merchant || `Transfer from ${getAccountName(accountId)}`, amount: Math.abs(amountNum), type: 'transfer', category: 'Transfer', accountId: accountToId, notes: trimmedNotes });
-
     } else if (type === 'debt_payment') {
       addTransaction({ date: fullDate, description: `Payment to ${getAccountName(accountToId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId, notes: trimmedNotes });
       addTransaction({ date: fullDate, description: `Payment from ${getAccountName(accountId)}`, amount: -Math.abs(amountNum), type: 'debt_payment', category: category || 'Debt Payment', accountId: accountToId, notes: trimmedNotes });
-
     } else if (type === 'investing') {
       const isFee = investCategory === 'Fee';
-      const savedAmount = isFee ? -Math.abs(amountNum) : amountNum;
-      addTransaction({ date: fullDate, description: assetName, amount: savedAmount, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
-
+      addTransaction({ date: fullDate, description: assetName, amount: isFee ? -Math.abs(amountNum) : amountNum, type: 'investing', category: investCategory, accountId, symbol: ticker.toUpperCase(), quantity: parseFloat(shares), price: parseFloat(pricePerShare), currency: investCurrency, notes: trimmedNotes });
     } else {
       const isDebtAccount = debtIds.has(accountId);
-      let finalAmount: number;
-      if (isDebtAccount) {
-        finalAmount = type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum);
-      } else {
-        finalAmount = type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum);
-      }
+      const finalAmount = isDebtAccount
+        ? (type === 'income' ? -Math.abs(amountNum) : Math.abs(amountNum))
+        : (type === 'expense' ? -Math.abs(amountNum) : Math.abs(amountNum));
       addTransaction({ date: fullDate, description: merchant, amount: finalAmount, type, category: category || 'General', accountId, notes: trimmedNotes });
     }
-
     resetForm(); onClose();
   };
 
@@ -238,6 +214,28 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
   const isFeeCategory = isInvesting && investCategory === 'Fee';
   const priceSymbol   = investCurrency === 'USD' ? '$' : investCurrency === 'EUR' ? '\u20ac' : investCurrency === 'GBX' ? 'p' : '\u00a3';
   const nativeTotal   = (parseFloat(shares) || 0) * (parseFloat(pricePerShare) || 0);
+
+  // ── Option builders ───────────────────────────────────────────────────────
+  const assetOptions = (filter?: (a: { type: string }) => boolean) =>
+    data.assets
+      .filter(a => !filter || filter(a))
+      .map(a => ({ value: a.id, label: a.name, hint: a.type }));
+
+  const debtOptions = data.debts.map(d => ({ value: d.id, label: d.name, hint: d.type }));
+
+  const liquidAssetOptions = assetOptions(a => a.type !== 'investment');
+  const investmentOptions  = assetOptions(a => a.type === 'investment');
+  const allAssetOptions    = assetOptions();
+
+  const accountFromGroups = [{ label: 'Liquid Assets', options: liquidAssetOptions }];
+  const accountToGroups   = isDebtPayment
+    ? [{ label: 'Liabilities', options: debtOptions }]
+    : [{ label: 'Assets', options: allAssetOptions.filter(o => o.value !== accountId) }];
+  const investAccGroups   = [{ label: 'Investment Accounts', options: investmentOptions }];
+  const allAccountGroups  = [
+    { label: 'Assets', options: allAssetOptions },
+    { label: 'Debts',  options: debtOptions },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -252,7 +250,9 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
         <div className="p-8 space-y-6">
           {validationErrors.length > 0 && (
             <div className="bg-magma/10 border border-magma/50 rounded-sm p-3">
-              <ul className="text-xs text-magma space-y-1">{validationErrors.map((e, i) => <li key={i}>\u2022 {e}</li>)}</ul>
+              <ul className="text-xs text-magma space-y-1">
+                {validationErrors.map((e, i) => <li key={i}>\u2022 {e}</li>)}
+              </ul>
             </div>
           )}
 
@@ -260,13 +260,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 md:col-span-4">
               <label className="block text-xs font-mono text-iron-dust mb-2">Type</label>
-              <select value={type} onChange={e => { setType(e.target.value as TransactionType); setAccountId(''); setAccountToId(''); }} disabled={!!editTransaction} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none disabled:opacity-50 disabled:cursor-not-allowed">
-                <option value="expense">Expense</option>
-                <option value="income">Income</option>
-                <option value="transfer">Transfer</option>
-                <option value="debt_payment">Debt Payment</option>
-                <option value="investing">Investing</option>
-              </select>
+              <CustomSelect
+                value={type}
+                onChange={v => { setType(v as TransactionType); setAccountId(''); setAccountToId(''); }}
+                disabled={!!editTransaction}
+                groups={[{ options: [
+                  { value: 'expense',      label: 'Expense' },
+                  { value: 'income',       label: 'Income' },
+                  { value: 'transfer',     label: 'Transfer' },
+                  { value: 'debt_payment', label: 'Debt Payment' },
+                  { value: 'investing',    label: 'Investing' },
+                ]}]}
+              />
             </div>
             <div className="col-span-7 md:col-span-5">
               <label className="block text-xs font-mono text-iron-dust mb-2">Date</label>
@@ -300,9 +305,16 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
                 <div className="col-span-6 md:col-span-3">
                   <label className="block text-xs font-mono text-iron-dust mb-2">Currency</label>
-                  <select value={investCurrency} onChange={e => setInvestCurrency(e.target.value as Currency)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                    <option value="GBP">GBP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBX">GBX</option>
-                  </select>
+                  <CustomSelect
+                    value={investCurrency}
+                    onChange={v => setInvestCurrency(v as Currency)}
+                    groups={[{ options: [
+                      { value: 'GBP', label: 'GBP' },
+                      { value: 'USD', label: 'USD' },
+                      { value: 'EUR', label: 'EUR' },
+                      { value: 'GBX', label: 'GBX' },
+                    ]}]}
+                  />
                 </div>
                 <div className="col-span-12 md:col-span-3">
                   <label className="block text-xs font-mono text-iron-dust mb-2">Price / Share</label>
@@ -313,18 +325,29 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                 </div>
                 <div className="col-span-12 md:col-span-3">
                   <label className="block text-xs font-mono text-iron-dust mb-2">Asset Type</label>
-                  <select value={assetType} onChange={e => setAssetType(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                    <option>Stock</option><option>Crypto</option><option>ETF</option><option>Pension</option><option>REIT</option>
-                  </select>
+                  <CustomSelect
+                    value={assetType}
+                    onChange={setAssetType}
+                    groups={[{ options: [
+                      { value: 'Stock',   label: 'Stock' },
+                      { value: 'Crypto',  label: 'Crypto' },
+                      { value: 'ETF',     label: 'ETF' },
+                      { value: 'Pension', label: 'Pension' },
+                      { value: 'REIT',    label: 'REIT' },
+                    ]}]}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-[1.2fr_1fr] gap-4">
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Investing Account</label>
-                  <select value={accountId} onChange={e => setAccountId(e.target.value)} className={clsx('w-full bg-black/20 border p-3 text-sm text-white rounded-sm focus:outline-none', validationErrors.some(e => e.includes('account')) ? 'border-magma/50 focus:border-magma' : 'border-white/10 focus:border-magma')}>
-                    <option value="">Select Account...</option>
-                    <optgroup label="Investment Accounts">{data.assets.filter(a => a.type === 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
-                  </select>
+                  <CustomSelect
+                    value={accountId}
+                    onChange={setAccountId}
+                    placeholder="Select Account..."
+                    error={validationErrors.some(e => e.includes('account'))}
+                    groups={investAccGroups}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
@@ -333,9 +356,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
                       <button key={cat} type="button" onClick={() => setInvestCategory(cat)} className={clsx(
                         'flex-1 px-2 py-2 text-xs font-mono font-bold uppercase rounded-sm transition-colors',
                         investCategory === cat
-                          ? cat === 'Fee'
-                            ? 'bg-amber-500 text-white border border-amber-500'
-                            : 'bg-magma text-white border border-magma'
+                          ? cat === 'Fee' ? 'bg-amber-500 text-white border border-amber-500' : 'bg-magma text-white border border-magma'
                           : 'bg-white/5 text-iron-dust border border-white/10 hover:border-white/20'
                       )}>{cat}</button>
                     ))}
@@ -357,21 +378,24 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
               <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Account From</label>
-                  <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">Select Source...</option>
-                    <optgroup label="Liquid Assets">{data.assets.filter(a => a.type !== 'investment').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
-                  </select>
+                  <CustomSelect
+                    value={accountId}
+                    onChange={setAccountId}
+                    placeholder="Select Source..."
+                    groups={accountFromGroups}
+                  />
                 </div>
-                <div className="flex justify-center mt-9 opacity-30 text-white"><ArrowRight size={18} /></div>
+                <div className="flex justify-center mt-9 opacity-30 text-white">
+                  <ArrowRight size={18} />
+                </div>
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">{isDebtPayment ? 'Debt Account' : 'Account To'}</label>
-                  <select value={accountToId} onChange={e => setAccountToId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                    <option value="">Select Destination...</option>
-                    {isDebtPayment
-                      ? <optgroup label="Liabilities">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
-                      : <optgroup label="Assets">{data.assets.filter(a => a.id !== accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
-                    }
-                  </select>
+                  <CustomSelect
+                    value={accountToId}
+                    onChange={setAccountToId}
+                    placeholder="Select Destination..."
+                    groups={accountToGroups}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -395,14 +419,24 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-mono text-iron-dust mb-2">{type === 'income' ? 'Payer / Source' : 'Merchant'}</label>
-                  <input list="merchants-list" type="text" placeholder={type === 'income' ? 'e.g. Employer' : 'e.g. Starbucks'} value={merchant} onChange={e => setMerchant(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
-                  <datalist id="merchants-list">{uniqueMerchants.map((m,i) => <option key={i} value={m} />)}</datalist>
+                  <label className="block text-xs font-mono text-iron-dust mb-2">
+                    {type === 'income' ? 'Payer / Source' : 'Merchant'}
+                  </label>
+                  <CustomComboBox
+                    value={merchant}
+                    onChange={setMerchant}
+                    options={uniqueMerchants}
+                    placeholder={type === 'income' ? 'e.g. Employer' : 'e.g. Starbucks'}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-mono text-iron-dust mb-2">Category</label>
-                  <input list="categories-list" type="text" placeholder="e.g. Food" value={category} onChange={e => setCategory(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none" />
-                  <datalist id="categories-list">{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
+                  <CustomComboBox
+                    value={category}
+                    onChange={setCategory}
+                    options={uniqueCategories}
+                    placeholder="e.g. Food"
+                  />
                 </div>
               </div>
               <div>
@@ -414,16 +448,18 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
               </div>
               <div>
                 <label className="block text-xs font-mono text-iron-dust mb-2">Account</label>
-                <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full bg-black/20 border border-white/10 p-3 text-sm text-white rounded-sm focus:border-magma outline-none">
-                  <option value="">Select Account...</option>
-                  <optgroup label="Assets">{data.assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
-                  <optgroup label="Debts">{data.debts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>
-                </select>
+                <CustomSelect
+                  value={accountId}
+                  onChange={setAccountId}
+                  placeholder="Select Account..."
+                  error={validationErrors.some(e => e.includes('account'))}
+                  groups={allAccountGroups}
+                />
               </div>
             </>
           )}
 
-          {/* Description (Notes) — shown for all non-investing types, after Merchant/Category/Account */}
+          {/* Notes */}
           {!isInvesting && (
             <div>
               <label className="block text-xs font-mono text-iron-dust mb-2">
@@ -439,13 +475,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({ isOpen
             </div>
           )}
 
-          {/* Investing estimated total */}
+          {/* Investing total */}
           {isInvesting && (
             <div className={clsx(
               'p-4 rounded-sm border flex justify-between items-center',
-              isFeeCategory
-                ? 'bg-amber-500/5 border-amber-500/20'
-                : 'bg-white/5 border-white/10'
+              isFeeCategory ? 'bg-amber-500/5 border-amber-500/20' : 'bg-white/5 border-white/10'
             )}>
               <div>
                 <span className="text-xs font-mono text-iron-dust uppercase tracking-wider block">
