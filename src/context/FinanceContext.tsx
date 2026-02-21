@@ -423,17 +423,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const points: HistoricalPoint[] = [];
     const userCurrency = data.user.currency || 'GBP';
     const debtIdSet = new Set(data.debts.map(d => d.id));
+
     for (let i = days; i >= 0; i--) {
       const d = subDays(new Date(), i);
       const dateStr = format(d, 'yyyy-MM-dd');
       let checking = 0, savings = 0, investing = 0;
+
       data.assets.forEach(asset => {
         if (asset.type === 'checking') {
           checking += asset.startingValue;
-          data.transactions.filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d).forEach(t => { checking += t.amount; });
+          data.transactions
+            .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
+            .forEach(t => { checking += t.amount; });
         } else if (asset.type === 'savings') {
           savings += asset.startingValue;
-          data.transactions.filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d).forEach(t => { savings += t.amount; });
+          data.transactions
+            .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
+            .forEach(t => { savings += t.amount; });
         } else if (asset.type === 'investment') {
           const investingTxns = data.transactions.filter(t => t.type === 'investing' && t.accountId === asset.id && t.symbol && t.quantity && new Date(t.date) <= d);
           const holdings = new Map<string, any>();
@@ -467,8 +473,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
         }
       });
+
+      // ✅ FIXED: replay debt transactions up to this date so the chart matches real balances
       let debts = 0;
-      data.debts.forEach(debt => { debts += debt.startingValue; });
+      data.debts.forEach(debt => {
+        let balance = debt.startingValue;
+        data.transactions
+          .filter(t => t.accountId === debt.id && new Date(t.date) <= d)
+          .forEach(t => { balance += t.amount; });
+        debts += balance;
+      });
+
       points.push({ date: dateStr, netWorth: checking + savings + investing - debts, assets: checking + savings + investing, debts, checking, savings, investing });
     }
     return points;
