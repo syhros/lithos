@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -9,6 +9,7 @@ import { HoldingDetailModal } from '../components/HoldingDetailModal';
 import { InvestmentAccountModal } from '../components/InvestmentAccountModal';
 import { Asset } from '../data/mockData';
 import { useSyncedCounter } from '../hooks/useSyncedCounter';
+import { getCardSortOrder, CardSortOrder, CARD_SORT_KEY } from './Settings';
 
 const tickerAbbrev = (symbol: string): string =>
   symbol.split('-')[0].substring(0, 4).toUpperCase();
@@ -34,6 +35,17 @@ export const Investments: React.FC = () => {
     const [selectedHolding, setSelectedHolding] = useState<any>(null);
     const [selectedAccount, setSelectedAccount] = useState<Asset | null>(null);
     const [closedOpen, setClosedOpen] = useState(false);
+    const [sortOrder, setSortOrder] = useState<CardSortOrder>(getCardSortOrder);
+
+    useEffect(() => {
+        const handler = (e: StorageEvent) => {
+            if (e.key === CARD_SORT_KEY && (e.newValue === 'az' || e.newValue === 'highest' || e.newValue === 'date')) {
+                setSortOrder(e.newValue as CardSortOrder);
+            }
+        };
+        window.addEventListener('storage', handler);
+        return () => window.removeEventListener('storage', handler);
+    }, []);
 
     const minsSinceUpdate = differenceInMinutes(new Date(), lastUpdated);
     const isStale = minsSinceUpdate > 5;
@@ -51,77 +63,43 @@ export const Investments: React.FC = () => {
     }, [data?.transactions]);
 
     const holdings = useMemo(() => {
-        const map = new Map<string, {
-            symbol: string;
-            quantity: number;
-            totalCost: number;
-            feeCost: number;
-            buyQty: number;
-            buyTotalCost: number;
-            currency: string;
-        }>();
-
+        const map = new Map<string, { symbol: string; quantity: number; totalCost: number; feeCost: number; buyQty: number; buyTotalCost: number; currency: string; }>();
         (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
-                const current = map.get(tx.symbol) || {
-                    symbol: tx.symbol,
-                    quantity: 0,
-                    totalCost: 0,
-                    feeCost: 0,
-                    buyQty: 0,
-                    buyTotalCost: 0,
-                    currency: tx.currency || 'GBP',
-                };
-
+                const current = map.get(tx.symbol) || { symbol: tx.symbol, quantity: 0, totalCost: 0, feeCost: 0, buyQty: 0, buyTotalCost: 0, currency: tx.currency || 'GBP' };
                 const isSell = tx.category === 'Sell';
                 const isFee  = tx.category === 'Fee';
-
                 current.quantity += tx.quantity;
-
-                if (isFee) {
-                    current.feeCost += Math.abs(tx.amount);
-                    current.totalCost += Math.abs(tx.amount);
-                } else if (!isSell) {
-                    current.totalCost += Math.abs(tx.amount);
-                    current.buyQty += tx.quantity;
-                    current.buyTotalCost += Math.abs(tx.amount);
-                }
-
+                if (isFee) { current.feeCost += Math.abs(tx.amount); current.totalCost += Math.abs(tx.amount); }
+                else if (!isSell) { current.totalCost += Math.abs(tx.amount); current.buyQty += tx.quantity; current.buyTotalCost += Math.abs(tx.amount); }
                 if (tx.currency) current.currency = tx.currency;
                 map.set(tx.symbol, current);
             }
         });
-
         return Array.from(map.values()).map(h => {
             const marketData = currentPrices[h.symbol];
             const nativeCurrency = h.currency || marketData?.currency || 'GBP';
             const stockIsUsd = nativeCurrency === 'USD';
             const stockIsGbx = nativeCurrency === 'GBX';
             const userIsUsd = userCurrency === 'USD';
-
             let fxRate = 1;
             if (gbpUsdRate > 0) {
               if (stockIsUsd && !userIsUsd) fxRate = 1 / gbpUsdRate;
               if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
             }
-
             const nativePrice = marketData ? marketData.price : 0;
             const displayPrice = stockIsGbx ? nativePrice / 100 : nativePrice * fxRate;
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
-
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
-
             const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
             const today = format(new Date(), 'yyyy-MM-dd');
             const history = historicalPrices[h.symbol] || {};
             const yesterdayPrice = history[yesterday] || history[today] || nativePrice;
             const todayPrice = history[today] || nativePrice;
             const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
-
             const tickerName = symbolNameMap.get(h.symbol) ?? h.symbol;
-
             return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice: avgPriceCost, profitValue, profitPercent, isZeroCost: h.totalCost === 0, marketData, fxRate, dailyChangePercent, tickerName };
         }).sort((a, b) => b.currentValue - a.currentValue);
     }, [data.transactions, currentPrices, gbpUsdRate, userCurrency, symbolNameMap]);
@@ -140,30 +118,18 @@ export const Investments: React.FC = () => {
         return history.map(p => ({ date: p.date, value: p.investing }));
     }, [getHistory]);
 
-    const portfolioUp = (() => {
-        const first = portfolioChartData[0]?.value ?? 0;
-        const last  = portfolioChartData[portfolioChartData.length - 1]?.value ?? 0;
-        return last >= first;
-    })();
-
     const accountChartData = useMemo(() => {
         const result: Record<string, { date: string; value: number }[]> = {};
         investmentAssets.forEach(asset => {
             const today = new Date();
             const start = subMonths(today, 1);
             const dates = eachDayOfInterval({ start, end: today });
-
-            const sortedTxs = (data?.transactions || [])
-                .filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === asset.id)
-                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
+            const sortedTxs = (data?.transactions || []).filter(t => t.type === 'investing' && t.symbol && t.quantity && t.accountId === asset.id).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             const symbolCurrencies: Record<string, string> = {};
             sortedTxs.forEach(t => { if (t.symbol && t.currency) symbolCurrencies[t.symbol] = t.currency; });
-
             const holdingQtys: Record<string, number> = {};
             let txIndex = 0;
             const fallbackBalance = currentBalances[asset.id] || 0;
-
             const chartPoints = dates.map(date => {
                 while (txIndex < sortedTxs.length && isBefore(parseISO(sortedTxs[txIndex].date), addDays(date, 1))) {
                     const tx = sortedTxs[txIndex];
@@ -233,7 +199,7 @@ export const Investments: React.FC = () => {
         return result;
     }, [closedHoldings, historicalPrices, gbpUsdRate]);
 
-    // ── Investment Summary data ────────────────────────────────────────────────
+    // Investment Summary stats
     const totalInvested = activeHoldings.reduce((sum, h) => sum + h.totalCost, 0);
     const totalProfitValue = activeHoldings.reduce((sum, h) => sum + h.profitValue, 0);
     const totalProfitPercent = totalInvested > 0 ? (totalProfitValue / totalInvested) * 100 : 0;
@@ -241,6 +207,13 @@ export const Investments: React.FC = () => {
     const bestPerformer = activeHoldings.length > 0
         ? activeHoldings.reduce((best, h) => h.profitPercent > best.profitPercent ? h : best, activeHoldings[0])
         : null;
+
+    // Sort investment account cards
+    const sortedInvestmentAssets = useMemo(() => {
+        if (sortOrder === 'az') return [...investmentAssets].sort((a, b) => a.name.localeCompare(b.name));
+        if (sortOrder === 'highest') return [...investmentAssets].sort((a, b) => (currentBalances[b.id] || 0) - (currentBalances[a.id] || 0));
+        return investmentAssets;
+    }, [investmentAssets, sortOrder, currentBalances]);
 
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -251,19 +224,13 @@ export const Investments: React.FC = () => {
                         <span className="font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Module</span>
                         <h2 className="text-4xl font-bold text-white tracking-tight mb-8">Investments</h2>
                         <span className="mb-4 font-mono text-xs text-iron-dust uppercase tracking-[3px] block mb-1">Total Portfolio Value</span>
-                        <p className={clsx(
-                            "text-[6.5rem] font-black leading-none tracking-[-4px] text-white",
-                            isPulsing && "animate-pulse-opacity"
-                        )}>
+                        <p className={clsx("text-[6.5rem] font-black leading-none tracking-[-4px] text-white", isPulsing && "animate-pulse-opacity")}>
                             {currencySymbol}{parseInt(pvInt.replace(/,/g, '')).toLocaleString()}
                             <span className="font-light opacity-30 text-[4rem] tracking-normal">.{pvDec}</span>
                         </p>
                     </div>
                     <div className="flex flex-col gap-4 items-end">
-                        <button
-                            onClick={() => setIsAddAccountModalOpen(true)}
-                            className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]"
-                        >
+                        <button onClick={() => setIsAddAccountModalOpen(true)} className="flex items-center gap-2 px-6 py-3 bg-magma text-obsidian rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-magma/90 transition-colors shadow-[0_0_15px_rgba(255,77,0,0.3)]">
                             <Plus size={14} /> Add Account
                         </button>
                         <div className="flex items-center gap-4">
@@ -274,11 +241,7 @@ export const Investments: React.FC = () => {
                                </span>
                             </div>
                             <span className="font-mono text-[10px] text-iron-dust">Updated {format(lastUpdated, 'HH:mm')}</span>
-                            <button
-                                onClick={() => refreshData()}
-                                disabled={loading}
-                                className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}
-                            >
+                            <button onClick={() => refreshData()} disabled={loading} className={clsx("p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-white border border-white/5", loading && "animate-spin cursor-not-allowed opacity-50")}>
                                 <RefreshCw size={12} />
                             </button>
                         </div>
@@ -286,20 +249,18 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
-            {/* ── Investment Summary ── */}
+            {/* Investment Summary */}
             {investmentAssets.length > 0 && (
-                <div className="mb-10">
+                <div className="mt-8 mb-10">
                     <div className="bg-[#161618] border border-white/5 rounded-sm p-6">
                         <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-[3px] mb-5">Investment Summary</span>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                             {/* Total Invested */}
                             <div className="bg-black/30 rounded-sm p-4 border border-white/5">
                                 <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total Invested</span>
-                                <span className="text-lg font-bold text-white font-mono">
-                                    {currencySymbol}{totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <span className="text-lg font-bold text-white font-mono">{currencySymbol}{totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                            {/* Total P/L with P/L% inline */}
+                            {/* Total P/L with % inline */}
                             <div className="bg-black/30 rounded-sm p-4 border border-white/5">
                                 <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Total P/L</span>
                                 <span className={clsx('text-lg font-bold font-mono', portfolioIsUp ? 'text-emerald-vein' : 'text-magma')}>
@@ -309,7 +270,19 @@ export const Investments: React.FC = () => {
                                     {portfolioIsUp ? '+' : ''}{totalProfitPercent.toFixed(2)}%
                                 </span>
                             </div>
-                            {/* Accounts count */}
+                            {/* Active Holdings */}
+                            <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Active Holdings</span>
+                                <span className="text-lg font-bold text-white font-mono">{activeHoldings.length}</span>
+                            </div>
+                            {/* Best Performer */}
+                            <div className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Best Performer</span>
+                                <span className="text-lg font-bold text-emerald-vein font-mono">
+                                    {bestPerformer ? `${tickerAbbrev(bestPerformer.symbol)} +${bestPerformer.profitPercent.toFixed(1)}%` : '\u2014'}
+                                </span>
+                            </div>
+                            {/* Accounts */}
                             <div className="bg-black/30 rounded-sm p-4 border border-white/5">
                                 <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Accounts</span>
                                 <span className="text-lg font-bold text-white font-mono">{investmentAssets.length}</span>
@@ -325,7 +298,7 @@ export const Investments: React.FC = () => {
                     <h2 className="text-sm font-bold text-white uppercase tracking-[2px] flex items-center gap-2"><Wallet size={16} className="text-magma" />Accounts</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {investmentAssets.map(asset => {
+                    {sortedInvestmentAssets.map(asset => {
                         const acctHoldings = holdings.filter(h => {
                           const holdingTx = data.transactions.find(t => t.symbol === h.symbol && t.type === 'investing' && t.accountId === asset.id);
                           return holdingTx !== undefined;
@@ -356,7 +329,6 @@ export const Investments: React.FC = () => {
                                     </ResponsiveContainer>
                                 </div>
                                 <div className="relative z-10 p-6">
-                                    {/* Top row: icon + name/currency on left, institution badge on right */}
                                     <div className="flex justify-between items-start mb-5">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2.5 bg-white/5 rounded-sm text-white shrink-0"><LineChartIcon size={18} /></div>
@@ -367,7 +339,6 @@ export const Investments: React.FC = () => {
                                         </div>
                                         <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase shrink-0 ml-3">{asset.institution}</span>
                                     </div>
-                                    {/* Value — bigger font, lighter decimal */}
                                     <div className="text-4xl font-black text-white tracking-tight leading-none">
                                         {currencySymbol}{whole}<span className="text-2xl font-light opacity-30">.{pence}</span>
                                     </div>
@@ -397,7 +368,6 @@ export const Investments: React.FC = () => {
                         const sparkMin   = sparkline.length > 0 ? Math.min(...sparkline.map(d => d.value)) * 0.98 : 'auto';
                         const abbrev     = tickerAbbrev(stock.symbol);
                         const displayName = toTitleCase(truncateName(stock.tickerName));
-
                         return (
                             <div key={stock.symbol} onClick={() => setSelectedHolding(stock)}
                                 className="bg-[#161618] border border-white/5 p-5 rounded-sm relative hover:bg-white/[0.02] transition-colors group cursor-pointer flex flex-col">
@@ -451,8 +421,7 @@ export const Investments: React.FC = () => {
             {/* Closed Positions */}
             {closedHoldings.length > 0 && (
                 <div>
-                    <button onClick={() => setClosedOpen(p => !p)}
-                        className="flex items-center gap-2 text-sm font-bold text-iron-dust uppercase tracking-[2px] mb-4 hover:text-white transition-colors w-full text-left">
+                    <button onClick={() => setClosedOpen(p => !p)} className="flex items-center gap-2 text-sm font-bold text-iron-dust uppercase tracking-[2px] mb-4 hover:text-white transition-colors w-full text-left">
                         {closedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <TrendingDown size={16} className="text-iron-dust" />
                         Closed Positions
@@ -496,6 +465,7 @@ export const Investments: React.FC = () => {
                                                     <Line type="monotone" dataKey="value" stroke={sparkColor} strokeWidth={1.5} dot={false} isAnimationActive={false} />
                                                 </LineChart>
                                             </ResponsiveContainer>
+
                                         </div>
                                         <div className="grid grid-cols-3 gap-x-3 border-t border-white/5 pt-2 mt-1">
                                             <div><span className="block text-[7px] text-iron-dust uppercase tracking-wider mb-0.5">Price</span><span className="font-mono text-[9px] text-white">{stock.nativeCurrency === 'GBX' ? `${stock.nativePrice.toFixed(2)}p` : `${nativeSymbol}${stock.nativePrice.toFixed(2)}`}</span></div>
