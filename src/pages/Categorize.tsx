@@ -1032,80 +1032,62 @@ export const Categorize: React.FC = () => {
                       <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
                     ))}
                   </div>
-                  {merchantRules.map(rule => {
-                    // Build a readable summary of active match conditions
-                    const conditions: string[] = [];
-                    if (rule.matchDescription) conditions.push(`desc∋"${rule.contains}"`);
-                    if (rule.matchType && rule.matchTypeValue) conditions.push(`type=${rule.matchTypeValue}`);
-                    if (rule.matchAmount && rule.matchAmountValue !== '') conditions.push(`amt=${rule.matchAmountValue}`);
-
-                    return (
-                      <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_3.5rem] gap-2 items-center px-3 pb-2 pt-1 hover:bg-white/[0.02] transition-colors">
-                        {/* Contains — show conditions badge if more than just desc */}
-                        <div>
-                          <input value={rule.contains}
-                            onChange={e => patchMerchantRule(rule.id, { contains: e.target.value })}
-                            placeholder="e.g. DENPLAN"
-                            className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                          {conditions.length > 1 && (
-                            <div className="flex flex-wrap gap-1 mt-0.5">
-                              {conditions.map((c, i) => (
-                                <span key={i} className="text-[8px] font-mono px-1 py-0.5 bg-magma/10 border border-magma/20 text-magma/80 rounded-sm">{c}</span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <input value={rule.setDescription}
-                          onChange={e => patchMerchantRule(rule.id, { setDescription: e.target.value })}
-                          placeholder="e.g. Denplan"
-                          className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                        <input list={`cats-${rule.id}`} value={rule.setCategory}
-                          onChange={e => patchMerchantRule(rule.id, { setCategory: e.target.value })}
-                          placeholder="e.g. Health"
-                          className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
-                        <datalist id={`cats-${rule.id}`}>{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
-                        <CustomSelect
-                          value={rule.setType}
-                          onChange={v => patchMerchantRule(rule.id, { setType: v as TransactionType | '' })}
-                          groups={[{ options: [{ value: '', label: '— keep —' }, ...TX_TYPE_OPTIONS[0].options] }]}
-                          placeholder="— keep —"
-                          triggerClassName="px-2 py-1.5 text-xs"
-                          maxVisibleItems={8}
-                        />
-                        <CustomSelect
-                          value={rule.setAccountId}
-                          onChange={v => patchMerchantRule(rule.id, { setAccountId: v })}
-                          groups={buildAccountGroups(data.assets, data.debts, '— any —')}
-                          placeholder="— any —"
-                          triggerClassName="px-2 py-1.5 text-xs"
-                          maxVisibleItems={8}
-                        />
-                        <CustomSelect
-                          value={rule.setAccountToId}
-                          onChange={v => patchMerchantRule(rule.id, { setAccountToId: v })}
-                          groups={buildAccountGroups(data.assets, data.debts, '— none —')}
-                          placeholder="— none —"
-                          triggerClassName="px-2 py-1.5 text-xs"
-                          maxVisibleItems={8}
-                        />
-                        {/* Action buttons: pencil (edit) + trash (delete) */}
-                        <div className="flex items-center gap-1 justify-end">
-                          <button
-                            onClick={() => setEditingRule(rule)}
-                            title="Edit rule"
-                            className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-white border border-white/10 hover:border-white/20 rounded-sm transition-colors">
-                            <Pencil size={10} />
-                          </button>
-                          <button
-                            onClick={() => removeMerchantRule(rule.id)}
-                            title="Delete rule"
-                            className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-magma border border-white/10 hover:border-magma/30 rounded-sm transition-colors">
-                            <Trash2 size={10} />
-                          </button>
-                        </div>
+                  {merchantRules.map(rule => (
+                    <div key={rule.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_3.5rem] gap-2 items-center px-3 py-2 hover:bg-white/[0.02] transition-colors">
+                      <input value={rule.contains}
+                        onChange={e => patchMerchantRule(rule.id, { contains: e.target.value })}
+                        placeholder="e.g. DENPLAN"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input value={rule.setDescription}
+                        onChange={e => patchMerchantRule(rule.id, { setDescription: e.target.value })}
+                        placeholder="e.g. Denplan"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <input list={`cats-${rule.id}`} value={rule.setCategory}
+                        onChange={e => patchMerchantRule(rule.id, { setCategory: e.target.value })}
+                        placeholder="e.g. Health"
+                        className="w-full bg-black/30 border border-white/10 px-2 py-1.5 text-xs text-white rounded-sm focus:border-magma outline-none" />
+                      <datalist id={`cats-${rule.id}`}>{uniqueCategories.map((c,i) => <option key={i} value={c} />)}</datalist>
+                      <CustomSelect
+                        value={rule.setType}
+                        onChange={v => patchMerchantRule(rule.id, { setType: v as TransactionType | '' })}
+                        groups={[{ options: [{ value: '', label: '— keep —' }, ...TX_TYPE_OPTIONS[0].options] }]}
+                        placeholder="— keep —"
+                        triggerClassName="px-2 py-1.5 text-xs"
+                        maxVisibleItems={8}
+                      />
+                      <CustomSelect
+                        value={rule.setAccountId}
+                        onChange={v => patchMerchantRule(rule.id, { setAccountId: v })}
+                        groups={buildAccountGroups(data.assets, data.debts, '— any —')}
+                        placeholder="— any —"
+                        triggerClassName="px-2 py-1.5 text-xs"
+                        maxVisibleItems={8}
+                      />
+                      <CustomSelect
+                        value={rule.setAccountToId}
+                        onChange={v => patchMerchantRule(rule.id, { setAccountToId: v })}
+                        groups={buildAccountGroups(data.assets, data.debts, '— none —')}
+                        placeholder="— none —"
+                        triggerClassName="px-2 py-1.5 text-xs"
+                        maxVisibleItems={8}
+                      />
+                      {/* Action buttons: pencil (edit) + trash (delete) */}
+                      <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => setEditingRule(rule)}
+                          title="Edit rule"
+                          className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-white border border-white/10 hover:border-white/20 rounded-sm transition-colors">
+                          <Pencil size={10} />
+                        </button>
+                        <button
+                          onClick={() => removeMerchantRule(rule.id)}
+                          title="Delete rule"
+                          className="w-6 h-6 flex items-center justify-center text-iron-dust hover:text-magma border border-white/10 hover:border-magma/30 rounded-sm transition-colors">
+                          <Trash2 size={10} />
+                        </button>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
               <button onClick={addMerchantRule} className="flex items-center gap-1.5 text-xs text-iron-dust hover:text-white transition-colors">
