@@ -54,8 +54,8 @@ export const Investments: React.FC = () => {
         const map = new Map<string, {
             symbol: string;
             quantity: number;
-            totalCost: number;     // total cost basis (buys only)
-            feeCost: number;       // accumulated fee costs (treated as losses)
+            totalCost: number;
+            feeCost: number;
             buyQty: number;
             buyTotalCost: number;
             currency: string;
@@ -76,17 +76,12 @@ export const Investments: React.FC = () => {
                 const isSell = tx.category === 'Sell';
                 const isFee  = tx.category === 'Fee';
 
-                // All categories adjust quantity (buy adds, sell/fee subtract)
                 current.quantity += tx.quantity;
 
                 if (isFee) {
-                    // Fee: shares removed from holding (already done above via tx.quantity which should be negative)
-                    // Cost is a loss — add to feeCost (stored as positive number)
                     current.feeCost += Math.abs(tx.amount);
-                    // Also add to totalCost so the cost basis includes fees (reduces P/L)
                     current.totalCost += Math.abs(tx.amount);
                 } else if (!isSell) {
-                    // Buy or Dividend: add to cost basis normally
                     current.totalCost += Math.abs(tx.amount);
                     current.buyQty += tx.quantity;
                     current.buyTotalCost += Math.abs(tx.amount);
@@ -115,7 +110,6 @@ export const Investments: React.FC = () => {
             const currentValue = h.quantity * displayPrice;
             const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
 
-            // P/L: currentValue minus total cost (which now includes fees as losses)
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
@@ -239,6 +233,12 @@ export const Investments: React.FC = () => {
         return result;
     }, [closedHoldings, historicalPrices, gbpUsdRate]);
 
+    // ── Total Credit Summary data ──────────────────────────────────────────────
+    const totalInvested = activeHoldings.reduce((sum, h) => sum + h.totalCost, 0);
+    const totalProfitValue = activeHoldings.reduce((sum, h) => sum + h.profitValue, 0);
+    const totalProfitPercent = totalInvested > 0 ? (totalProfitValue / totalInvested) * 100 : 0;
+    const portfolioIsUp = totalProfitValue >= 0;
+
     return (
         <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
             {/* Header */}
@@ -283,6 +283,47 @@ export const Investments: React.FC = () => {
                 </div>
             </div>
 
+            {/* ── Account Summary + Total Credit Summary ── */}
+            {investmentAssets.length > 0 && (
+                <div className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Account Summary */}
+                    <div>
+                        <h3 className="text-[10px] font-mono uppercase tracking-[3px] text-iron-dust mb-3">Account Summary</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { label: 'Total Value', value: `${currencySymbol}${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
+                                { label: 'Total Invested', value: `${currencySymbol}${totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: 'text-white' },
+                                { label: 'Total P/L', value: `${portfolioIsUp ? '+' : ''}${currencySymbol}${Math.abs(totalProfitValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: portfolioIsUp ? 'text-emerald-vein' : 'text-magma' },
+                                { label: 'P/L %', value: `${portfolioIsUp ? '+' : ''}${totalProfitPercent.toFixed(2)}%`, color: portfolioIsUp ? 'text-emerald-vein' : 'text-magma' },
+                            ].map(({ label, value, color }) => (
+                                <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                    <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
+                                    <span className={clsx('text-lg font-bold font-mono', color)}>{value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Total Credit Summary */}
+                    <div>
+                        <h3 className="text-[10px] font-mono uppercase tracking-[3px] text-iron-dust mb-3">Total Credit Summary</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { label: 'Active Holdings', value: String(activeHoldings.length), color: 'text-white' },
+                                { label: 'Closed Positions', value: String(closedHoldings.length), color: 'text-iron-dust' },
+                                { label: 'Best Performer', value: activeHoldings.length > 0 ? `${activeHoldings.reduce((best, h) => h.profitPercent > best.profitPercent ? h : best, activeHoldings[0]).symbol.split('-')[0].substring(0,4).toUpperCase()} +${Math.max(...activeHoldings.map(h => h.profitPercent)).toFixed(1)}%` : '—', color: 'text-emerald-vein' },
+                                { label: 'Accounts', value: String(investmentAssets.length), color: 'text-white' },
+                            ].map(({ label, value, color }) => (
+                                <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
+                                    <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
+                                    <span className={clsx('text-lg font-bold font-mono', color)}>{value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Accounts */}
             <div className="mb-12">
                 <div className="flex items-center justify-between mb-6">
@@ -319,15 +360,21 @@ export const Investments: React.FC = () => {
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 </div>
-                                <div className="relative z-10 p-8">
-                                    <div className="flex justify-between items-start mb-6">
-                                        <div className="p-3 bg-white/5 rounded-sm text-white"><LineChartIcon size={20} /></div>
-                                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase">{asset.institution}</span>
+                                <div className="relative z-10 p-6">
+                                    {/* Top row: icon + name/currency on left, institution badge on right */}
+                                    <div className="flex justify-between items-start mb-5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 bg-white/5 rounded-sm text-white shrink-0"><LineChartIcon size={18} /></div>
+                                            <div>
+                                                <h3 className="text-sm font-bold text-white leading-tight">{asset.name}</h3>
+                                                <p className="text-[11px] text-iron-dust font-mono mt-0.5">{asset.currency}</p>
+                                            </div>
+                                        </div>
+                                        <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-mono text-iron-dust uppercase shrink-0 ml-3">{asset.institution}</span>
                                     </div>
-                                    <h3 className="text-lg font-bold text-white mb-1">{asset.name}</h3>
-                                    <p className="text-xs text-iron-dust font-mono mb-4">{asset.currency}</p>
-                                    <div className="text-3xl font-bold text-white tracking-tight">
-                                        {currencySymbol}{whole}<span className="text-xl font-light opacity-40">.{pence}</span>
+                                    {/* Value — bigger font, lighter decimal */}
+                                    <div className="text-4xl font-black text-white tracking-tight leading-none">
+                                        {currencySymbol}{whole}<span className="text-2xl font-light opacity-30">.{pence}</span>
                                     </div>
                                     <div className={clsx('text-[10px] font-mono mt-1.5', acctUp ? 'text-emerald-vein' : 'text-magma')}>
                                         {acctUp ? '+' : ''}{currencySymbol}{Math.abs(acctTotalProfit).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})} ({acctTotalCost === 0 ? '+\u221e' : acctProfitPercent.toFixed(2)}%)

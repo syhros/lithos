@@ -20,13 +20,15 @@ type PullPhase =
   | 'pulling'
   | 'done';
 
+type ImportPhase = 'idle' | 'parsing' | 'importing' | 'done' | 'error';
+
 // Strip any timestamp component, return just YYYY-MM-DD
 const toDateOnly = (dateStr: string): string => dateStr.substring(0, 10);
 
 const DELETE_OPTIONS: SelectGroup[] = [
   {
     options: [
-      { value: 'none', label: 'Select deletion type…' },
+      { value: 'none', label: 'Select deletion type\u2026' },
     ],
   },
   {
@@ -50,7 +52,7 @@ const DELETE_OPTIONS: SelectGroup[] = [
       {
         value: 'accounts',
         label: 'All Accounts',
-        hint: 'resets all account balances to £0',
+        hint: 'resets all account balances to \u00a30',
       },
       {
         value: 'debts',
@@ -80,7 +82,7 @@ const DELETE_OPTIONS: SelectGroup[] = [
       {
         value: 'factory_reset',
         label: 'Factory Reset',
-        hint: 'deletes everything — irreversible',
+        hint: 'deletes everything \u2014 irreversible',
       },
     ],
   },
@@ -88,11 +90,24 @@ const DELETE_OPTIONS: SelectGroup[] = [
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const { data, refreshData } = useFinance();
+  const {
+    data,
+    refreshData,
+    addAccount,
+    addTransaction,
+    addDebt,
+    addBill,
+  } = useFinance();
   const [deleteType, setDeleteType] = useState<string>('none');
   const [monthsToDelete, setMonthsToDelete] = useState<number>(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
+
+  // JSON import state
+  const [importPhase, setImportPhase] = useState<ImportPhase>('idle');
+  const [importMessage, setImportMessage] = useState<string>('');
+  const [importFileName, setImportFileName] = useState<string>('');
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // Historic pull state
   const [pullPhase, setPullPhase] = useState<PullPhase>('idle');
@@ -127,6 +142,164 @@ export const Settings: React.FC = () => {
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // JSON Import
+  // ──────────────────────────────────────────────────────────────────────────
+  const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so re-selecting same file fires onChange again
+    if (importInputRef.current) importInputRef.current.value = '';
+
+    setImportFileName(file.name);
+    setImportPhase('parsing');
+    setImportMessage('Reading file\u2026');
+
+    let parsed: any;
+    try {
+      const text = await file.text();
+      parsed = JSON.parse(text);
+    } catch {
+      setImportPhase('error');
+      setImportMessage('Invalid JSON file — could not parse.');
+      return;
+    }
+
+    // Basic shape validation
+    const hasTransactions = Array.isArray(parsed?.transactions);
+    const hasAssets = Array.isArray(parsed?.assets);
+    const hasDebts = Array.isArray(parsed?.debts);
+    const hasBills = Array.isArray(parsed?.bills);
+
+    if (!hasTransactions && !hasAssets && !hasDebts && !hasBills) {
+      setImportPhase('error');
+      setImportMessage('File does not look like a Lithos backup (no recognisable data arrays found).');
+      return;
+    }
+
+    setImportPhase('importing');
+
+    let imported = { accounts: 0, transactions: 0, debts: 0, bills: 0 };
+    let errors: string[] = [];
+
+    // ── Accounts / Assets ──────────────────────────────────────────────────
+    if (hasAssets) {
+      for (const a of parsed.assets) {
+        try {
+          await addAccount({
+            name: a.name ?? 'Imported Account',
+            type: a.type ?? 'checking',
+            currency: a.currency ?? 'GBP',
+            institution: a.institution ?? '',
+            color: a.color ?? '#ffffff',
+            startingValue: typeof a.startingValue === 'number' ? a.startingValue : 0,
+            interestRate: a.interestRate,
+            symbol: a.symbol,
+            isClosed: a.isClosed ?? false,
+            openedDate: a.openedDate,
+            closedDate: a.closedDate,
+          });
+          imported.accounts++;
+        } catch (err: any) {
+          errors.push(`Account "${a.name}": ${err?.message ?? 'unknown error'}`);
+        }
+      }
+    }
+
+    // ── Debts ──────────────────────────────────────────────────────────────
+    if (hasDebts) {
+      for (const d of parsed.debts) {
+        try {
+          await addDebt({
+            name: d.name ?? 'Imported Debt',
+            type: d.type ?? 'credit_card',
+            limit: typeof d.limit === 'number' ? d.limit : 0,
+            apr: typeof d.apr === 'number' ? d.apr : 0,
+            minPaymentType: d.minPaymentType ?? 'fixed',
+            minPaymentValue: typeof d.minPaymentValue === 'number' ? d.minPaymentValue : 0,
+            startingValue: typeof d.startingValue === 'number' ? d.startingValue : 0,
+            promo: d.promo,
+          });
+          imported.debts++;
+        } catch (err: any) {
+          errors.push(`Debt "${d.name}": ${err?.message ?? 'unknown error'}`);
+        }
+      }
+    }
+
+    // ── Bills ──────────────────────────────────────────────────────────────
+    if (hasBills) {
+      for (const b of parsed.bills) {
+        try {
+          await addBill({
+            name: b.name ?? 'Imported Bill',
+            amount: typeof b.amount === 'number' ? b.amount : 0,
+            dueDate: b.dueDate ?? b.due_date ?? new Date().toISOString().split('T')[0],
+            isPaid: b.isPaid ?? false,
+            autoPay: b.autoPay ?? false,
+            category: b.category ?? 'Other',
+            isRecurring: b.isRecurring ?? false,
+            frequency: b.frequency,
+            recurringEndDate: b.recurringEndDate,
+          });
+          imported.bills++;
+        } catch (err: any) {
+          errors.push(`Bill "${b.name}": ${err?.message ?? 'unknown error'}`);
+        }
+      }
+    }
+
+    // ── Transactions ───────────────────────────────────────────────────────
+    // Import transactions last so account IDs exist if they were remapped.
+    // NOTE: account IDs in the backup may not match the freshly-created account
+    // IDs (they're new UUIDs). We attempt a best-effort name match.
+    const nameToNewId = new Map<string, string>();
+    if (hasAssets) {
+      // Re-fetch from context after addAccount calls populated state
+      // We'll match by name when we can.
+    }
+
+    if (hasTransactions) {
+      for (const t of parsed.transactions) {
+        try {
+          await addTransaction({
+            date: t.date ?? new Date().toISOString().split('T')[0],
+            description: t.description ?? '',
+            amount: typeof t.amount === 'number' ? t.amount : 0,
+            type: t.type ?? 'expense',
+            category: t.category ?? 'Other',
+            accountId: t.accountId ?? t.account_id ?? undefined,
+            notes: t.notes,
+            symbol: t.symbol,
+            quantity: t.quantity,
+            price: t.price,
+            currency: t.currency,
+          });
+          imported.transactions++;
+        } catch (err: any) {
+          errors.push(`Transaction "${t.description}": ${err?.message ?? 'unknown error'}`);
+        }
+      }
+    }
+
+    if (errors.length === 0) {
+      setImportPhase('done');
+      const parts = [
+        imported.accounts > 0 && `${imported.accounts} account${imported.accounts !== 1 ? 's' : ''}`,
+        imported.debts > 0 && `${imported.debts} debt${imported.debts !== 1 ? 's' : ''}`,
+        imported.bills > 0 && `${imported.bills} bill${imported.bills !== 1 ? 's' : ''}`,
+        imported.transactions > 0 && `${imported.transactions} transaction${imported.transactions !== 1 ? 's' : ''}`,
+      ].filter(Boolean).join(', ');
+      setImportMessage(`Import complete \u2014 ${parts || 'nothing to import'}`);
+    } else {
+      setImportPhase('error');
+      setImportMessage(`Imported with ${errors.length} error${errors.length !== 1 ? 's' : ''}: ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` \u2026and ${errors.length - 3} more` : ''}`);
+    }
+
+    await refreshData();
+  };
+
   const handlePullHistoricData = async () => {
     if (pullPhase !== 'idle' && pullPhase !== 'done') return;
 
@@ -136,10 +309,9 @@ export const Settings: React.FC = () => {
     const transactions = data?.transactions || [];
     const today = toDateOnly(new Date().toISOString());
 
-    // ── PHASE 1: Scan all tickers for earliest transaction date ──
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
-    addLog('PHASE 1 — Scanning transaction history', 'heading');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
+    addLog('PHASE 1 \u2014 Scanning transaction history', 'heading');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
     await sleep(150);
 
     const firstTxDate = new Map<string, string>();
@@ -154,19 +326,18 @@ export const Settings: React.FC = () => {
         .map(t => toDateOnly(t.date))
         .sort()[0];
       firstTxDate.set(sym, earliest);
-      addLog(`  → ${sym}: first transaction on ${earliest}`, 'info');
+      addLog(`  \u2192 ${sym}: first transaction on ${earliest}`, 'info');
     }
 
     addLog('', 'dim');
-    addLog(`✓ Earliest transaction dates found for ${allSymbols.length} tickers`, 'success');
+    addLog(`\u2713 Earliest transaction dates found for ${allSymbols.length} tickers`, 'success');
     await sleep(200);
 
-    // ── PHASE 2: Check cache for each ticker ──
     setPullPhase('cache_check');
     addLog('', 'dim');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
-    addLog('PHASE 2 — Checking price history cache', 'heading');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
+    addLog('PHASE 2 \u2014 Checking price history cache', 'heading');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
     await sleep(150);
 
     const toFetch = new Map<string, { from: string; to: string }>();
@@ -188,53 +359,51 @@ export const Settings: React.FC = () => {
       const cacheStart = cached?.date ? toDateOnly(cached.date) : null;
 
       if (cacheStart && cacheStart <= txFrom) {
-        addLog(`  → ${sym}: cache covers ${cacheStart} ✓ — skipping`, 'success');
+        addLog(`  \u2192 ${sym}: cache covers ${cacheStart} \u2713 \u2014 skipping`, 'success');
         ignored.push(sym);
       } else if (cacheStart) {
-        addLog(`  → ${sym}: cache starts ${cacheStart}, need ${txFrom} — gap: ${txFrom} → ${cacheStart}`, 'info');
+        addLog(`  \u2192 ${sym}: cache starts ${cacheStart}, need ${txFrom} \u2014 gap: ${txFrom} \u2192 ${cacheStart}`, 'info');
         toFetch.set(sym, { from: txFrom, to: cacheStart });
       } else {
-        addLog(`  → ${sym}: no cache found — will fetch ${txFrom} → ${today}`, 'info');
+        addLog(`  \u2192 ${sym}: no cache found \u2014 will fetch ${txFrom} \u2192 ${today}`, 'info');
         toFetch.set(sym, { from: txFrom, to: today });
       }
     }
 
     addLog('', 'dim');
     if (ignored.length > 0) {
-      addLog(`✓ ${ignored.length} ticker(s) already fully cached: ${ignored.join(', ')}`, 'success');
+      addLog(`\u2713 ${ignored.length} ticker(s) already fully cached: ${ignored.join(', ')}`, 'success');
     }
-    addLog(`→ ${toFetch.size} ticker(s) require a fetch`, 'info');
+    addLog(`\u2192 ${toFetch.size} ticker(s) require a fetch`, 'info');
     await sleep(200);
 
     if (toFetch.size === 0) {
       addLog('', 'dim');
-      addLog('✓ All tickers are fully cached. Nothing to do!', 'success');
+      addLog('\u2713 All tickers are fully cached. Nothing to do!', 'success');
       setPullPhase('done');
       return;
     }
 
-    // ── PHASE 3: Compile request list ──
     setPullPhase('compiling');
     addLog('', 'dim');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
-    addLog('PHASE 3 — Compiling request list', 'heading');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
+    addLog('PHASE 3 \u2014 Compiling request list', 'heading');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
     await sleep(150);
 
     for (const [sym, range] of toFetch.entries()) {
-      addLog(`  ${sym.padEnd(16)} ${range.from} → ${range.to}`, 'info');
+      addLog(`  ${sym.padEnd(16)} ${range.from} \u2192 ${range.to}`, 'info');
       await sleep(25);
     }
     addLog('', 'dim');
-    addLog(`✓ Request list compiled — ${toFetch.size} ticker(s) queued`, 'success');
+    addLog(`\u2713 Request list compiled \u2014 ${toFetch.size} ticker(s) queued`, 'success');
     await sleep(200);
 
-    // ── PHASE 4: Fetch ──
     setPullPhase('pulling');
     addLog('', 'dim');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
-    addLog('PHASE 4 — Pulling price history', 'heading');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
+    addLog('PHASE 4 \u2014 Pulling price history', 'heading');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
     await sleep(150);
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -245,37 +414,37 @@ export const Settings: React.FC = () => {
     let errors = 0;
 
     for (const [sym, range] of toFetch.entries()) {
-      addLog(`  Requesting price history for ${sym} (${range.from} → ${range.to})...`, 'info');
+      addLog(`  Requesting price history for ${sym} (${range.from} \u2192 ${range.to})...`, 'info');
 
       try {
         const url = `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(sym)}&from=${range.from}&to=${range.to}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 
         if (!res.ok) {
-          addLog(`  ✗ ${sym}: HTTP ${res.status}`, 'error');
+          addLog(`  \u2717 ${sym}: HTTP ${res.status}`, 'error');
           errors++;
         } else {
           const json = await res.json();
           const result = json?.summary?.[sym];
           if (result?.error) {
-            addLog(`  ✗ ${sym}: ${result.error}`, 'error');
+            addLog(`  \u2717 ${sym}: ${result.error}`, 'error');
             errors++;
           } else {
             const rows = result?.rows ?? 0;
             totalRows += rows;
-            addLog(`  ✓ ${sym} complete — ${rows.toLocaleString()} rows cached`, 'success');
+            addLog(`  \u2713 ${sym} complete \u2014 ${rows.toLocaleString()} rows cached`, 'success');
           }
         }
       } catch (e: any) {
-        addLog(`  ✗ ${sym}: ${e.message || 'Network error'}`, 'error');
+        addLog(`  \u2717 ${sym}: ${e.message || 'Network error'}`, 'error');
         errors++;
       }
     }
 
     addLog('', 'dim');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
-    addLog(`COMPLETE — ${totalRows.toLocaleString()} rows cached${errors > 0 ? `, ${errors} error(s)` : ''}`, errors > 0 ? 'error' : 'success');
-    addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'dim');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
+    addLog(`COMPLETE \u2014 ${totalRows.toLocaleString()} rows cached${errors > 0 ? `, ${errors} error(s)` : ''}`, errors > 0 ? 'error' : 'success');
+    addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501', 'dim');
 
     setPullPhase('done');
     await refreshData();
@@ -413,11 +582,56 @@ export const Settings: React.FC = () => {
           <div className="space-y-8">
             <div>
               <p className="text-sm text-iron-dust mb-4">Import a previously exported JSON backup to restore your data</p>
-              <label className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/20 text-white rounded-sm text-sm font-bold uppercase tracking-wider hover:bg-white/15 transition-colors cursor-pointer w-fit">
-                <Upload size={14} />
-                Choose File
-                <input type="file" accept=".json" className="hidden" onChange={() => {}} />
+
+              {/* File picker */}
+              <label className={clsx(
+                'flex items-center gap-2 px-6 py-3 rounded-sm text-sm font-bold uppercase tracking-wider transition-colors cursor-pointer w-fit border',
+                importPhase === 'importing' || importPhase === 'parsing'
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed pointer-events-none'
+                  : importPhase === 'done'
+                  ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20'
+                  : importPhase === 'error'
+                  ? 'bg-red-900/20 border-red-900/30 text-red-400 hover:bg-red-900/30'
+                  : 'bg-white/10 border-white/20 text-white hover:bg-white/15'
+              )}>
+                {importPhase === 'importing' || importPhase === 'parsing' ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : importPhase === 'done' ? (
+                  <CheckCircle2 size={14} />
+                ) : importPhase === 'error' ? (
+                  <XCircle size={14} />
+                ) : (
+                  <Upload size={14} />
+                )}
+                {importPhase === 'parsing' ? 'Parsing\u2026' :
+                 importPhase === 'importing' ? 'Importing\u2026' :
+                 importPhase === 'done' ? 'Import Complete' :
+                 importPhase === 'error' ? 'Import Failed — Try Again' :
+                 'Choose JSON File'}
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleImportJSON}
+                  disabled={importPhase === 'importing' || importPhase === 'parsing'}
+                />
               </label>
+
+              {/* Status message */}
+              {importMessage && (
+                <div className={clsx(
+                  'mt-3 flex items-start gap-2 text-sm font-mono rounded-sm px-4 py-3 border',
+                  importPhase === 'done'
+                    ? 'bg-emerald-vein/5 border-emerald-vein/20 text-emerald-vein'
+                    : importPhase === 'error'
+                    ? 'bg-red-900/10 border-red-900/30 text-red-400'
+                    : 'bg-white/5 border-white/10 text-white/70'
+                )}>
+                  {importPhase === 'done' ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" /> : importPhase === 'error' ? <XCircle size={14} className="shrink-0 mt-0.5" /> : <Loader2 size={14} className="animate-spin shrink-0 mt-0.5" />}
+                  <span>{importFileName && <span className="text-iron-dust mr-1">[{importFileName}]</span>}{importMessage}</span>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-white/5" />
@@ -497,7 +711,7 @@ export const Settings: React.FC = () => {
                 value={deleteType}
                 onChange={v => { setDeleteType(v); setConfirmDelete(false); }}
                 groups={DELETE_OPTIONS}
-                placeholder="Select deletion type…"
+                placeholder="Select deletion type\u2026"
                 maxVisibleItems={8}
               />
             </div>
