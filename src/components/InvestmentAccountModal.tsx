@@ -5,6 +5,7 @@ import { format, subMonths, eachDayOfInterval, isBefore, parseISO, addDays } fro
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { Asset, Currency } from '../data/mockData';
+import { getCloseForDate } from '../lib/priceHistory';
 
 interface InvestmentAccountModalProps {
   isOpen: boolean;
@@ -14,8 +15,6 @@ interface InvestmentAccountModalProps {
 
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
-// Returns a display-friendly price string for a holding.
-// GBX raw prices (pence) are shown as Xp. USD shown as $X. GBP shown as £X.
 const formatHoldingPrice = (rawPrice: number, currency: string): string => {
   if (currency === 'GBX') return `${rawPrice.toFixed(2)}p (\u00a3${(rawPrice / 100).toFixed(4)})`;
   if (currency === 'USD') return `$${rawPrice.toFixed(2)}`;
@@ -93,7 +92,6 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
       const profitValue = currentValue - h.totalCost;
       const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
 
-      // Guard against zero quantity to avoid division explosion
       const avgCostGbp = h.quantity > 0 ? h.totalCost / h.quantity : 0;
 
       return {
@@ -146,7 +144,8 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
       Object.entries(holdingQtys).forEach(([sym, qty]) => {
         const hist = historicalPrices[sym] || {};
         const dateStr = format(date, 'yyyy-MM-dd');
-        let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
+        const closedPrice = getCloseForDate(hist, dateStr);
+        let price = closedPrice !== null ? closedPrice : (currentPrices[sym]?.price ?? 0);
         const isUsd = symbolCurrencies[sym] === 'USD';
         const isGbx = symbolCurrencies[sym] === 'GBX';
         const fxRate = isUsd && gbpUsdRate > 0 ? 1 / gbpUsdRate : 1;
@@ -349,7 +348,6 @@ export const InvestmentAccountModal: React.FC<InvestmentAccountModalProps> = ({ 
                         <span className="text-sm font-bold text-white font-mono">{currencySymbol}{h.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        {/* Use a JS expression for the middle dot to avoid \u00b7 rendering literally in JSX */}
                         <span className="text-[9px] font-mono text-iron-dust">
                           {h.quantity.toFixed(4)} shares {String.fromCharCode(183)} {formatHoldingPrice(h.rawNativePrice, h.currency)}
                         </span>

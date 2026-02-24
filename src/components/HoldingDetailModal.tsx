@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format, subDays, eachDayOfInterval, isBefore, parseISO, addDays, subWeeks, subMonths } from 'date-fns';
 import { clsx } from 'clsx';
 import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
+import { getCloseForDate } from '../lib/priceHistory';
 
 type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 type ChartMode = 'VALUE' | 'STOCK';
@@ -39,10 +40,6 @@ const getStartDate = (range: TimeRange, allDates: Date[], chartMode: ChartMode, 
   }
 };
 
-/**
- * Always returns 'dd MMM yyyy' so the tooltip always has the full date.
- * The XAxis tick format is handled separately (and the axis is hidden anyway).
- */
 const getTooltipDateFormat = (): string => 'dd MMM yyyy';
 
 const getAxisDateFormat = (range: TimeRange): string => {
@@ -59,7 +56,6 @@ const getAxisDateFormat = (range: TimeRange): string => {
 const CustomTooltip = ({ active, payload, mode, nativeCurrency, currencySymbol, gbpUsdRate }: any) => {
   if (active && payload && payload.length) {
     const value = payload[0]?.value;
-    // The full ISO date is stored as `fullDate` on each data point
     const fullDate: string | undefined = payload[0]?.payload?.fullDate;
     const isUsd = nativeCurrency === 'USD';
     const isGbx = nativeCurrency === 'GBX';
@@ -160,8 +156,9 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
         txIndex++;
       }
 
-      const rawPrice = history[dateStr] !== undefined ? history[dateStr] : lastKnownPrice;
-      if (history[dateStr] !== undefined) lastKnownPrice = history[dateStr];
+      const closedPrice = getCloseForDate(history, dateStr);
+      const rawPrice = closedPrice !== null ? closedPrice : lastKnownPrice;
+      if (closedPrice !== null) lastKnownPrice = closedPrice;
 
       const gbpPrice = isGbx ? rawPrice / 100 : rawPrice * fxRate;
       const marketValueGbp = currentQty * gbpPrice;
@@ -187,9 +184,7 @@ export const HoldingDetailModal: React.FC<HoldingDetailModalProps> = ({ isOpen, 
     return allChartData
       .filter(d => !isBefore(d.date, startDate))
       .map(d => ({
-        // `date` is the axis label (formatted for tick density, but axis is hidden)
         date: format(d.date, getAxisDateFormat(timeRange)),
-        // `fullDate` is the ISO string used by the tooltip for the precise date
         fullDate: d.dateStr,
         value: parseFloat(d.value.toFixed(2)),
         price: parseFloat(d.price.toFixed(2)),
