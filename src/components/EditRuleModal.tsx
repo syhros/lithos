@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check, Code } from 'lucide-react';
 import { clsx } from 'clsx';
 import { MerchantRule } from '../hooks/useImportRules';
 import { TransactionType } from '../data/mockData';
@@ -51,6 +51,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
   const [matchDescription, setMatchDescription] = useState(rule.matchDescription);
   const [matchType,        setMatchType]        = useState(rule.matchType);
   const [matchAmount,      setMatchAmount]      = useState(rule.matchAmount);
+  const [useRegex,         setUseRegex]         = useState(rule.useRegex || false);
 
   // ─ Match values ─
   const [contains,          setContains]         = useState(rule.contains);
@@ -71,22 +72,33 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
 
   const atLeastOneCondition = matchDescription || matchType || matchAmount;
 
+  // Validate regex pattern
+  const regexError = useMemo(() => {
+    if (!useRegex || !contains) return null;
+    try {
+      new RegExp(contains, 'i');
+      return null;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }, [useRegex, contains]);
+
   const typeMatchOptions: SelectGroup[] = useMemo(() => [{
     options: [
-      { value: '', label: '\u2014 select type \u2014' },
+      { value: '', label: '— select type —' },
       ...TX_TYPE_OPTIONS[0].options,
     ],
   }], []);
 
   const typeSetOptions: SelectGroup[] = useMemo(() => [{
     options: [
-      { value: '', label: '\u2014 keep current \u2014' },
+      { value: '', label: '— keep current —' },
       ...TX_TYPE_OPTIONS[0].options,
     ],
   }], []);
 
-  const acctFromGroups = useMemo(() => buildAccountGroups(assets, debts, '\u2014 any account \u2014'), [assets, debts]);
-  const acctToGroups   = useMemo(() => buildAccountGroups(assets, debts, '\u2014 none \u2014'),        [assets, debts]);
+  const acctFromGroups = useMemo(() => buildAccountGroups(assets, debts, '— any account —'), [assets, debts]);
+  const acctToGroups   = useMemo(() => buildAccountGroups(assets, debts, '— none —'),        [assets, debts]);
 
   const handleSave = () => {
     onSave({
@@ -94,6 +106,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
       matchDescription,
       matchType,
       matchAmount,
+      useRegex,
       contains,
       matchTypeValue,
       matchAmountValue: matchAmountValue !== '' ? parseFloat(matchAmountValue) : '',
@@ -153,7 +166,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
 
           {/* ── MATCH CONDITIONS ── */}
           <div>
-            <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Match when\u2026 (ALL ticked conditions must pass)</p>
+            <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">Match when… (ALL ticked conditions must pass)</p>
             <div className="flex flex-wrap gap-2">
               <CheckToggle label="Description contains" checked={matchDescription} onChange={setMatchDescription} />
               <CheckToggle label="Type matches"         checked={matchType}        onChange={setMatchType}        />
@@ -161,19 +174,44 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
             </div>
           </div>
 
-          {/* Description contains input */}
+          {/* Description contains input with regex toggle */}
           {matchDescription && (
             <div>
-              <label className="text-[9px] font-mono text-iron-dust block mb-1 uppercase tracking-wider">
-                Description contains
-                <span className="text-iron-dust/50 normal-case tracking-normal ml-1">(shorten to a keyword to broaden matching)</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">
+                  Description contains
+                  <span className="text-iron-dust/50 normal-case tracking-normal ml-1">
+                    {useRegex ? '(regex pattern)' : '(shorten to a keyword to broaden matching)'}
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setUseRegex(!useRegex)}
+                  className={clsx(
+                    'flex items-center gap-1 px-2 py-1 border rounded-sm text-[9px] transition-colors',
+                    useRegex
+                      ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
+                      : 'border-white/10 bg-white/[0.02] text-iron-dust hover:border-white/20',
+                  )}
+                >
+                  <Code size={10} />
+                  {useRegex ? 'Regex ON' : 'Regex OFF'}
+                </button>
+              </div>
               <input
                 value={contains}
                 onChange={e => setContains(e.target.value)}
-                placeholder="e.g. PAYBYPHONE"
+                placeholder={useRegex ? 'e.g. ^(PAYBYPHONE|PARKING).*' : 'e.g. PAYBYPHONE'}
                 className="w-full bg-black/30 border border-white/10 px-3 py-2 text-xs text-white font-mono rounded-sm focus:border-magma outline-none"
               />
+              {regexError && (
+                <p className="text-[9px] text-red-400 mt-1 font-mono">⚠ Invalid regex: {regexError}</p>
+              )}
+              {useRegex && !regexError && (
+                <p className="text-[9px] text-purple-400/60 mt-1 font-mono">
+                  Tip: Use .* for wildcards, ^ for start, $ for end, (A|B) for OR
+                </p>
+              )}
             </div>
           )}
 
@@ -185,7 +223,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
                 value={matchTypeValue}
                 onChange={v => setMatchTypeValue(v as TransactionType | '')}
                 groups={typeMatchOptions}
-                placeholder="\u2014 select type \u2014"
+                placeholder="— select type —"
                 triggerClassName="px-3 py-2 text-xs"
                 maxVisibleItems={8}
               />
@@ -214,7 +252,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
 
           {/* ── SET ACTIONS ── */}
           <div>
-            <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-3">Then set\u2026</p>
+            <p className="text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-3">Then set…</p>
             <div className="space-y-3">
 
               {/* Description + Category */}
@@ -250,7 +288,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
                     value={setType}
                     onChange={v => setSetType(v as TransactionType | '')}
                     groups={typeSetOptions}
-                    placeholder="\u2014 keep current \u2014"
+                    placeholder="— keep current —"
                     triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
@@ -261,7 +299,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
                     value={setAccountId}
                     onChange={setSetAccountId}
                     groups={acctFromGroups}
-                    placeholder="\u2014 any account \u2014"
+                    placeholder="— any account —"
                     triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
@@ -276,7 +314,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
                     value={setAccountToId}
                     onChange={setSetAccountToId}
                     groups={acctToGroups}
-                    placeholder="\u2014 none \u2014"
+                    placeholder="— none —"
                     triggerClassName="px-3 py-2 text-xs"
                     maxVisibleItems={8}
                   />
@@ -306,7 +344,7 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={!atLeastOneCondition}
+            disabled={!atLeastOneCondition || !!regexError}
             className="px-5 py-2.5 bg-magma text-black text-xs font-bold uppercase rounded-sm hover:bg-magma/90 disabled:opacity-40 transition-colors"
           >
             Save Rule
