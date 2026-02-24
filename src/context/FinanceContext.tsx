@@ -25,6 +25,11 @@ interface MarketData {
   name?: string;
 }
 
+export interface HistoricalPricePoint {
+  open: number | null;
+  close: number;
+}
+
 interface HistoricalPoint {
   date: string;
   netWorth: number;
@@ -45,7 +50,8 @@ interface FinanceContextType {
 
   currentPrices: Record<string, MarketData>;
   currentBalances: { [key: string]: number };
-  historicalPrices: Record<string, Record<string, number>>;
+  // historicalPrices[symbol][date] = { open, close }
+  historicalPrices: Record<string, Record<string, HistoricalPricePoint>>;
 
   getHistory: (range: HistoryRange) => HistoricalPoint[];
   getTotalNetWorth: () => number;
@@ -96,26 +102,48 @@ const getEarliestTxDate = (symbol: string, transactions: Transaction[]): string 
   return earliest.substring(0, 10);
 };
 
-const getMostRecentClose = (history: Record<string, number>): number | undefined => {
+const getMostRecentClose = (history: Record<string, HistoricalPricePoint>): number | undefined => {
   const dates = Object.keys(history).sort();
   if (dates.length === 0) return undefined;
-  return history[dates[dates.length - 1]];
+  return history[dates[dates.length - 1]].close;
 };
 
-const generateSyntheticHistory = (currentPrice: number): Record<string, number> => {
-  const history: Record<string, number> = {};
+// Get the close price for a given date, falling back to nearest prior close.
+export const getCloseForDate = (
+  history: Record<string, HistoricalPricePoint>,
+  dateStr: string
+): number | undefined => {
+  if (history[dateStr]) return history[dateStr].close;
+  const dates = Object.keys(history).sort();
+  const latest = dates.filter(d => d <= dateStr).pop();
+  if (latest) return history[latest].close;
+  return dates.length > 0 ? history[dates[0]].close : undefined;
+};
+
+// Get the open price for today specifically.
+export const getTodayOpen = (
+  history: Record<string, HistoricalPricePoint>,
+  todayStr: string
+): number | null => {
+  return history[todayStr]?.open ?? null;
+};
+
+const generateSyntheticHistory = (currentPrice: number): Record<string, HistoricalPricePoint> => {
+  const history: Record<string, HistoricalPricePoint> = {};
   const today = new Date();
   const volatility = 0.015;
-  const prices: number[] = [currentPrice];
+  const closes: number[] = [currentPrice];
   for (let i = 1; i < 365; i++) {
-    const prev = prices[i - 1];
-    const move = prev * (1 + (Math.random() * volatility * 2 - volatility));
-    prices.push(move);
+    const prev = closes[i - 1];
+    closes.push(prev * (1 + (Math.random() * volatility * 2 - volatility)));
   }
-  prices.reverse();
+  closes.reverse();
   for (let i = 0; i < 365; i++) {
     const d = subDays(today, i);
-    history[format(d, 'yyyy-MM-dd')] = prices[i];
+    const close = closes[i];
+    // Synthetic open: slight random offset from close
+    const open = close * (1 + (Math.random() * 0.01 - 0.005));
+    history[format(d, 'yyyy-MM-dd')] = { open: parseFloat(open.toFixed(6)), close: parseFloat(close.toFixed(6)) };
   }
   return history;
 };
@@ -142,7 +170,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [deletingTransactions, setDeletingTransactions] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentPrices, setCurrentPrices] = useState<Record<string, MarketData>>({});
-  const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, number>>>({});
+  const [historicalPrices, setHistoricalPrices] = useState<Record<string, Record<string, HistoricalPricePoint>>>({});
   const [gbpUsdRate, setGbpUsdRate] = useState<number>(0);
   const [rateUpdatedAt, setRateUpdatedAt] = useState<string>('');
   const [sortOrders, setSortOrders] = useState<SortOrders>(DEFAULT_SORT_ORDERS);
@@ -279,16 +307,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch (e) { console.warn('live-prices fetch failed, will use cached prices:', e); }
 
         localStorage.setItem('lithos_last_sync', now.toString());
-        const historyCache: Record<string, Record<string, number>> = {};
+        const historyCache: Record<string, Record<string, HistoricalPricePoint>> = {};
 
         await Promise.all(uniqueSymbols.map(async sym => {
-          let history: Record<string, number> = {};
+          let history: Record<string, HistoricalPricePoint> = {};
           const fromDate = symbolFromDateMap[sym];
 
           if (liveApiAvailable) {
             try {
               const hRes = await fetch(`${supabaseUrl}/functions/v1/price-history?symbol=${sym}&from=${fromDate}`, { headers: authHeader });
-              if (hRes.ok) { const response = await hRes.json(); const rows: { date: string; close: number }[] = response[sym] || []; rows.forEach(row => { history[row.date] = row.close; }); }
+              if (hRes.ok) {
+                const response = await hRes.json();
+                const rows: { date: string; open: number | null; close: number }[] = response[sym] || [];
+                rows.forEach(row => {
+                  history[row.date] = { open: row.open ?? null, close: row.close };
+                });
+              }
             } catch (e) { console.info(`Failed to fetch history for ${sym}:`, e); }
           }
 
@@ -296,15 +330,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             try {
               let allCached: any[] = []; let offset = 0; let hasMore = true;
               while (hasMore) {
-                const { data: cached, error } = await supabase.from('price_history_cache').select('date, close').eq('symbol', sym).gte('date', fromDate).order('date', { ascending: true }).range(offset, offset + 999);
+                const { data: cached, error } = await supabase
+                  .from('price_history_cache')
+                  .select('date, open, close')
+                  .eq('symbol', sym)
+                  .gte('date', fromDate)
+                  .order('date', { ascending: true })
+                  .range(offset, offset + 999);
                 if (error || !cached || cached.length === 0) { hasMore = false; }
                 else { allCached = allCached.concat(cached); hasMore = cached.length === 1000; offset += 1000; }
               }
-              if (allCached.length > 0) allCached.forEach((row: { date: string; close: number }) => { history[row.date] = row.close; });
+              if (allCached.length > 0) {
+                allCached.forEach((row: { date: string; open: number | null; close: number }) => {
+                  history[row.date] = { open: row.open ?? null, close: row.close };
+                });
+              }
             } catch (e) { console.info(`Supabase cache miss for ${sym}`); }
           }
 
-          if (Object.keys(history).length === 0) history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+          if (Object.keys(history).length === 0) {
+            history = generateSyntheticHistory(fetchedPrices[sym]?.price || fallbackPrices[sym] || 100);
+          }
           historyCache[sym] = history;
         }));
 
@@ -314,25 +360,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
         const updatedPrices = { ...fetchedPrices };
 
+        // Fill in prices for symbols where live fetch returned nothing
         uniqueSymbols.forEach(sym => {
           if (!updatedPrices[sym] || !updatedPrices[sym].price) {
             const hist = historyCache[sym];
             const mostRecentClose = hist ? getMostRecentClose(hist) : undefined;
             if (mostRecentClose !== undefined && mostRecentClose > 0) {
               const dates = Object.keys(hist).sort();
-              const prevClose = dates.length >= 2 ? hist[dates[dates.length - 2]] : mostRecentClose;
+              const prevClose = dates.length >= 2 ? hist[dates[dates.length - 2]].close : mostRecentClose;
               const chg = mostRecentClose - prevClose;
               updatedPrices[sym] = { price: mostRecentClose, change: chg, changePercent: prevClose > 0 ? (chg / prevClose) * 100 : 0, currency: symbolCurrencyMap[sym] || 'GBP', name: sym };
             }
           }
         });
 
+        // Recompute change % vs yesterday's close
         uniqueSymbols.forEach(sym => {
           const hist = historyCache[sym];
           const currentPrice = updatedPrices[sym]?.price;
           if (hist && currentPrice && updatedPrices[sym]) {
-            const prevClose = hist[yesterday];
-            if (prevClose && prevClose > 0) { const chg = currentPrice - prevClose; updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: (chg / prevClose) * 100 }; }
+            const prevClose = hist[yesterday]?.close;
+            if (prevClose && prevClose > 0) {
+              const chg = currentPrice - prevClose;
+              updatedPrices[sym] = { ...updatedPrices[sym], change: chg, changePercent: (chg / prevClose) * 100 };
+            }
           }
         });
 
@@ -346,7 +397,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const cachedPrices = localStorage.getItem('lithos_current_prices');
     if (cachedPrices) { try { setCurrentPrices(JSON.parse(cachedPrices)); } catch (e) {} }
     const cachedHistory = localStorage.getItem('lithos_historical_prices');
-    if (cachedHistory) { try { setHistoricalPrices(JSON.parse(cachedHistory)); } catch (e) {} }
+    if (cachedHistory) {
+      try {
+        const parsed = JSON.parse(cachedHistory);
+        // Migrate old flat number format { date: number } -> { date: { open, close } }
+        const migrated: Record<string, Record<string, HistoricalPricePoint>> = {};
+        for (const [sym, hist] of Object.entries(parsed)) {
+          migrated[sym] = {};
+          for (const [date, val] of Object.entries(hist as Record<string, any>)) {
+            if (typeof val === 'number') {
+              migrated[sym][date] = { open: null, close: val };
+            } else {
+              migrated[sym][date] = val as HistoricalPricePoint;
+            }
+          }
+        }
+        setHistoricalPrices(migrated);
+      } catch (e) {}
+    }
 
     (async () => { await fetchFxRate(); await loadUserData(true); })();
 
@@ -382,7 +450,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!stockIsUsd && userIsUsd) fxRate = gbpUsdRate;
       }
       const nativePrice = marketData ? marketData.price : 0;
-      let displayPrice = stockIsGbx ? nativePrice / 100 : nativePrice * fxRate;
+      const displayPrice = stockIsGbx ? nativePrice / 100 : nativePrice * fxRate;
       return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue: h.quantity * displayPrice };
     });
   };
@@ -392,7 +460,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const debtIdSet = new Set(data.debts.map(d => d.id));
     const assetIdSet = new Set(data.assets.map(a => a.id));
 
-    // Investment accounts: value = sum of holdings at market price only
     data.assets.forEach(asset => {
       if (asset.type === 'investment') {
         const holdings = getHoldingsByAccount(asset.id);
@@ -402,30 +469,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    // Non-investment asset transactions
     data.transactions.forEach(tx => {
       if (tx.type === 'investing') return;
-
-      // Credit the FROM side (accountId) — skip if investment account or debt
       if (tx.accountId) {
         const fromAcct = data.assets.find(a => a.id === tx.accountId);
         if (fromAcct && fromAcct.type !== 'investment' && !debtIdSet.has(tx.accountId)) {
           if (balances[tx.accountId] !== undefined) balances[tx.accountId] += tx.amount;
         }
       }
-
-      // For single-row transfers: credit the TO side with the positive (incoming) amount
       if (tx.type === 'transfer' && tx.accountToId && assetIdSet.has(tx.accountToId)) {
         const toAcct = data.assets.find(a => a.id === tx.accountToId);
         if (toAcct && toAcct.type !== 'investment') {
-          if (balances[tx.accountToId] !== undefined) {
-            balances[tx.accountToId] += Math.abs(tx.amount);
-          }
+          if (balances[tx.accountToId] !== undefined) balances[tx.accountToId] += Math.abs(tx.amount);
         }
       }
     });
 
-    // Debt balances
     data.debts.forEach(debt => { balances[debt.id] = debt.startingValue; });
     data.transactions.forEach(tx => {
       if (!tx.accountId || !debtIdSet.has(tx.accountId)) return;
@@ -439,9 +498,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let days: number;
     if (range === 'all') {
       const allDates = data.transactions.map(t => t.date).filter(Boolean).sort();
-      if (allDates.length === 0) {
-        days = 365;
-      } else {
+      if (allDates.length === 0) { days = 365; }
+      else {
         const earliest = new Date(allDates[0]);
         const today = new Date();
         days = Math.ceil((today.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24));
@@ -471,7 +529,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           data.transactions
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { checking += t.amount; });
-          // Credit incoming transfers to this account
           data.transactions
             .filter(t => t.type === 'transfer' && t.accountToId === asset.id && assetIdSet.has(t.accountId ?? '') && new Date(t.date) <= d)
             .forEach(t => { checking += Math.abs(t.amount); });
@@ -480,7 +537,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           data.transactions
             .filter(t => t.accountId === asset.id && t.type !== 'investing' && !debtIdSet.has(t.accountId!) && new Date(t.date) <= d)
             .forEach(t => { savings += t.amount; });
-          // Credit incoming transfers to this account
           data.transactions
             .filter(t => t.type === 'transfer' && t.accountToId === asset.id && assetIdSet.has(t.accountId ?? '') && new Date(t.date) <= d)
             .forEach(t => { savings += Math.abs(t.amount); });
@@ -495,13 +551,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           });
           Array.from(holdings.values()).forEach(h => {
             const historicalData = historicalPrices[h.symbol] || {};
-            let priceOnDate = historicalData[dateStr];
-            if (priceOnDate === undefined) {
-              const dates = Object.keys(historicalData).sort();
-              const latestBeforeDate = dates.filter(date => date <= dateStr).pop();
-              if (latestBeforeDate) priceOnDate = historicalData[latestBeforeDate];
-              else priceOnDate = dates.length > 0 ? historicalData[dates[0]] : currentPrices[h.symbol]?.price;
-            }
+            // Use close price for historical chart points
+            const priceOnDate = getCloseForDate(historicalData, dateStr);
             if (priceOnDate !== undefined && priceOnDate > 0) {
               const nativeCurrency = h.currency || currentPrices[h.symbol]?.currency || 'GBP';
               const stockIsUsd = nativeCurrency === 'USD';
@@ -575,14 +626,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       category: tx.category, notes: tx.notes ?? null, symbol: tx.symbol ?? null,
       quantity: tx.quantity ?? null, price: tx.price ?? null, currency: tx.currency ?? null,
     }).select().maybeSingle();
-    if (error) {
-      console.error('addTransaction: Supabase insert failed:', error);
-      return;
-    }
+    if (error) { console.error('addTransaction: Supabase insert failed:', error); return; }
     if (newTx) {
       setData(prev => ({ ...prev, transactions: [...prev.transactions, {
-        id: newTx.id, ...tx,
-        date: normalisedDate,
+        id: newTx.id, ...tx, date: normalisedDate,
         accountId: newTx.account_id || newTx.debt_id || tx.accountId,
         accountToId: newTx.account_to_id || tx.accountToId || undefined,
       }] }));
