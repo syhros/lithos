@@ -439,6 +439,9 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
     const newErrors: string[] = [];
     let totalIncome = 0, totalExpense = 0, totalInvestments = 0;
 
+    // Build a set of debt IDs for quick lookup
+    const debtIdSet = new Set(data.debts.map(d => d.id));
+
     csvRows.forEach((row, i) => {
       try {
         if (mode === 'accounts') {
@@ -459,11 +462,17 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({ isOpen, onClose 
           const { datePart, timePart } = splitDateTime(rawDate);
           const resolvedTime = sameCol ? timePart : (rawTimeCol.trim() || timePart);
 
+          // For debt accounts: charges must be stored as positive (increases balance owed)
+          // and payments as negative (decreases balance owed).
+          // Bank CSVs export charges as negative and payments as positive, so we flip the sign.
+          const isDebtAccount = debtIdSet.has(accountId);
+          const normalisedAmount = isDebtAccount ? -amount : amount;
+
           addTransaction({
             date: parseDate(rawDate, resolvedTime),
-            description, amount, type, category, accountId, notes,
+            description, amount: normalisedAmount, type, category, accountId, notes,
           });
-          if (amount > 0) totalIncome += amount; else totalExpense += Math.abs(amount);
+          if (normalisedAmount > 0) totalIncome += normalisedAmount; else totalExpense += Math.abs(normalisedAmount);
           count++;
         } else {
           const rawSymbol = getCellValue(row, 'symbol').trim().toUpperCase();
