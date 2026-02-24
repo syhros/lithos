@@ -163,6 +163,21 @@ function findAccountIdByName(
   }
 }
 
+/**
+ * Resolve a raw account column value (e.g. "Halifax", "AMEX Gold#Debt") to an
+ * account ID. Returns { id, warning } — id is '' when not found.
+ */
+function resolveAccountColumn(
+  rawName: string,
+  assets: { id: string; name: string }[],
+  debts:  { id: string; name: string }[],
+): { id: string; warning?: string } {
+  const trimmed = rawName.trim();
+  if (!trimmed) return { id: '' };
+  const { baseName, accountType } = parseAccountName(trimmed);
+  return findAccountIdByName(baseName, accountType, assets, debts);
+}
+
 function assignAccountByDirection(
   rawAmount: number,
   accountId: string,
@@ -202,6 +217,11 @@ function parseCSV(
   const headers = parseCSVLine(lines[0]).map(h => h.replace(/'/g,'').trim());
   const bankType = detectBankType(headers);
   const rows: RawRow[] = [];
+
+  // Detect explicit account from/to columns (case-insensitive)
+  const hLower = headers.map(h => h.toLowerCase());
+  const hasAccountFromCol = hLower.includes('account from');
+  const hasAccountToCol   = hLower.includes('account to');
 
   for (let i = 1; i < lines.length; i++) {
     const cells = parseCSVLine(lines[i]);
@@ -258,9 +278,40 @@ function parseCSV(
     const matchedRule = typeRules.find(r => r.bankCode.toUpperCase() === rawType.toUpperCase());
     const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (rawAmount >= 0 ? 'income' : 'expense');
 
-    const { resolvedAccountId, resolvedAccountToId, accountMatchWarning } = assignAccountByDirection(
-      rawAmount, csvConfig?.accountId || '', rawAccountName, assets, debts,
-    );
+    // ── Account resolution ──────────────────────────────────────────────────
+    // If the CSV contains explicit "account from" / "account to" columns,
+    // resolve them directly — no amount-sign guessing needed.
+    let resolvedAccountId    = '';
+    let resolvedAccountToId  = '';
+    let accountMatchWarning: string | undefined;
+
+    if (hasAccountFromCol || hasAccountToCol) {
+      if (hasAccountFromCol) {
+        const raw = get('account from');
+        if (raw) {
+          const { id, warning } = resolveAccountColumn(raw, assets, debts);
+          resolvedAccountId = id;
+          if (!id && warning) accountMatchWarning = warning;
+        }
+      }
+      if (hasAccountToCol) {
+        const raw = get('account to');
+        if (raw) {
+          const { id, warning } = resolveAccountColumn(raw, assets, debts);
+          resolvedAccountToId = id;
+          if (!id && warning) accountMatchWarning = (accountMatchWarning ? accountMatchWarning + ' | ' : '') + warning;
+        }
+      }
+    } else {
+      // Fall back to original direction-based logic
+      const assigned = assignAccountByDirection(
+        rawAmount, csvConfig?.accountId || '', rawAccountName, assets, debts,
+      );
+      resolvedAccountId   = assigned.resolvedAccountId;
+      resolvedAccountToId = assigned.resolvedAccountToId;
+      accountMatchWarning = assigned.accountMatchWarning;
+    }
+    // ── End account resolution ───────────────────────────────────────────────
 
     rows.push({
       id: `row-${i}-${Date.now()}`,
@@ -332,12 +383,12 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
 }
 
 function downloadCsvTemplate() {
-  const template = `date,type,description,amount,account
-2026-02-20,DEB,Grocery Store,-45.50,Halifax
-2026-02-21,BAC,Salary,2500.00,Halifax
-2026-02-22,DEB,Credit Card Payment,-150.00,Halifax#Debt
-2026-02-23,DEB,Transfer to Savings,-200.00,Halifax#Savings
-2026-02-24,SO,Rent Payment,-800.00,Halifax`;
+  const template = `date,type,description,amount,account from,account to
+2026-02-20,DEB,Grocery Store,-45.50,Halifax,
+2026-02-21,BAC,Salary,2500.00,,Halifax
+2026-02-22,DEB,Credit Card Payment,-150.00,Halifax,AMEX Gold#Debt
+2026-02-23,DEB,Transfer to Savings,-200.00,Halifax,Savings Account
+2026-02-24,SO,Rent Payment,-800.00,Halifax,`;
 
   const blob = new Blob([template], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -796,6 +847,7 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
           onChange={e => { if (e.target.files?.length) { onAddMore(e.target.files); e.target.value = ''; } }} />
       </div>
       <div className="text-[10px] text-iron-dust/70 font-mono space-y-1">
+        <p>• Use <span className="text-white/60">account from</span> / <span className="text-white/60">account to</span> columns for pre-assigned transfers (e.g. Halifax → AMEX Gold#Debt)</p>
         <p>• Use account column for multi-account CSVs (e.g. Halifax, Halifax#Debt, Halifax#Savings)</p>
         <p>• Use single account selector if all rows belong to one account</p>
         <p>• You can still override account per-row in the preview table</p>
@@ -889,10 +941,12 @@ export const Categorize: React.FC = () => {
     const headers   = firstLine ? parseCSVLine(firstLine).map(h => h.replace(/'/g,'').trim()) : [];
     const hLower = headers.map(h => h.toLowerCase());
     const isHalifax = hLower.includes('sort code');
+    // If the CSV has explicit account from/to columns, skip the single-account column detection
+    const hasExplicitAccountCols = hLower.includes('account from') || hLower.includes('account to');
     return {
       csvName: name,
       accountId: '',
-      accountColumnName: headers.find(h => h.toLowerCase() === 'account') || '',
+      accountColumnName: hasExplicitAccountCols ? '' : (headers.find(h => h.toLowerCase() === 'account') || ''),
       amountColumns: isHalifax ? 2 : 1,
       amountCol: headers.find(h => ['value','amount'].includes(h.toLowerCase())) || '',
       debitCol:  headers.find(h => h.toLowerCase().includes('debit'))  || '',
