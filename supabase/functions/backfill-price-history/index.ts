@@ -11,13 +11,12 @@ const YAHOO_HEADERS = {
   "Accept": "application/json",
 };
 
-// Fetch daily closes from Yahoo Finance for a specific window.
-// period1 / period2 are Unix timestamps.
+// Fetch daily open + close from Yahoo Finance for a specific window.
 const fetchYearChunk = async (
   symbol: string,
   period1: number,
   period2: number
-): Promise<Array<{ date: string; close: number }>> => {
+): Promise<Array<{ date: string; open: number | null; close: number }>> => {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
   const res = await fetch(url, { headers: YAHOO_HEADERS });
 
@@ -29,14 +28,20 @@ const fetchYearChunk = async (
   if (!result) return [];
 
   const timestamps: number[] = result.timestamp || [];
-  const closes: number[] = result.indicators?.quote?.[0]?.close || [];
+  const closes: (number | null)[] = result.indicators?.quote?.[0]?.close || [];
+  const opens: (number | null)[] = result.indicators?.quote?.[0]?.open || [];
 
-  const rows: Array<{ date: string; close: number }> = [];
+  const rows: Array<{ date: string; open: number | null; close: number }> = [];
   for (let i = 0; i < timestamps.length; i++) {
     const close = closes[i];
     if (close == null || isNaN(close)) continue;
+    const open = opens[i];
     const date = new Date(timestamps[i] * 1000).toISOString().substring(0, 10);
-    rows.push({ date, close: parseFloat(close.toFixed(6)) });
+    rows.push({
+      date,
+      open: open != null && !isNaN(open) ? parseFloat(open.toFixed(6)) : null,
+      close: parseFloat(close.toFixed(6)),
+    });
   }
   return rows;
 };
@@ -78,8 +83,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // from: required (first tx date). to: optional, defaults to now.
-    // Both must be plain YYYY-MM-DD for reliable parsing.
     const fromMs = fromDate
       ? new Date(fromDate).getTime()
       : Date.now() - 2 * 365 * 24 * 60 * 60 * 1000;
@@ -103,7 +106,7 @@ Deno.serve(async (req: Request) => {
           const period1 = Math.floor(chunkStart / 1000);
           const period2 = Math.floor(chunkEnd / 1000);
 
-          let rows: Array<{ date: string; close: number }> = [];
+          let rows: Array<{ date: string; open: number | null; close: number }> = [];
           let attempt = 0;
 
           while (attempt < 3) {
@@ -127,13 +130,14 @@ Deno.serve(async (req: Request) => {
               const batch = rows.slice(i, i + BATCH).map(r => ({
                 symbol,
                 date: r.date,
+                open: r.open,
                 close: r.close,
                 fetched_at: new Date().toISOString(),
               }));
 
               const { error } = await supabase
                 .from("price_history_cache")
-                .upsert(batch, { onConflict: "symbol,date", ignoreDuplicates: true });
+                .upsert(batch, { onConflict: "symbol,date", ignoreDuplicates: false });
 
               if (error) {
                 console.error(`Upsert error for ${symbol}:`, error.message);

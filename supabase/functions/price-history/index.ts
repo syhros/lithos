@@ -6,8 +6,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+interface PriceHistoryRow {
+  date: string;
+  open: number | null;
+  close: number;
+}
+
 interface PriceHistoryResponse {
-  [symbol: string]: Array<{ date: string; close: number }>;
+  [symbol: string]: PriceHistoryRow[];
 }
 
 Deno.serve(async (req: Request) => {
@@ -28,10 +34,7 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "Missing symbol or from parameter" }),
         {
           status: 400,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
@@ -44,17 +47,14 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "Missing Supabase configuration" }),
         {
           status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    let allData: Array<{ date: string; close: number }> = [];
+    let allData: PriceHistoryRow[] = [];
     let offset = 0;
     const pageSize = 1000;
     let hasMore = true;
@@ -62,7 +62,7 @@ Deno.serve(async (req: Request) => {
     while (hasMore) {
       const { data, error } = await supabase
         .from("price_history_cache")
-        .select("date, close")
+        .select("date, open, close")
         .eq("symbol", symbol)
         .gte("date", from)
         .order("date", { ascending: true })
@@ -74,10 +74,7 @@ Deno.serve(async (req: Request) => {
           JSON.stringify({ error: "Failed to fetch price history" }),
           {
             status: 500,
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "application/json",
-            },
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
           }
         );
       }
@@ -85,7 +82,7 @@ Deno.serve(async (req: Request) => {
       if (!data || data.length === 0) {
         hasMore = false;
       } else {
-        allData = allData.concat(data);
+        allData = allData.concat(data as PriceHistoryRow[]);
         if (data.length < pageSize) {
           hasMore = false;
         } else {
@@ -99,10 +96,7 @@ Deno.serve(async (req: Request) => {
     };
 
     return new Response(JSON.stringify(response), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-      },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Error:", error);
@@ -110,10 +104,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({ error: "Internal server error" }),
       {
         status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }

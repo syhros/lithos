@@ -109,43 +109,141 @@ export const Settings: React.FC = () => {
     setLog([]); setPullPhase('scanning');
     const transactions = data?.transactions || [];
     const today = toDateOnly(new Date().toISOString());
-    addLog('\u2501'.repeat(40), 'dim'); addLog('PHASE 1 \u2014 Scanning transaction history', 'heading'); addLog('\u2501'.repeat(40), 'dim'); await sleep(150);
+
+    addLog('\u2501'.repeat(40), 'dim');
+    addLog('PHASE 1 \u2014 Scanning transaction history', 'heading');
+    addLog('\u2501'.repeat(40), 'dim');
+    await sleep(150);
+
     const firstTxDate = new Map<string, string>();
     const investingTxs = transactions.filter(t => t.type === 'investing' && t.symbol && t.date);
     const allSymbols = Array.from(new Set(investingTxs.map(t => t.symbol!)));
-    for (const sym of allSymbols) { addLog(`  Checking earliest transaction for ${sym}...`, 'dim'); await sleep(30); const earliest = investingTxs.filter(t => t.symbol === sym).map(t => toDateOnly(t.date)).sort()[0]; firstTxDate.set(sym, earliest); addLog(`  \u2192 ${sym}: first transaction on ${earliest}`, 'info'); }
-    addLog('', 'dim'); addLog(`\u2713 Earliest transaction dates found for ${allSymbols.length} tickers`, 'success'); await sleep(200);
-    setPullPhase('cache_check'); addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim'); addLog('PHASE 2 \u2014 Checking price history cache', 'heading'); addLog('\u2501'.repeat(40), 'dim'); await sleep(150);
-    const toFetch = new Map<string, { from: string; to: string }>(); const ignored: string[] = [];
+
     for (const sym of allSymbols) {
-      const txFrom = firstTxDate.get(sym)!; addLog(`  Checking cache for ${sym} (need from ${txFrom})...`, 'dim'); await sleep(40);
-      const { data: cached } = await supabase.from('price_history_cache').select('date').eq('symbol', sym).order('date', { ascending: true }).limit(1).single();
-      const cacheStart = cached?.date ? toDateOnly(cached.date) : null;
-      if (cacheStart && cacheStart <= txFrom) { addLog(`  \u2192 ${sym}: cache covers ${cacheStart} \u2713 \u2014 skipping`, 'success'); ignored.push(sym); }
-      else if (cacheStart) { addLog(`  \u2192 ${sym}: cache starts ${cacheStart}, need ${txFrom}`, 'info'); toFetch.set(sym, { from: txFrom, to: cacheStart }); }
-      else { addLog(`  \u2192 ${sym}: no cache found \u2014 will fetch ${txFrom} \u2192 ${today}`, 'info'); toFetch.set(sym, { from: txFrom, to: today }); }
+      addLog(`  Checking earliest transaction for ${sym}...`, 'dim');
+      await sleep(30);
+      const earliest = investingTxs.filter(t => t.symbol === sym).map(t => toDateOnly(t.date)).sort()[0];
+      firstTxDate.set(sym, earliest);
+      addLog(`  \u2192 ${sym}: first transaction on ${earliest}`, 'info');
     }
-    addLog('', 'dim'); if (ignored.length > 0) addLog(`\u2713 ${ignored.length} ticker(s) already fully cached: ${ignored.join(', ')}`, 'success'); addLog(`\u2192 ${toFetch.size} ticker(s) require a fetch`, 'info'); await sleep(200);
-    if (toFetch.size === 0) { addLog('', 'dim'); addLog('\u2713 All tickers are fully cached. Nothing to do!', 'success'); setPullPhase('done'); return; }
-    setPullPhase('compiling'); addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim'); addLog('PHASE 3 \u2014 Compiling request list', 'heading'); addLog('\u2501'.repeat(40), 'dim'); await sleep(150);
-    for (const [sym, range] of toFetch.entries()) { addLog(`  ${sym.padEnd(16)} ${range.from} \u2192 ${range.to}`, 'info'); await sleep(25); }
-    addLog('', 'dim'); addLog(`\u2713 Request list compiled \u2014 ${toFetch.size} ticker(s) queued`, 'success'); await sleep(200);
-    setPullPhase('pulling'); addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim'); addLog('PHASE 4 \u2014 Pulling price history', 'heading'); addLog('\u2501'.repeat(40), 'dim'); await sleep(150);
+
+    addLog('', 'dim');
+    addLog(`\u2713 Earliest transaction dates found for ${allSymbols.length} tickers`, 'success');
+    await sleep(200);
+
+    setPullPhase('cache_check');
+    addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim');
+    addLog('PHASE 2 \u2014 Checking price history cache (most recent entry per ticker)', 'heading');
+    addLog('\u2501'.repeat(40), 'dim');
+    await sleep(150);
+
+    // For each symbol we need two things:
+    //   - the FROM date  = earliest transaction date (lower bound, never re-fetch before this)
+    //   - the GAP start  = day after most recent cached date (fetch from here up to today)
+    const toFetch = new Map<string, { from: string; to: string }>();
+    const ignored: string[] = [];
+
+    for (const sym of allSymbols) {
+      const txFrom = firstTxDate.get(sym)!;
+      addLog(`  Checking cache for ${sym} (tx from ${txFrom})...`, 'dim');
+      await sleep(40);
+
+      // Most recent cached entry
+      const { data: latestRow } = await supabase
+        .from('price_history_cache')
+        .select('date')
+        .eq('symbol', sym)
+        .order('date', { ascending: false })
+        .limit(1)
+        .single();
+
+      const latestCached = latestRow?.date ? toDateOnly(latestRow.date) : null;
+
+      if (!latestCached) {
+        // No cache at all — fetch everything from first tx date
+        addLog(`  \u2192 ${sym}: no cache found \u2014 will fetch ${txFrom} \u2192 ${today}`, 'info');
+        toFetch.set(sym, { from: txFrom, to: today });
+      } else if (latestCached >= today) {
+        // Already up to date
+        addLog(`  \u2192 ${sym}: cache is current (${latestCached}) \u2713 \u2014 skipping`, 'success');
+        ignored.push(sym);
+      } else {
+        // Gap between latest cached and today
+        const gapFrom = latestCached; // Yahoo returns from >= period1, so using latestCached re-fetches that day (fine, upsert handles it)
+        addLog(`  \u2192 ${sym}: latest cache ${latestCached}, gap ${gapFrom} \u2192 ${today}`, 'info');
+        toFetch.set(sym, { from: gapFrom, to: today });
+      }
+    }
+
+    addLog('', 'dim');
+    if (ignored.length > 0) addLog(`\u2713 ${ignored.length} ticker(s) already up to date: ${ignored.join(', ')}`, 'success');
+    addLog(`\u2192 ${toFetch.size} ticker(s) require a fetch`, 'info');
+    await sleep(200);
+
+    if (toFetch.size === 0) {
+      addLog('', 'dim');
+      addLog('\u2713 All tickers are fully cached. Nothing to do!', 'success');
+      setPullPhase('done');
+      return;
+    }
+
+    setPullPhase('compiling');
+    addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim');
+    addLog('PHASE 3 \u2014 Compiling request list (open + close)', 'heading');
+    addLog('\u2501'.repeat(40), 'dim');
+    await sleep(150);
+
+    for (const [sym, range] of toFetch.entries()) {
+      addLog(`  ${sym.padEnd(16)} ${range.from} \u2192 ${range.to}`, 'info');
+      await sleep(25);
+    }
+    addLog('', 'dim');
+    addLog(`\u2713 Request list compiled \u2014 ${toFetch.size} ticker(s) queued`, 'success');
+    await sleep(200);
+
+    setPullPhase('pulling');
+    addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim');
+    addLog('PHASE 4 \u2014 Pulling open + close price history', 'heading');
+    addLog('\u2501'.repeat(40), 'dim');
+    await sleep(150);
+
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
-    let totalRows = 0; let errors = 0;
+    let totalRows = 0;
+    let errors = 0;
+
     for (const [sym, range] of toFetch.entries()) {
       addLog(`  Requesting price history for ${sym} (${range.from} \u2192 ${range.to})...`, 'info');
       try {
         const url = `${supabaseUrl}/functions/v1/backfill-price-history?symbols=${encodeURIComponent(sym)}&from=${range.from}&to=${range.to}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) { addLog(`  \u2717 ${sym}: HTTP ${res.status}`, 'error'); errors++; }
-        else { const json = await res.json(); const result = json?.summary?.[sym]; if (result?.error) { addLog(`  \u2717 ${sym}: ${result.error}`, 'error'); errors++; } else { const rows = result?.rows ?? 0; totalRows += rows; addLog(`  \u2713 ${sym} complete \u2014 ${rows.toLocaleString()} rows cached`, 'success'); } }
-      } catch (e: any) { addLog(`  \u2717 ${sym}: ${e.message || 'Network error'}`, 'error'); errors++; }
+        if (!res.ok) {
+          addLog(`  \u2717 ${sym}: HTTP ${res.status}`, 'error');
+          errors++;
+        } else {
+          const json = await res.json();
+          const result = json?.summary?.[sym];
+          if (result?.error) {
+            addLog(`  \u2717 ${sym}: ${result.error}`, 'error');
+            errors++;
+          } else {
+            const rows = result?.rows ?? 0;
+            totalRows += rows;
+            addLog(`  \u2713 ${sym} complete \u2014 ${rows.toLocaleString()} rows cached (open + close)`, 'success');
+          }
+        }
+      } catch (e: any) {
+        addLog(`  \u2717 ${sym}: ${e.message || 'Network error'}`, 'error');
+        errors++;
+      }
     }
-    addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim'); addLog(`COMPLETE \u2014 ${totalRows.toLocaleString()} rows cached${errors > 0 ? `, ${errors} error(s)` : ''}`, errors > 0 ? 'error' : 'success'); addLog('\u2501'.repeat(40), 'dim');
-    setPullPhase('done'); await refreshData();
+
+    addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim');
+    addLog(`COMPLETE \u2014 ${totalRows.toLocaleString()} rows cached${errors > 0 ? `, ${errors} error(s)` : ''} (open + close prices)`, errors > 0 ? 'error' : 'success');
+    addLog('\u2501'.repeat(40), 'dim');
+    setPullPhase('done');
+    await refreshData();
   };
 
   const handleExportCSV = () => {
@@ -177,7 +275,14 @@ export const Settings: React.FC = () => {
   };
 
   const isPulling = pullPhase !== 'idle' && pullPhase !== 'done';
-  const phaseLabel: Record<PullPhase, string> = { idle: 'Pull Historic Price Data', scanning: 'Scanning transactions...', cache_check: 'Checking cache...', compiling: 'Compiling requests...', pulling: 'Pulling data...', done: 'Pull Complete' };
+  const phaseLabel: Record<PullPhase, string> = {
+    idle: 'Pull Historic Price Data',
+    scanning: 'Scanning transactions...',
+    cache_check: 'Checking cache...',
+    compiling: 'Compiling requests...',
+    pulling: 'Pulling data...',
+    done: 'Pull Complete'
+  };
 
   return (
     <div className="p-12 max-w-4xl mx-auto h-full flex flex-col slide-up overflow-y-auto custom-scrollbar">
@@ -202,22 +307,18 @@ export const Settings: React.FC = () => {
 
       <div className="space-y-8">
 
-        {/* Card Sort Order — per-page */}
+        {/* Card Sort Order */}
         <div className="border border-white/5 rounded-sm p-8 bg-[#161618]">
           <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
             <LayoutGrid size={18} /> Card Sort Order
           </h3>
           <p className="text-sm text-iron-dust mb-6">Set the sort order for each page independently. Changes are saved to your account.</p>
-
-          {/* Column headers */}
           <div className="grid grid-cols-[120px_1fr_1fr_1fr] gap-3 mb-3 items-center">
             <div />
             {PAGE_KEYS.map(p => (
               <div key={p.key} className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px] text-center">{p.label}</div>
             ))}
           </div>
-
-          {/* Row per sort option */}
           {SORT_OPTIONS.map(opt => (
             <div key={opt.value} className="grid grid-cols-[120px_1fr_1fr_1fr] gap-3 mb-2 items-center">
               <span className="text-xs font-bold text-white/60 uppercase tracking-wider text-right pr-4">{opt.label}</span>
@@ -275,22 +376,41 @@ export const Settings: React.FC = () => {
             <div className="border-t border-white/5" />
             <div>
               <p className="text-sm font-bold text-white mb-1">Pull Historic Price Data</p>
-              <p className="text-sm text-iron-dust">Backfills missing price history for all investment holdings. Checks the cache first and only requests the uncached date range per ticker.</p>
-              <button onClick={handlePullHistoricData} disabled={isPulling} className={clsx('mt-4 flex items-center gap-2 px-6 py-3 rounded-sm text-sm font-bold uppercase tracking-wider border transition-all',
-                isPulling ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed' : pullPhase === 'done' ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20' : 'bg-white/10 border-white/20 text-white hover:bg-white/15')}>
+              <p className="text-sm text-iron-dust">Backfills missing open + close price history for all investment holdings. Checks the most recent cached date per ticker and only fetches the gap up to today.</p>
+              <button
+                onClick={handlePullHistoricData}
+                disabled={isPulling}
+                className={clsx('mt-4 flex items-center gap-2 px-6 py-3 rounded-sm text-sm font-bold uppercase tracking-wider border transition-all',
+                  isPulling ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed' :
+                  pullPhase === 'done' ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20' :
+                  'bg-white/10 border-white/20 text-white hover:bg-white/15'
+                )}
+              >
                 {isPulling ? <Loader2 size={14} className="animate-spin" /> : pullPhase === 'done' ? <CheckCircle2 size={14} /> : <Database size={14} />}
                 {phaseLabel[pullPhase]}
               </button>
               {log.length > 0 && (
                 <div className="mt-4 bg-[#0a0b0c] border border-white/8 rounded-sm overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2 bg-[#111314] border-b border-white/5">
-                    <div className="flex gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500/60" /><div className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" /><div className="w-2.5 h-2.5 rounded-full bg-green-500/60" /></div>
+                    <div className="flex gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
+                    </div>
                     <span className="text-[10px] font-mono text-iron-dust/50 ml-2 uppercase tracking-widest">lithos price history console</span>
                     {isPulling && <Loader2 size={10} className="animate-spin text-blue-400 ml-auto" />}
                     {pullPhase === 'done' && <CheckCircle2 size={10} className="text-emerald-vein ml-auto" />}
                   </div>
                   <div ref={logRef} className="max-h-[340px] overflow-y-auto custom-scrollbar p-4 space-y-0.5 font-mono text-[11px] leading-relaxed">
-                    {log.map(entry => (<div key={entry.id} className={clsx(entry.type === 'heading' && 'text-blue-400 font-bold', entry.type === 'success' && 'text-emerald-vein', entry.type === 'error' && 'text-magma', entry.type === 'info' && 'text-white/80', entry.type === 'dim' && 'text-white/20')}>{entry.text || '\u00a0'}</div>))}
+                    {log.map(entry => (
+                      <div key={entry.id} className={clsx(
+                        entry.type === 'heading' && 'text-blue-400 font-bold',
+                        entry.type === 'success' && 'text-emerald-vein',
+                        entry.type === 'error' && 'text-magma',
+                        entry.type === 'info' && 'text-white/80',
+                        entry.type === 'dim' && 'text-white/20'
+                      )}>{entry.text || '\u00a0'}</div>
+                    ))}
                   </div>
                 </div>
               )}
