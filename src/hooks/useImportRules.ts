@@ -27,10 +27,10 @@ export interface MerchantRule {
   matchDescription: boolean;
   matchType:        boolean;
   matchAmount:      boolean;
-  useRegex:         boolean;          // NEW: treat `contains` as regex
-  contains:         string;           // used when matchDescription === true
-  matchTypeValue:   TransactionType | '';  // used when matchType === true
-  matchAmountValue: number | '';      // used when matchAmount === true (absolute value)
+  useRegex:         boolean;
+  contains:         string;
+  matchTypeValue:   TransactionType | '';
+  matchAmountValue: number | '';
   // ── set actions ──
   setDescription: string;
   setCategory:    string;
@@ -68,16 +68,6 @@ const DEFAULT_HALIFAX_TYPES: TypeMappingRule[] = [
   { id: 'hx7', bankCode: 'TFR', mapsTo: 'transfer' },
 ];
 
-const DEFAULT_TRANSFER_RULES: TransferRule[] = [
-  {
-    id: 'tr1',
-    label: 'Halifax → NatWest (weekly savings)',
-    fromDescContains: 'CAMERON REES',
-    toDescContains: 'C REES',
-    toleranceDays: 2,
-  },
-];
-
 // ─────────────────────────────────────────────
 // Helper — blank rule skeleton
 // ─────────────────────────────────────────────
@@ -100,13 +90,6 @@ export const BLANK_MERCHANT_RULE: Omit<MerchantRule, 'id'> = {
 // ─────────────────────────────────────────────
 // applyMerchantRules  (AND-gate with regex support)
 // ─────────────────────────────────────────────
-/**
- * Each rule has up to three independent match conditions.
- * ALL enabled conditions must pass for the rule to fire.
- *
- * @param rows      The parsed CSV rows
- * @param rules     The merchant rules
- */
 export function applyMerchantRules(
   rows: Array<{
     rawDescription: string;
@@ -124,21 +107,16 @@ export function applyMerchantRules(
   return rows.map(row => {
     let r = { ...row };
     for (const rule of rules) {
-      // Every enabled condition must pass (AND gate)
       if (rule.matchDescription) {
         if (!rule.contains) continue;
-        
-        // NEW: Regex matching support
         if (rule.useRegex) {
           try {
             const regex = new RegExp(rule.contains, 'i');
             if (!regex.test(r.rawDescription)) continue;
-          } catch (err) {
-            // Invalid regex — treat as literal string
+          } catch {
             if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
           }
         } else {
-          // Standard substring matching (case-insensitive)
           if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
         }
       }
@@ -150,17 +128,15 @@ export function applyMerchantRules(
         if (rule.matchAmountValue === '' || rule.matchAmountValue === undefined) continue;
         if (Math.abs(r.rawAmount) !== Number(rule.matchAmountValue)) continue;
       }
-      // At least one condition must be enabled — skip no-op rules
       if (!rule.matchDescription && !rule.matchType && !rule.matchAmount) continue;
 
-      // All enabled conditions passed — apply set actions
       if (rule.setDescription) r.resolvedDescription = rule.setDescription;
       if (rule.setCategory)    r.resolvedCategory    = rule.setCategory;
       if (rule.setType)        r.resolvedType        = rule.setType as TransactionType;
       if (rule.setAccountId)   r.resolvedAccountId   = rule.setAccountId;
       if (rule.setAccountToId) r.resolvedAccountToId = rule.setAccountToId;
       if (rule.setNotes)       r.resolvedNotes       = rule.setNotes;
-      break; // first matching rule wins
+      break;
     }
     return r;
   });
@@ -218,7 +194,7 @@ function merchantRuleToDbRow(
 export function useImportRules() {
   const [typeRules,     setTypeRules]     = useState<TypeMappingRule[]>([...DEFAULT_NATWEST_TYPES, ...DEFAULT_HALIFAX_TYPES]);
   const [merchantRules, setMerchantRules] = useState<MerchantRule[]>([]);
-  const [transferRules, setTransferRules] = useState<TransferRule[]>(DEFAULT_TRANSFER_RULES);
+  const [transferRules, setTransferRules] = useState<TransferRule[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [saving,        setSaving]        = useState<Record<string, boolean>>({});
   const [saved,         setSaved]         = useState<Record<string, boolean>>({});
@@ -311,10 +287,6 @@ export function useImportRules() {
     flashSaved('transfer');
   }, [transferRules]);
 
-  /**
-   * Auto-persist a single new merchant rule to Supabase immediately.
-   * Called from the CreateRule popup in the Preview tab.
-   */
   const persistMerchantRule = useCallback(async (rule: MerchantRule): Promise<MerchantRule> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return rule;
@@ -338,15 +310,10 @@ export function useImportRules() {
     return { ...rule, id: data.id };
   }, []);
 
-  /**
-   * Update (upsert) a single existing merchant rule in Supabase.
-   * Called from EditRuleModal after the user saves edits.
-   */
   const updateMerchantRule = useCallback(async (rule: MerchantRule): Promise<void> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Get current sort_order for this rule so we don't reset it
     const { data: existing } = await supabase
       .from('import_merchant_rules')
       .select('sort_order')
@@ -365,9 +332,6 @@ export function useImportRules() {
     }
   }, []);
 
-  /**
-   * Delete a single merchant rule from Supabase by id.
-   */
   const deleteMerchantRule = useCallback(async (id: string): Promise<void> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
