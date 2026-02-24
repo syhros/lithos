@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Upload, Plus, Trash2, Save, ChevronDown, ChevronUp,
   ArrowRight, Tag, Shuffle, RefreshCcw,
-  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2, Pencil
+  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2, Pencil, Download
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
@@ -44,11 +44,13 @@ interface RawRow {
   isTransferCredit: boolean;
   skip: boolean;
   sourceCsvName: string;
+  rawAccountName?: string; // NEW: raw account name from CSV
 }
 
 export interface CsvConfig {
   csvName: string;
   accountId: string;
+  accountColumnName: string; // NEW: column name to read account from
   amountColumns: 1 | 2;
   amountCol: string;
   debitCol: string;
@@ -128,15 +130,76 @@ function parseHalifaxDate(raw: string): string {
   return raw;
 }
 
+/**
+ * Parse account name and return base name + account type
+ * Examples:
+ *  - "Halifax" → { baseName: "Halifax", accountType: "account" }
+ *  - "Halifax#Debt" → { baseName: "Halifax", accountType: "debt" }
+ *  - "Halifax#Savings" → { baseName: "Halifax", accountType: "savings" }
+ */
+function parseAccountName(rawAccountName: string): { 
+  baseName: string; 
+  accountType: 'account' | 'debt' | 'savings' 
+} {
+  const trimmed = rawAccountName.trim();
+  if (trimmed.includes('#Debt')) {
+    return { baseName: trimmed.replace('#Debt', '').trim(), accountType: 'debt' };
+  }
+  if (trimmed.includes('#Savings')) {
+    return { baseName: trimmed.replace('#Savings', '').trim(), accountType: 'savings' };
+  }
+  return { baseName: trimmed, accountType: 'account' };
+}
+
+/**
+ * Find account ID by name and type
+ * Searches in assets for 'account'/'savings' and debts for 'debt'
+ */
+function findAccountIdByName(
+  baseName: string,
+  accountType: 'account' | 'debt' | 'savings',
+  assets: { id: string; name: string }[],
+  debts: { id: string; name: string }[],
+): string {
+  const lowerName = baseName.toLowerCase();
+  
+  if (accountType === 'debt') {
+    const debt = debts.find(d => d.name.toLowerCase() === lowerName);
+    return debt?.id || '';
+  } else {
+    // For 'account' or 'savings', search in assets
+    // In the future, you could filter by tags if needed
+    const asset = assets.find(a => a.name.toLowerCase() === lowerName);
+    return asset?.id || '';
+  }
+}
+
 function assignAccountByDirection(
   rawAmount: number,
-  csvAccountId: string,
+  accountId: string,
+  rawAccountName: string | undefined,
+  assets: { id: string; name: string }[],
+  debts: { id: string; name: string }[],
 ): { resolvedAccountId: string; resolvedAccountToId: string } {
-  if (!csvAccountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
+  // If we have a per-row account name, use it
+  if (rawAccountName) {
+    const { baseName, accountType } = parseAccountName(rawAccountName);
+    const foundAccountId = findAccountIdByName(baseName, accountType, assets, debts);
+    if (foundAccountId) {
+      if (rawAmount >= 0) {
+        return { resolvedAccountId: '', resolvedAccountToId: foundAccountId };
+      } else {
+        return { resolvedAccountId: foundAccountId, resolvedAccountToId: '' };
+      }
+    }
+  }
+  
+  // Fallback to CSV-level account assignment
+  if (!accountId) return { resolvedAccountId: '', resolvedAccountToId: '' };
   if (rawAmount >= 0) {
-    return { resolvedAccountId: '', resolvedAccountToId: csvAccountId };
+    return { resolvedAccountId: '', resolvedAccountToId: accountId };
   } else {
-    return { resolvedAccountId: csvAccountId, resolvedAccountToId: '' };
+    return { resolvedAccountId: accountId, resolvedAccountToId: '' };
   }
 }
 
@@ -145,6 +208,8 @@ function parseCSV(
   fileName: string,
   typeRules: TypeMappingRule[],
   csvConfig: CsvConfig | null,
+  assets: { id: string; name: string }[],
+  debts: { id: string; name: string }[],
 ): RawRow[] {
   const lines = text.split('\n').filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -161,6 +226,12 @@ function parseCSV(
     };
 
     let rawDate = '', rawType = '', rawDescription = '', rawAmount = 0, balance: number | undefined;
+    let rawAccountName: string | undefined;
+
+    // NEW: Get account from column if specified
+    if (csvConfig?.accountColumnName) {
+      rawAccountName = get(csvConfig.accountColumnName);
+    }
 
     if (csvConfig && csvConfig.amountColumns === 2 && csvConfig.debitCol && csvConfig.creditCol) {
       rawDate        = get('date') || get('Date') || get('Transaction Date');
@@ -205,6 +276,9 @@ function parseCSV(
     const { resolvedAccountId, resolvedAccountToId } = assignAccountByDirection(
       rawAmount,
       csvConfig?.accountId || '',
+      rawAccountName,
+      assets,
+      debts,
     );
 
     rows.push({
@@ -220,6 +294,7 @@ function parseCSV(
       isTransferCredit: false,
       skip: false,
       sourceCsvName: fileName,
+      rawAccountName, // Store for debugging
     });
   }
   return rows;
@@ -272,6 +347,28 @@ function applyTransferMatching(rows: RawRow[], rules: TransferRule[]): RawRow[] 
     }
   }
   return updated;
+}
+
+// ────────────────────────────────────────────────
+// Download Template
+// ────────────────────────────────────────────────
+function downloadCsvTemplate() {
+  const template = `date,type,description,amount,account
+2026-02-20,DEB,Grocery Store,-45.50,Halifax
+2026-02-21,BAC,Salary,2500.00,Halifax
+2026-02-22,DEB,Credit Card Payment,-150.00,Halifax#Debt
+2026-02-23,DEB,Transfer to Savings,-200.00,Halifax#Savings
+2026-02-24,SO,Rent Payment,-800.00,Halifax`;
+
+  const blob = new Blob([template], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'categorize-template.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ────────────────────────────────────────────────
@@ -485,10 +582,11 @@ const SectionCard: React.FC<{
   icon: React.ReactNode;
   defaultOpen?: boolean;
   onSave?: () => void;
+  onDownloadTemplate?: () => void;
   saving?: boolean;
   saved?: boolean;
   children: React.ReactNode;
-}> = ({ title, subtitle, icon, defaultOpen = true, onSave, saving = false, saved = false, children }) => {
+}> = ({ title, subtitle, icon, defaultOpen = true, onSave, onDownloadTemplate, saving = false, saved = false, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border border-white/10 rounded-sm bg-[#131517] overflow-hidden">
@@ -501,6 +599,13 @@ const SectionCard: React.FC<{
             {subtitle && <span className="text-[10px] text-iron-dust font-mono">{subtitle}</span>}
           </div>
         </button>
+        {onDownloadTemplate && (
+          <button onClick={onDownloadTemplate}
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider border-l border-white/5 px-4 py-4 transition-colors hover:bg-white/[0.02] text-iron-dust hover:text-white">
+            <Download size={11} />
+            <span>Template</span>
+          </button>
+        )}
         {onSave && (
           <button onClick={onSave} disabled={saving}
             className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider border-l border-white/5 px-4 py-4 transition-colors disabled:opacity-50 hover:bg-white/[0.02]"
@@ -620,6 +725,25 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
               {cfg.csvName}
             </span>
             <ArrowRight size={12} className="text-iron-dust shrink-0" />
+            
+            {/* Account column selector - NEW */}
+            {cfg.headers.length > 0 && (
+              <>
+                <span className="text-[10px] text-iron-dust font-mono">Account col:</span>
+                <div className="w-36">
+                  <CustomSelect
+                    value={cfg.accountColumnName}
+                    onChange={v => onChange(cfg.csvName, { accountColumnName: v })}
+                    groups={[{ options: [{ value: '', label: '— none —' }, ...cfg.headers.map(h => ({ value: h, label: h }))] }]}
+                    placeholder="— none —"
+                    triggerClassName="px-2 py-1.5 text-xs"
+                    maxVisibleItems={8}
+                  />
+                </div>
+                <span className="text-[10px] text-iron-dust font-mono">or</span>
+              </>
+            )}
+            
             <div className="w-48">
               <CustomSelect
                 value={cfg.accountId}
@@ -705,7 +829,11 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
         <input ref={addMoreRef} type="file" accept=".csv" multiple className="hidden"
           onChange={e => { if (e.target.files?.length) { onAddMore(e.target.files); e.target.value = ''; } }} />
       </div>
-      <p className="text-[10px] text-iron-dust/50 font-mono">(you can still override account per-row in the preview below)</p>
+      <div className="text-[10px] text-iron-dust/70 font-mono space-y-1">
+        <p>• Use account column for multi-account CSVs (e.g. Halifax, Halifax#Debt, Halifax#Savings)</p>
+        <p>• Use single account selector if all rows belong to one account</p>
+        <p>• You can still override account per-row in the preview table</p>
+      </div>
     </div>
   );
 };
@@ -780,6 +908,7 @@ export const Categorize: React.FC = () => {
     return {
       csvName: name,
       accountId: '',
+      accountColumnName: headers.find(h => h.toLowerCase() === 'account') || '', // Auto-detect 'account' column
       amountColumns: isHalifax ? 2 : 1,
       amountCol: headers.find(h => ['value','amount'].includes(h.toLowerCase())) || '',
       debitCol:  headers.find(h => h.toLowerCase().includes('debit'))  || '',
@@ -802,12 +931,12 @@ export const Categorize: React.FC = () => {
     const allRowsArr: RawRow[] = [];
     for (const csv of csvs) {
       const cfg = configs.find(c => c.csvName === csv.name) || null;
-      let parsed = parseCSV(csv.text, csv.name, typeRulesRef.current, cfg);
+      let parsed = parseCSV(csv.text, csv.name, typeRulesRef.current, cfg, data.assets, data.debts);
       parsed = applyMerchantRules(parsed as any, merchantRulesRef.current) as RawRow[];
       allRowsArr.push(...parsed);
     }
     return applyTransferMatching(allRowsArr, transferRulesRef.current);
-  }, []);
+  }, [data.assets, data.debts]);
 
   const loadFiles = useCallback((files: FileList, existingConfigs: CsvConfig[]) => {
     const fileArr = Array.from(files);
@@ -893,18 +1022,12 @@ export const Categorize: React.FC = () => {
       const debtIdSet = new Set(data.debts.map(d => d.id));
 
       const records = toImport.map(row => {
-        // Determine the primary ID (account_id / debt_id).
-        // Income rows have resolvedAccountId='' and resolvedAccountToId=csvAccountId;
-        // expenses are the inverse. Fall back so we always have a value.
         const primaryId    = row.resolvedAccountId || row.resolvedAccountToId;
         const isPrimaryDebt = debtIdSet.has(primaryId);
 
-        // account_to_id is a FK into the `accounts` table only — debt IDs must NOT
-        // be stored there.  If the "to" side resolves to a debt, null it out.
         const rawAccountToId = row.resolvedAccountToId || null;
         const accountToId    = rawAccountToId && debtIdSet.has(rawAccountToId) ? null : rawAccountToId;
 
-        // Dates from CSV parsers are already yyyy-MM-dd — slice to be safe
         const date = row.rawDate ? row.rawDate.substring(0, 10) : row.rawDate;
         return {
           user_id:        session.user.id,
@@ -952,7 +1075,6 @@ export const Categorize: React.FC = () => {
   const removeTypeRule = (id: string) => setTypeRules(prev => prev.filter(r => r.id !== id));
   const updateTypeRule = (id: string, patch: Partial<TypeMappingRule>) => setTypeRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  // ── Description rule helpers ───────────────────────────────────────────────────────
   const addMerchantRule = () =>
     setMerchantRules(prev => [...prev, { ...BLANK_MERCHANT_RULE, id: `mr-${Date.now()}` }]);
 
@@ -964,12 +1086,10 @@ export const Categorize: React.FC = () => {
   const patchMerchantRule = (id: string, patch: Partial<MerchantRule>) =>
     setMerchantRules(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
 
-  /** Called by EditRuleModal → saves full rule locally + to DB */
   const handleEditRuleSave = useCallback(async (updated: MerchantRule) => {
     setMerchantRules(prev => prev.map(r => r.id === updated.id ? updated : r));
     setEditingRule(null);
     await dbUpdateMerchantRule(updated);
-    // re-apply rules to live preview rows if any are loaded
     if (rows.length > 0) {
       setRows(prev => applyMerchantRules(prev as any, [updated, ...merchantRules.filter(r => r.id !== updated.id)]) as RawRow[]);
     }
@@ -1059,7 +1179,6 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            {/* DESCRIPTION RULES */}
             <SectionCard
               title="Description Rules"
               subtitle="Auto-set description, category, type, or accounts when conditions are matched"
@@ -1071,7 +1190,6 @@ export const Categorize: React.FC = () => {
                 <p className="text-iron-dust text-xs font-mono mb-2">No rules yet — add one or create from the preview table.</p>
               ) : (
                 <div className="border border-white/10 rounded-sm overflow-hidden mb-3">
-                  {/* Table header */}
                   <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_1fr_3.5rem] gap-2 px-3 py-2 bg-[#0f1012] border-b border-white/10">
                     {['Contains', 'Set Description', 'Category', 'Type', 'Acct From', 'Acct To', ''].map((h, i) => (
                       <span key={i} className="text-[9px] font-mono text-iron-dust uppercase tracking-wider">{h}</span>
@@ -1116,7 +1234,6 @@ export const Categorize: React.FC = () => {
                         triggerClassName="px-2 py-1.5 text-xs"
                         maxVisibleItems={8}
                       />
-                      {/* Action buttons: pencil (edit) + trash (delete) */}
                       <div className="flex items-center gap-1 justify-end">
                         <button
                           onClick={() => setEditingRule(rule)}
@@ -1185,7 +1302,11 @@ export const Categorize: React.FC = () => {
               </button>
             </SectionCard>
 
-            <SectionCard title="Upload Bank CSV(s)" subtitle="Drop one or more files — NatWest & Halifax auto-detected" icon={<Upload size={14} />}>
+            <SectionCard 
+              title="Upload Bank CSV(s)" 
+              subtitle="Drop one or more files — NatWest & Halifax auto-detected" 
+              icon={<Upload size={14} />}
+              onDownloadTemplate={downloadCsvTemplate}>
               <div
                 onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
                 onDragOver={e => e.preventDefault()}
@@ -1391,7 +1512,6 @@ export const Categorize: React.FC = () => {
         )}
       </div>
 
-      {/* Create Rule popup (from preview table) */}
       {rulePopup && (
         <CreateRulePopup
           row={rulePopup.row}
@@ -1406,7 +1526,6 @@ export const Categorize: React.FC = () => {
         />
       )}
 
-      {/* Edit Rule modal (from Description Rules table pencil button) */}
       {editingRule && (
         <EditRuleModal
           rule={editingRule}
