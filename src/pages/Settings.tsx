@@ -133,13 +133,10 @@ export const Settings: React.FC = () => {
 
     setPullPhase('cache_check');
     addLog('', 'dim'); addLog('\u2501'.repeat(40), 'dim');
-    addLog('PHASE 2 \u2014 Checking price history cache (most recent entry per ticker)', 'heading');
+    addLog('PHASE 2 \u2014 Checking price history cache (open + close validation)', 'heading');
     addLog('\u2501'.repeat(40), 'dim');
     await sleep(150);
 
-    // For each symbol we need two things:
-    //   - the FROM date  = earliest transaction date (lower bound, never re-fetch before this)
-    //   - the GAP start  = day after most recent cached date (fetch from here up to today)
     const toFetch = new Map<string, { from: string; to: string }>();
     const ignored: string[] = [];
 
@@ -148,30 +145,31 @@ export const Settings: React.FC = () => {
       addLog(`  Checking cache for ${sym} (tx from ${txFrom})...`, 'dim');
       await sleep(40);
 
-      // Most recent cached entry
+      // Fetch the most recent cached row — must have BOTH open and close populated
       const { data: latestRow } = await supabase
         .from('price_history_cache')
-        .select('date')
+        .select('date, open, close')
         .eq('symbol', sym)
+        .not('open', 'is', null)
+        .not('close', 'is', null)
         .order('date', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       const latestCached = latestRow?.date ? toDateOnly(latestRow.date) : null;
 
       if (!latestCached) {
-        // No cache at all — fetch everything from first tx date
-        addLog(`  \u2192 ${sym}: no cache found \u2014 will fetch ${txFrom} \u2192 ${today}`, 'info');
+        // No valid cache with both open+close — fetch everything from first tx date
+        addLog(`  \u2192 ${sym}: no cache with open+close found \u2014 will fetch ${txFrom} \u2192 ${today}`, 'info');
         toFetch.set(sym, { from: txFrom, to: today });
       } else if (latestCached >= today) {
-        // Already up to date
-        addLog(`  \u2192 ${sym}: cache is current (${latestCached}) \u2713 \u2014 skipping`, 'success');
+        // Today's row exists and has both open+close — fully up to date
+        addLog(`  \u2192 ${sym}: cache current with open+close (${latestCached}) \u2713 \u2014 skipping`, 'success');
         ignored.push(sym);
       } else {
-        // Gap between latest cached and today
-        const gapFrom = latestCached; // Yahoo returns from >= period1, so using latestCached re-fetches that day (fine, upsert handles it)
-        addLog(`  \u2192 ${sym}: latest cache ${latestCached}, gap ${gapFrom} \u2192 ${today}`, 'info');
-        toFetch.set(sym, { from: gapFrom, to: today });
+        // Has valid rows but there's a gap up to today
+        addLog(`  \u2192 ${sym}: latest valid cache ${latestCached}, gap \u2192 ${today}`, 'info');
+        toFetch.set(sym, { from: latestCached, to: today });
       }
     }
 
@@ -182,7 +180,7 @@ export const Settings: React.FC = () => {
 
     if (toFetch.size === 0) {
       addLog('', 'dim');
-      addLog('\u2713 All tickers are fully cached. Nothing to do!', 'success');
+      addLog('\u2713 All tickers are fully cached with open + close. Nothing to do!', 'success');
       setPullPhase('done');
       return;
     }
@@ -376,7 +374,7 @@ export const Settings: React.FC = () => {
             <div className="border-t border-white/5" />
             <div>
               <p className="text-sm font-bold text-white mb-1">Pull Historic Price Data</p>
-              <p className="text-sm text-iron-dust">Backfills missing open + close price history for all investment holdings. Checks the most recent cached date per ticker and only fetches the gap up to today.</p>
+              <p className="text-sm text-iron-dust">Backfills missing open + close price history for all investment holdings. Checks the most recent cached date per ticker (with both open and close populated) and only fetches the gap up to today.</p>
               <button
                 onClick={handlePullHistoricData}
                 disabled={isPulling}
