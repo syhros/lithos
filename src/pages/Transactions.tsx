@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
-import { Plus, Upload, Trash2, CheckSquare, Square, X, Edit2, ArrowRight } from 'lucide-react';
+import { Plus, Upload, Trash2, CheckSquare, Square, X, Edit2, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import { AddTransactionModal } from '../components/AddTransactionModal';
@@ -219,6 +219,8 @@ export const Transactions: React.FC = () => {
   const [showBulkEdit,      setShowBulkEdit]      = useState(false);
   const [showImport,        setShowImport]        = useState(false);
   const [selectedTx,        setSelectedTx]        = useState<Transaction | null>(null);
+  const [currentPage,       setCurrentPage]       = useState(1);
+  const [perPage,           setPerPage]           = useState(10);
 
   const allAccounts = useMemo(() => [...data.assets, ...data.debts], [data.assets, data.debts]);
 
@@ -236,14 +238,24 @@ export const Transactions: React.FC = () => {
     data.transactions, accountMap, search, filterType, sortBy
   );
 
-  const allSelected = filteredTransactions.length > 0 &&
-    filteredTransactions.every(tx => selectedIds.has(tx.id));
+  // Pagination
+  const totalPages = Math.ceil(filteredTransactions.length / perPage);
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return filteredTransactions.slice(start, start + perPage);
+  }, [filteredTransactions, currentPage, perPage]);
+
+  // Reset to page 1 when filters change
+  useMemo(() => setCurrentPage(1), [search, filterType, sortBy, perPage]);
+
+  const allSelected = paginatedTransactions.length > 0 &&
+    paginatedTransactions.every(tx => selectedIds.has(tx.id));
 
   const toggleSelectMode = () => { setSelectMode(p => !p); setSelectedIds(new Set()); };
   const toggleSelect     = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleSelectAll  = () => allSelected
     ? setSelectedIds(new Set())
-    : setSelectedIds(new Set(filteredTransactions.map(tx => tx.id)));
+    : setSelectedIds(new Set(paginatedTransactions.map(tx => tx.id)));
 
   const handleConfirmDelete = async () => {
     await deleteTransactions(Array.from(selectedIds));
@@ -266,7 +278,7 @@ export const Transactions: React.FC = () => {
   };
 
   return (
-    <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar">
+    <div className="p-12 max-w-7xl mx-auto h-full flex flex-col slide-up relative overflow-y-auto custom-scrollbar pb-24">
 
       {/* Page header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
@@ -375,7 +387,7 @@ export const Transactions: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {filteredTransactions.map(tx => {
+              {paginatedTransactions.map(tx => {
                 const isSelected  = selectedIds.has(tx.id);
                 const typeLabel   = TYPE_LABELS[tx.type] ?? tx.type;
                 const typeColor   = TYPE_COLORS[tx.type]  ?? 'text-iron-dust bg-white/5 border-white/10';
@@ -435,7 +447,7 @@ export const Transactions: React.FC = () => {
                   </tr>
                 );
               })}
-              {filteredTransactions.length === 0 && (
+              {paginatedTransactions.length === 0 && (
                 <tr>
                   <td colSpan={selectMode ? 8 : 7} className="py-12 text-center text-iron-dust font-mono text-xs">
                     No transactions found.
@@ -446,6 +458,51 @@ export const Transactions: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Fixed Pagination Bar */}
+      {filteredTransactions.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-[#131517] border-t border-white/10 z-20">
+          <div className="max-w-7xl mx-auto px-12 py-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-iron-dust font-mono">Rows per page:</span>
+              <select
+                value={perPage}
+                onChange={e => setPerPage(Number(e.target.value))}
+                className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-sm text-xs font-mono text-white hover:bg-white/10 transition-colors appearance-none cursor-pointer">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-iron-dust font-mono">
+                {(currentPage - 1) * perPage + 1}–{Math.min(currentPage * perPage, filteredTransactions.length)} of {filteredTransactions.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2 py-1.5 bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="px-3 text-xs font-mono text-white">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2 py-1.5 bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       <AddTransactionModal isOpen={showModal} onClose={() => setShowModal(false)} />
