@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFinance } from '../context/FinanceContext';
-import { Download, Upload, Trash2, AlertCircle, Check, LogOut, Database, CheckCircle2, XCircle, Loader2, LayoutGrid } from 'lucide-react';
+import { Download, Upload, Trash2, AlertCircle, Check, LogOut, Database, CheckCircle2, XCircle, Loader2, LayoutGrid, FileText } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../lib/supabase';
 import { CustomSelect, SelectGroup } from '../components/CustomSelect';
@@ -15,6 +15,7 @@ type LogEntry = {
 
 type PullPhase = 'idle' | 'scanning' | 'cache_check' | 'compiling' | 'pulling' | 'done';
 type ImportPhase = 'idle' | 'parsing' | 'importing' | 'done' | 'error';
+type PriceImportPhase = 'idle' | 'parsing' | 'uploading' | 'done' | 'error';
 
 const toDateOnly = (dateStr: string): string => dateStr.substring(0, 10);
 
@@ -51,6 +52,11 @@ export const Settings: React.FC = () => {
   const [importFileName, setImportFileName] = useState<string>('');
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  const [priceImportPhase, setPriceImportPhase] = useState<PriceImportPhase>('idle');
+  const [priceImportMessage, setPriceImportMessage] = useState<string>('');
+  const [priceImportFileName, setPriceImportFileName] = useState<string>('');
+  const priceImportInputRef = useRef<HTMLInputElement>(null);
+
   const [pullPhase, setPullPhase] = useState<PullPhase>('idle');
   const [log, setLog] = useState<LogEntry[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -70,6 +76,134 @@ export const Settings: React.FC = () => {
   const addLog = (text: string, type: LogEntry['type'] = 'info') =>
     setLog(prev => [...prev, { id: ++logIdRef.current, text, type }]);
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  const handleDownloadPriceTemplate = () => {
+    const csv = 'date,ticker,open,close\n2026-02-24,L&GP,1.23,1.25\n2026-02-23,L&GP,1.20,1.23';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'lithos-price-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
+  const handleImportPriceCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (priceImportInputRef.current) priceImportInputRef.current.value = '';
+    setPriceImportFileName(file.name);
+    setPriceImportPhase('parsing');
+    setPriceImportMessage('Reading CSV...');
+
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setPriceImportPhase('error');
+      setPriceImportMessage('Failed to read file');
+      return;
+    }
+
+    const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      setPriceImportPhase('error');
+      setPriceImportMessage('CSV is empty or has no data rows');
+      return;
+    }
+
+    const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+    const dateIdx = header.indexOf('date');
+    const tickerIdx = header.indexOf('ticker');
+    const openIdx = header.indexOf('open');
+    const closeIdx = header.indexOf('close');
+
+    if (dateIdx === -1 || tickerIdx === -1 || closeIdx === -1) {
+      setPriceImportPhase('error');
+      setPriceImportMessage('CSV must have columns: date, ticker, close (open is optional)');
+      return;
+    }
+
+    const rows: Array<{ symbol: string; date: string; open: number | null; close: number; fetched_at: string }> = [];
+    const errors: string[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.trim());
+      const dateStr = cols[dateIdx];
+      const ticker = cols[tickerIdx];
+      const closeStr = cols[closeIdx];
+      const openStr = openIdx !== -1 ? cols[openIdx] : '';
+
+      if (!dateStr || !ticker || !closeStr) {
+        errors.push(`Row ${i + 1}: missing date, ticker, or close`);
+        continue;
+      }
+
+      // Validate date format (YYYY-MM-DD)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        errors.push(`Row ${i + 1}: invalid date format "${dateStr}" (expected YYYY-MM-DD)`);
+        continue;
+      }
+
+      const closeNum = parseFloat(closeStr);
+      if (isNaN(closeNum)) {
+        errors.push(`Row ${i + 1}: invalid close price "${closeStr}"`);
+        continue;
+      }
+
+      const openNum = openStr ? parseFloat(openStr) : null;
+      if (openStr && isNaN(openNum!)) {
+        errors.push(`Row ${i + 1}: invalid open price "${openStr}"`);
+        continue;
+      }
+
+      rows.push({
+        symbol: ticker,
+        date: dateStr,
+        open: openNum,
+        close: closeNum,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+
+    if (rows.length === 0) {
+      setPriceImportPhase('error');
+      setPriceImportMessage(`No valid rows found. ${errors.length > 0 ? errors.slice(0, 3).join('; ') : ''}`);
+      return;
+    }
+
+    setPriceImportPhase('uploading');
+    setPriceImportMessage(`Uploading ${rows.length} price records...`);
+
+    const BATCH = 500;
+    let uploaded = 0;
+    let upsertErrors: string[] = [];
+
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH);
+      const { error } = await supabase
+        .from('price_history_cache')
+        .upsert(batch, { onConflict: 'symbol,date', ignoreDuplicates: false });
+
+      if (error) {
+        upsertErrors.push(error.message);
+      } else {
+        uploaded += batch.length;
+      }
+    }
+
+    if (upsertErrors.length === 0) {
+      setPriceImportPhase('done');
+      setPriceImportMessage(`${uploaded} price records uploaded successfully${errors.length > 0 ? ` (${errors.length} rows skipped due to validation errors)` : ''}`);
+    } else {
+      setPriceImportPhase('error');
+      setPriceImportMessage(`Uploaded ${uploaded}/${rows.length} records. Errors: ${upsertErrors.slice(0, 2).join('; ')}`);
+    }
+
+    await refreshData();
+  };
 
   const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -410,6 +544,33 @@ export const Settings: React.FC = () => {
                       )}>{entry.text || '\u00a0'}</div>
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-white/5" />
+            <div>
+              <p className="text-sm font-bold text-white mb-1">Manual Price Import</p>
+              <p className="text-sm text-iron-dust mb-4">Upload a CSV file with daily open/close prices for custom tickers that aren't available on Yahoo Finance (e.g., pension funds, private instruments). Format: <code className="bg-black/30 px-1.5 py-0.5 rounded text-xs">date,ticker,open,close</code></p>
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  onClick={handleDownloadPriceTemplate}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-sm text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                >
+                  <FileText size={12} /> Download Template
+                </button>
+                <label className={clsx('flex items-center gap-2 px-4 py-2.5 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer border',
+                  priceImportPhase === 'uploading' || priceImportPhase === 'parsing' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 cursor-not-allowed pointer-events-none' :
+                  priceImportPhase === 'done' ? 'bg-emerald-vein/10 border-emerald-vein/30 text-emerald-vein hover:bg-emerald-vein/20' :
+                  priceImportPhase === 'error' ? 'bg-red-900/20 border-red-900/30 text-red-400 hover:bg-red-900/30' : 'bg-white/10 border-white/20 text-white hover:bg-white/15')}>
+                  {priceImportPhase === 'uploading' || priceImportPhase === 'parsing' ? <Loader2 size={12} className="animate-spin" /> : priceImportPhase === 'done' ? <CheckCircle2 size={12} /> : priceImportPhase === 'error' ? <XCircle size={12} /> : <Upload size={12} />}
+                  {priceImportPhase === 'parsing' ? 'Reading...' : priceImportPhase === 'uploading' ? 'Uploading...' : priceImportPhase === 'done' ? 'Upload Complete' : priceImportPhase === 'error' ? 'Upload Failed' : 'Upload CSV'}
+                  <input ref={priceImportInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportPriceCSV} disabled={priceImportPhase === 'uploading' || priceImportPhase === 'parsing'} />
+                </label>
+              </div>
+              {priceImportMessage && (
+                <div className={clsx('mt-3 flex items-start gap-2 text-sm font-mono rounded-sm px-4 py-3 border', priceImportPhase === 'done' ? 'bg-emerald-vein/5 border-emerald-vein/20 text-emerald-vein' : priceImportPhase === 'error' ? 'bg-red-900/10 border-red-900/30 text-red-400' : 'bg-white/5 border-white/10 text-white/70')}>
+                  {priceImportPhase === 'done' ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" /> : priceImportPhase === 'error' ? <XCircle size={14} className="shrink-0 mt-0.5" /> : <Loader2 size={14} className="animate-spin shrink-0 mt-0.5" />}
+                  <span>{priceImportFileName && <span className="text-iron-dust mr-1">[{priceImportFileName}]</span>}{priceImportMessage}</span>
                 </div>
               )}
             </div>
