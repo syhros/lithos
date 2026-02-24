@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { X, TrendingUp, ArrowUpRight, ArrowDownRight, Pencil, Check, Trash2, ArrowRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { format } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
 import { Asset, AssetType, Currency } from '../data/mockData';
@@ -15,7 +15,7 @@ interface AccountDetailModalProps {
 const COLORS = ['#00f2ad', '#d4af37', '#3b82f6', '#f97316', '#e85d04', '#ec4899', '#14b8a6'];
 
 export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, onClose, account }) => {
-  const { data, currentBalances, updateAccount, deleteAccount, getHistory, currencySymbol } = useFinance();
+  const { data, currentBalances, updateAccount, deleteAccount, currencySymbol } = useFinance();
 
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
@@ -41,7 +41,6 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
     return map;
   }, [data.assets, data.debts]);
 
-  // Include transfers where this account is the destination (accountToId)
   const transactions = useMemo(() => {
     if (!account) return [];
     return (data?.transactions || [])
@@ -50,26 +49,75 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
       .slice(0, 20);
   }, [data?.transactions, account]);
 
+  // Build a true per-account 30-day running balance chart
   const chartData = useMemo(() => {
     if (!account) return [];
-    const history = getHistory('1M');
-    return history.map(point => ({
-      date: point.date,
-      value: account.type === 'checking'
-        ? point.checking
-        : account.type === 'savings'
-        ? point.savings
-        : point.investing,
-    }));
-  }, [account, getHistory]);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // All txns for this account (no slice limit), sorted oldest → newest
+    const accountTxns = (data?.transactions || [])
+      .filter(t => t.accountId === account.id || t.accountToId === account.id)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Current balance is the source of truth — walk backwards from it
+    // to find starting balance 30 days ago
+    const cutoff = subDays(today, 30);
+
+    // Sum of all txns AFTER cutoff (these are in our 30-day window)
+    const windowDelta = accountTxns
+      .filter(t => {
+        const d = new Date(t.date);
+        d.setHours(0, 0, 0, 0);
+        return d > cutoff;
+      })
+      .reduce((sum, t) => {
+        // Credits to this account are positive, debits are negative
+        if (t.accountToId === account.id) return sum + Math.abs(t.amount);
+        return sum + t.amount;
+      }, 0);
+
+    // Balance at the start of the 30-day window
+    const startBalance = balance - windowDelta;
+
+    // Build daily points
+    const points: { date: string; value: number }[] = [];
+    for (let i = 30; i >= 0; i--) {
+      const day = subDays(today, i);
+      day.setHours(0, 0, 0, 0);
+      const dayStr = format(day, 'yyyy-MM-dd');
+
+      // Sum all txns on this day
+      const dayDelta = accountTxns
+        .filter(t => {
+          const d = new Date(t.date);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime() === day.getTime();
+        })
+        .reduce((sum, t) => {
+          if (t.accountToId === account.id) return sum + Math.abs(t.amount);
+          return sum + t.amount;
+        }, 0);
+
+      points.push({ date: dayStr, dayDelta });
+    }
+
+    // Walk forward from startBalance accumulating deltas
+    let running = startBalance;
+    return points.map(p => {
+      running += (p as any).dayDelta;
+      return { date: p.date, value: running };
+    });
+  }, [account, data?.transactions, balance]);
 
   const chartMin = chartData.length > 0
     ? Math.min(...chartData.map(d => d.value)) * 0.97
     : 'auto';
 
   const firstVal = chartData[0]?.value ?? 0;
-  const lastVal = chartData[chartData.length - 1]?.value ?? 0;
-  const chartUp = lastVal >= firstVal;
+  const lastVal  = chartData[chartData.length - 1]?.value ?? 0;
+  const chartUp  = lastVal >= firstVal;
   const chartColor = chartUp ? '#00f2ad' : '#ff4d00';
 
   const income   = transactions.filter(t => t.amount > 0 || (t.type === 'transfer' && t.accountToId === account?.id)).reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -122,8 +170,8 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
           <div className="flex items-center gap-4">
             <div className="text-right">
               <span className="block text-[10px] text-iron-dust uppercase tracking-wider mb-1">Current Balance</span>
-              <span className="text-2xl font-bold text-white tracking-tight">
-                {currencySymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <span className={clsx('text-2xl font-bold tracking-tight', balance < 0 ? 'text-magma' : 'text-white')}>
+                {balance < 0 ? '-' : ''}{currencySymbol}{Math.abs(balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
             {!editMode && (
@@ -306,7 +354,7 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
                   <span className="text-[10px] font-mono text-iron-dust uppercase tracking-[2px]">30 Day Performance</span>
                   <span className={clsx('text-[10px] font-mono font-bold flex items-center gap-1', chartUp ? 'text-emerald-vein' : 'text-magma')}>
                     {chartUp ? <TrendingUp size={10} /> : null}
-                    {chartUp ? '+' : ''}{lastVal > 0 ? (((lastVal - firstVal) / Math.abs(firstVal)) * 100).toFixed(1) : '0.0'}%
+                    {chartUp ? '+' : ''}{firstVal !== 0 ? (((lastVal - firstVal) / Math.abs(firstVal)) * 100).toFixed(1) : '0.0'}%
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height="85%">
@@ -410,8 +458,8 @@ export const AccountDetailModal: React.FC<AccountDetailModalProps> = ({ isOpen, 
                               {isTransfer && (
                                 <span className="ml-1">
                                   {isIncoming
-                                    ? <> ← {allAccountMap[tx.accountId ?? ''] || 'Unknown'}</>
-                                    : <> → {allAccountMap[tx.accountToId ?? ''] || 'Unknown'}</>
+                                    ? <> ← {allAccountMap[tx.accountId ?? ''] || 'Unknown'}</>
+                                    : <> → {allAccountMap[tx.accountToId ?? ''] || 'Unknown'}</>
                                   }
                                 </span>
                               )}

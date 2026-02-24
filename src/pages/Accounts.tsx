@@ -44,11 +44,13 @@ export const Accounts: React.FC = () => {
 
     const AccountTile = ({ asset }: { asset: Asset }) => {
         const balance = currentBalances[asset.id] || 0;
+        const isNegative = balance < 0;
         const change = balance - asset.startingValue;
         const changePercent = asset.startingValue > 0 ? (change / asset.startingValue) * 100 : 0;
         const isPositive = change >= 0;
-        const whole = Math.floor(Math.abs(balance)).toLocaleString();
-        const pence = balance.toFixed(2).split('.')[1];
+        const absBalance = Math.abs(balance);
+        const whole = Math.floor(absBalance).toLocaleString();
+        const pence = absBalance.toFixed(2).split('.')[1];
         const isSavings = asset.type === 'savings';
         return (
             <div key={asset.id} onClick={() => setSelectedAccount(asset)} className="group bg-[#161618] border border-white/5 p-6 rounded-sm relative overflow-hidden transition-all hover:border-white/10 hover:-translate-y-1 cursor-pointer">
@@ -67,8 +69,8 @@ export const Accounts: React.FC = () => {
                     </div>
                 </div>
                 <div className="mb-3">
-                    <div className="text-4xl font-black text-white tracking-tight leading-none">
-                        {currencySymbol}{whole}<span className="text-2xl font-light opacity-30">.{pence}</span>
+                    <div className={clsx('text-4xl font-black tracking-tight leading-none', isNegative ? 'text-magma' : 'text-white')}>
+                        {isNegative && <span>-</span>}{currencySymbol}{whole}<span className={clsx('text-2xl font-light', isNegative ? 'opacity-60' : 'opacity-30')}>.{pence}</span>
                     </div>
                     {isSavings ? (
                         <div className="flex items-center gap-3 mt-1.5">
@@ -100,7 +102,7 @@ export const Accounts: React.FC = () => {
                             <div key={label} className="bg-black/30 rounded-sm p-4 border border-white/5">
                                 <span className="block text-[10px] font-mono text-iron-dust uppercase tracking-wider mb-2">{label}</span>
                                 <span className={clsx('text-lg font-bold font-mono', color || 'text-white')}>
-                                    {isMoney ? `${currencySymbol}${val.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : checkSavingsRatio}
+                                    {isMoney ? `${val < 0 ? '-' : ''}${currencySymbol}${Math.abs(val).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : checkSavingsRatio}
                                 </span>
                             </div>
                         ))}
