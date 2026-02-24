@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useFinance, getCurrencySymbol } from '../context/FinanceContext';
+import { useFinance, getCurrencySymbol, getCloseForDate, getTodayOpen } from '../context/FinanceContext';
 import { LineChart as LineChartIcon, Wallet, TrendingUp, TrendingDown, Plus, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AreaChart, Area, YAxis, ResponsiveContainer, LineChart, Line } from 'recharts';
@@ -53,6 +53,8 @@ export const Investments: React.FC = () => {
     }, [data?.transactions]);
 
     const holdings = useMemo(() => {
+        const today = format(new Date(), 'yyyy-MM-dd');
+
         const map = new Map<string, { symbol: string; quantity: number; totalCost: number; feeCost: number; buyQty: number; buyTotalCost: number; currency: string; }>();
         (data?.transactions || []).forEach(tx => {
             if (tx.type === 'investing' && tx.symbol && tx.quantity) {
@@ -66,6 +68,7 @@ export const Investments: React.FC = () => {
                 map.set(tx.symbol, current);
             }
         });
+
         return Array.from(map.values()).map(h => {
             const marketData = currentPrices[h.symbol];
             const nativeCurrency = h.currency || marketData?.currency || 'GBP';
@@ -83,16 +86,27 @@ export const Investments: React.FC = () => {
             const avgPriceCost = h.buyQty > 0 ? h.buyTotalCost / h.buyQty : 0;
             const profitValue = currentValue - h.totalCost;
             const profitPercent = h.totalCost > 0 ? (profitValue / h.totalCost) * 100 : 0;
-            const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-            const today = format(new Date(), 'yyyy-MM-dd');
+
+            // Daily % change: today's open price vs current live price (native currency)
+            // Falls back to yesterday close vs live if no open available yet
             const history = historicalPrices[h.symbol] || {};
-            const yesterdayPrice = history[yesterday] || history[today] || nativePrice;
-            const todayPrice = history[today] || nativePrice;
-            const dailyChangePercent = yesterdayPrice > 0 ? ((todayPrice - yesterdayPrice) / yesterdayPrice) * 100 : 0;
+            const todayOpen = getTodayOpen(history, today);
+            const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+            const yesterdayClose = getCloseForDate(history, yesterday);
+
+            let dailyChangePercent = 0;
+            if (todayOpen != null && todayOpen > 0 && nativePrice > 0) {
+                // Primary: open-to-live
+                dailyChangePercent = ((nativePrice - todayOpen) / todayOpen) * 100;
+            } else if (yesterdayClose != null && yesterdayClose > 0 && nativePrice > 0) {
+                // Fallback: yesterday close-to-live (market closed or open not yet cached)
+                dailyChangePercent = ((nativePrice - yesterdayClose) / yesterdayClose) * 100;
+            }
+
             const tickerName = symbolNameMap.get(h.symbol) ?? h.symbol;
             return { ...h, nativeCurrency, nativePrice, displayPrice, currentValue, avgPrice: avgPriceCost, profitValue, profitPercent, isZeroCost: h.totalCost === 0, marketData, fxRate, dailyChangePercent, tickerName };
         }).sort((a, b) => b.currentValue - a.currentValue);
-    }, [data.transactions, currentPrices, gbpUsdRate, userCurrency, symbolNameMap]);
+    }, [data.transactions, currentPrices, gbpUsdRate, userCurrency, symbolNameMap, historicalPrices]);
 
     const EPSILON = 0.000001;
     const activeHoldings = holdings.filter(h => h.quantity > EPSILON);
@@ -130,14 +144,15 @@ export const Investments: React.FC = () => {
                 Object.entries(holdingQtys).forEach(([sym, qty]) => {
                     const hist = historicalPrices[sym] || {};
                     const dateStr = format(date, 'yyyy-MM-dd');
-                    let price = hist[dateStr] ?? currentPrices[sym]?.price ?? 0;
+                    // Use close price for historical chart points
+                    const price = getCloseForDate(hist, dateStr) ?? currentPrices[sym]?.price ?? 0;
                     const symCurrency = symbolCurrencies[sym] || currentPrices[sym]?.currency || 'GBP';
                     const isUsd = symCurrency === 'USD';
                     const isGbx = symCurrency === 'GBX';
                     let fx = 1;
                     if (isUsd && gbpUsdRate > 0) fx = 1 / gbpUsdRate;
-                    if (isGbx) price = price / 100;
-                    val += qty * price * fx;
+                    const adjustedPrice = isGbx ? price / 100 : price * fx;
+                    val += qty * adjustedPrice;
                 });
                 return { date: format(date, 'dd MMM'), value: val > 0 ? parseFloat(val.toFixed(2)) : fallbackBalance };
             });
@@ -159,9 +174,10 @@ export const Investments: React.FC = () => {
             if (isUsd && gbpUsdRate > 0) fx = 1 / gbpUsdRate;
             result[h.symbol] = dates.map(date => {
                 const dateStr = format(date, 'yyyy-MM-dd');
-                let price = hist[dateStr] ?? h.nativePrice;
-                if (isGbx) price = price / 100;
-                return { date: format(date, 'dd'), value: parseFloat((h.quantity * price * fx).toFixed(2)) };
+                // Use close price for sparkline points
+                const price = getCloseForDate(hist, dateStr) ?? h.nativePrice;
+                const adjustedPrice = isGbx ? price / 100 : price * fx;
+                return { date: format(date, 'dd'), value: parseFloat((h.quantity * adjustedPrice).toFixed(2)) };
             });
         });
         return result;
@@ -180,10 +196,9 @@ export const Investments: React.FC = () => {
             if (isUsd && gbpUsdRate > 0) fx = 1 / gbpUsdRate;
             result[h.symbol] = dates.map(date => {
                 const dateStr = format(date, 'yyyy-MM-dd');
-                let price = hist[dateStr] ?? h.nativePrice;
-                if (isGbx) price = price / 100;
-                else price = price * fx;
-                return { date: format(date, 'dd'), value: parseFloat(price.toFixed(2)) };
+                const price = getCloseForDate(hist, dateStr) ?? h.nativePrice;
+                const adjustedPrice = isGbx ? price / 100 : price * fx;
+                return { date: format(date, 'dd'), value: parseFloat(adjustedPrice.toFixed(2)) };
             });
         });
         return result;
@@ -378,7 +393,9 @@ export const Investments: React.FC = () => {
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">
                                         <p className="text-[9px] font-mono text-iron-dust uppercase tracking-widest">Market Value</p>
-                                        <span className={clsx('text-[8px] font-mono font-bold px-1 py-0.5 rounded', isDayUp ? 'bg-emerald-vein/10 text-emerald-vein' : 'bg-magma/10 text-magma')}>{isDayUp ? '+' : ''}{dayChange.toFixed(2)}%</span>
+                                        <span className={clsx('text-[8px] font-mono font-bold px-1 py-0.5 rounded', isDayUp ? 'bg-emerald-vein/10 text-emerald-vein' : 'bg-magma/10 text-magma')}>
+                                            {isDayUp ? '+' : ''}{dayChange.toFixed(2)}%
+                                        </span>
                                     </div>
                                 </div>
                                 <div className="h-[40px] w-full my-2">
