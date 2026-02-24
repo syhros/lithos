@@ -11,7 +11,6 @@ const YAHOO_HEADERS = {
   "Accept": "application/json",
 };
 
-// Fetch daily open + close from Yahoo Finance for a specific window.
 const fetchYearChunk = async (
   symbol: string,
   period1: number,
@@ -28,8 +27,27 @@ const fetchYearChunk = async (
   if (!result) return [];
 
   const timestamps: number[] = result.timestamp || [];
-  const closes: (number | null)[] = result.indicators?.quote?.[0]?.close || [];
-  const opens: (number | null)[] = result.indicators?.quote?.[0]?.open || [];
+  const quoteObj = result.indicators?.quote?.[0];
+
+  // --- DEBUG: log exactly what Yahoo returned for this chunk ---
+  console.log(`[DEBUG] ${symbol} period1=${period1} period2=${period2}`);
+  console.log(`[DEBUG] timestamps.length=${timestamps.length}`);
+  console.log(`[DEBUG] quote keys=${JSON.stringify(Object.keys(quoteObj || {}))}`);
+  const rawOpens = quoteObj?.open;
+  const rawCloses = quoteObj?.close;
+  console.log(`[DEBUG] opens type=${typeof rawOpens}, isArray=${Array.isArray(rawOpens)}, length=${Array.isArray(rawOpens) ? rawOpens.length : 'n/a'}`);
+  console.log(`[DEBUG] closes type=${typeof rawCloses}, isArray=${Array.isArray(rawCloses)}, length=${Array.isArray(rawCloses) ? rawCloses.length : 'n/a'}`);
+  // log first 3 pairs so we can see actual values
+  if (Array.isArray(rawOpens) && Array.isArray(rawCloses)) {
+    for (let i = 0; i < Math.min(3, timestamps.length); i++) {
+      const date = new Date(timestamps[i] * 1000).toISOString().substring(0, 10);
+      console.log(`[DEBUG] row ${i}: date=${date} open=${rawOpens[i]} close=${rawCloses[i]}`);
+    }
+  }
+  // --- END DEBUG ---
+
+  const closes: (number | null)[] = rawCloses || [];
+  const opens: (number | null)[] = rawOpens || [];
 
   const rows: Array<{ date: string; open: number | null; close: number }> = [];
   for (let i = 0; i < timestamps.length; i++) {
@@ -91,11 +109,12 @@ Deno.serve(async (req: Request) => {
       ? new Date(toDate).getTime()
       : Date.now();
 
-    const summary: Record<string, { rows: number; error?: string }> = {};
+    const summary: Record<string, { rows: number; error?: string; debug?: any }> = {};
 
     for (const symbol of symbols) {
       let totalRows = 0;
       let hadError: string | undefined;
+      let debugInfo: any = {};
 
       try {
         const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -124,7 +143,12 @@ Deno.serve(async (req: Request) => {
             }
           }
 
+          // Debug: check first row open value before upsert
           if (rows.length > 0) {
+            debugInfo.firstRow = rows[0];
+            debugInfo.sampleOpenValues = rows.slice(0, 5).map(r => ({ date: r.date, open: r.open, close: r.close }));
+            console.log(`[DEBUG] ${symbol} first row before upsert:`, JSON.stringify(rows[0]));
+
             const BATCH = 500;
             for (let i = 0; i < rows.length; i += BATCH) {
               const batch = rows.slice(i, i + BATCH).map(r => ({
@@ -135,12 +159,19 @@ Deno.serve(async (req: Request) => {
                 fetched_at: new Date().toISOString(),
               }));
 
-              const { error } = await supabase
+              console.log(`[DEBUG] ${symbol} upsert batch[0]:`, JSON.stringify(batch[0]));
+
+              const { error, data: upsertData } = await supabase
                 .from("price_history_cache")
-                .upsert(batch, { onConflict: "symbol,date", ignoreDuplicates: false });
+                .upsert(batch, { onConflict: "symbol,date", ignoreDuplicates: false })
+                .select('symbol, date, open, close')
+                .limit(1);
+
+              console.log(`[DEBUG] ${symbol} upsert result row[0]:`, JSON.stringify(upsertData?.[0]));
 
               if (error) {
                 console.error(`Upsert error for ${symbol}:`, error.message);
+                debugInfo.upsertError = error.message;
                 hadError = error.message;
               } else {
                 totalRows += batch.length;
@@ -156,7 +187,7 @@ Deno.serve(async (req: Request) => {
         hadError = e.message;
       }
 
-      summary[symbol] = { rows: totalRows, ...(hadError ? { error: hadError } : {}) };
+      summary[symbol] = { rows: totalRows, ...(hadError ? { error: hadError } : {}), debug: debugInfo };
       await sleep(500);
     }
 
