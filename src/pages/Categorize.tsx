@@ -71,6 +71,18 @@ const TX_TYPE_OPTIONS: SelectGroup[] = [{
   ],
 }];
 
+const PER_PAGE_OPTIONS: SelectGroup[] = [{
+  options: [
+    { value: '25',   label: '25 / page' },
+    { value: '50',   label: '50 / page' },
+    { value: '100',  label: '100 / page' },
+    { value: '200',  label: '200 / page' },
+    { value: '500',  label: '500 / page' },
+    { value: '1000', label: '1000 / page' },
+    { value: 'all',  label: 'All' },
+  ],
+}];
+
 function buildAccountGroups(
   assets: { id: string; name: string }[],
   debts: { id: string; name: string }[],
@@ -881,7 +893,8 @@ export const Categorize: React.FC = () => {
   const [filterAccount,     setFilterAccount]     = useState<string>('all');
   const [filterCategorySet, setFilterCategorySet] = useState<'all' | 'with' | 'without'>('all');
   const [currentPage,       setCurrentPage]       = useState(1);
-  const [perPage,           setPerPage]           = useState(50);
+  // perPage is a number OR the special string 'all'
+  const [perPage,           setPerPage]           = useState<number | 'all'>(50);
   const [rulePopup,         setRulePopup]         = useState<{ row: RawRow; field: 'category' | 'description' | 'type' | 'notes' } | null>(null);
   const [editingRule,       setEditingRule]       = useState<MerchantRule | null>(null);
   const [csvConfigs,        setCsvConfigs]        = useState<CsvConfig[]>([]);
@@ -919,9 +932,12 @@ export const Categorize: React.FC = () => {
     return true;
   }), [rows, filterType, filterAccount, filterCategorySet]);
 
-  const totalPages   = Math.max(1, Math.ceil(filteredRows.length / perPage));
+  // When perPage is 'all', treat it as the full list length for slicing
+  const effectivePerPage = perPage === 'all' ? Math.max(1, filteredRows.length) : perPage;
+  const totalPages   = perPage === 'all' ? 1 : Math.max(1, Math.ceil(filteredRows.length / effectivePerPage));
   const safePage     = Math.min(currentPage, totalPages);
   const paginatedRows = useMemo(() => {
+    if (perPage === 'all') return filteredRows;
     const start = (safePage - 1) * perPage;
     return filteredRows.slice(start, start + perPage);
   }, [filteredRows, safePage, perPage]);
@@ -1426,35 +1442,38 @@ export const Categorize: React.FC = () => {
 
                   <span className="text-xs text-iron-dust font-mono ml-auto">{filteredRows.length} rows</span>
 
-                  {/* Per-page selector */}
-                  <select
-                    value={perPage}
-                    onChange={e => { setPerPage(Number(e.target.value)); resetPage(); }}
-                    className="px-2 py-1.5 bg-white/5 border border-white/10 rounded-sm text-xs font-mono text-iron-dust hover:text-white hover:bg-white/10 transition-colors cursor-pointer outline-none">
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                    <option value={200}>200</option>
-                    <option value={500}>500</option>
-                    <option value={1000}>1000</option>
-                  </select>
+                  {/* Per-page CustomSelect */}
+                  <div className="w-32">
+                    <CustomSelect
+                      value={String(perPage)}
+                      onChange={v => { setPerPage(v === 'all' ? 'all' : Number(v)); resetPage(); }}
+                      groups={PER_PAGE_OPTIONS}
+                      placeholder="50 / page"
+                      triggerClassName="px-2 py-1.5 text-xs"
+                      maxVisibleItems={8}
+                    />
+                  </div>
 
-                  {/* Page prev/next */}
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={safePage === 1}
-                    className="w-7 h-7 flex items-center justify-center bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                    <ChevronLeft size={13} />
-                  </button>
-                  <span className="text-xs font-mono text-white tabular-nums">
-                    {safePage}&nbsp;/&nbsp;{totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={safePage === totalPages}
-                    className="w-7 h-7 flex items-center justify-center bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                    <ChevronRight size={13} />
-                  </button>
+                  {/* Page prev/next — hidden when showing all */}
+                  {perPage !== 'all' && (
+                    <>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={safePage === 1}
+                        className="w-7 h-7 flex items-center justify-center bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                        <ChevronLeft size={13} />
+                      </button>
+                      <span className="text-xs font-mono text-white tabular-nums">
+                        {safePage}&nbsp;/&nbsp;{totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={safePage === totalPages}
+                        className="w-7 h-7 flex items-center justify-center bg-white/5 border border-white/10 rounded-sm text-iron-dust hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                        <ChevronRight size={13} />
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 <div className="border border-white/10 rounded-sm overflow-hidden">
@@ -1480,7 +1499,7 @@ export const Categorize: React.FC = () => {
                       </thead>
                       <tbody>
                         {paginatedRows.map((row, idx) => {
-                          const globalIdx = (safePage - 1) * perPage + idx;
+                          const globalIdx = perPage === 'all' ? idx : (safePage - 1) * perPage + idx;
                           return (
                             <tr key={row.id}
                               className={clsx(
