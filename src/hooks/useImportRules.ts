@@ -15,6 +15,7 @@ export interface TypeMappingRule {
  *   matchDescription  — row.rawDescription must contain `contains`
  *   matchType         — row.resolvedType must equal `matchTypeValue`
  *   matchAmount       — Math.abs(row.rawAmount) must equal `matchAmountValue`
+ *   useRegex          — when true, `contains` is treated as regex pattern
  *
  * Set fields (applied when ALL enabled match conditions pass):
  *   setDescription, setCategory, setType,
@@ -26,6 +27,7 @@ export interface MerchantRule {
   matchDescription: boolean;
   matchType:        boolean;
   matchAmount:      boolean;
+  useRegex:         boolean;          // NEW: treat `contains` as regex
   contains:         string;           // used when matchDescription === true
   matchTypeValue:   TransactionType | '';  // used when matchType === true
   matchAmountValue: number | '';      // used when matchAmount === true (absolute value)
@@ -83,6 +85,7 @@ export const BLANK_MERCHANT_RULE: Omit<MerchantRule, 'id'> = {
   matchDescription: true,
   matchType:        false,
   matchAmount:      false,
+  useRegex:         false,
   contains:         '',
   matchTypeValue:   '',
   matchAmountValue: '',
@@ -95,7 +98,7 @@ export const BLANK_MERCHANT_RULE: Omit<MerchantRule, 'id'> = {
 };
 
 // ─────────────────────────────────────────────
-// applyMerchantRules  (AND-gate)
+// applyMerchantRules  (AND-gate with regex support)
 // ─────────────────────────────────────────────
 /**
  * Each rule has up to three independent match conditions.
@@ -124,7 +127,20 @@ export function applyMerchantRules(
       // Every enabled condition must pass (AND gate)
       if (rule.matchDescription) {
         if (!rule.contains) continue;
-        if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
+        
+        // NEW: Regex matching support
+        if (rule.useRegex) {
+          try {
+            const regex = new RegExp(rule.contains, 'i');
+            if (!regex.test(r.rawDescription)) continue;
+          } catch (err) {
+            // Invalid regex — treat as literal string
+            if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
+          }
+        } else {
+          // Standard substring matching (case-insensitive)
+          if (!r.rawDescription.toLowerCase().includes(rule.contains.toLowerCase())) continue;
+        }
       }
       if (rule.matchType) {
         if (!rule.matchTypeValue) continue;
@@ -159,6 +175,7 @@ function dbRowToMerchantRule(r: Record<string, unknown>): MerchantRule {
     matchDescription: (r.match_description as boolean) ?? true,
     matchType:        (r.match_type        as boolean) ?? false,
     matchAmount:      (r.match_amount      as boolean) ?? false,
+    useRegex:         (r.use_regex         as boolean) ?? false,
     contains:         (r.contains          as string)  || '',
     matchTypeValue:   (r.match_type_value  as TransactionType | '') || '',
     matchAmountValue: r.match_amount_value != null ? (r.match_amount_value as number) : '',
@@ -182,6 +199,7 @@ function merchantRuleToDbRow(
     match_description:  rule.matchDescription,
     match_type:         rule.matchType,
     match_amount:       rule.matchAmount,
+    use_regex:          rule.useRegex,
     match_type_value:   rule.matchTypeValue   || null,
     match_amount_value: rule.matchAmountValue !== '' ? Number(rule.matchAmountValue) : null,
     set_description:    rule.setDescription   || null,
