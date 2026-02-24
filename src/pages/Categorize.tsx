@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Upload, Plus, Trash2, Save, ChevronDown, ChevronUp,
   ArrowRight, Tag, Shuffle, RefreshCcw,
-  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2, Pencil, Download
+  CheckCircle2, AlertCircle, X, Check, Filter, Link2, Loader2, Columns2, Pencil, Download, AlertTriangle
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useFinance } from '../context/FinanceContext';
@@ -44,13 +44,14 @@ interface RawRow {
   isTransferCredit: boolean;
   skip: boolean;
   sourceCsvName: string;
-  rawAccountName?: string; // NEW: raw account name from CSV
+  rawAccountName?: string; // Raw account name from CSV
+  accountMatchWarning?: string; // Warning if account name couldn't be matched
 }
 
 export interface CsvConfig {
   csvName: string;
   accountId: string;
-  accountColumnName: string; // NEW: column name to read account from
+  accountColumnName: string;
   amountColumns: 1 | 2;
   amountCol: string;
   debitCol: string;
@@ -154,23 +155,35 @@ function parseAccountName(rawAccountName: string): {
 /**
  * Find account ID by name and type
  * Searches in assets for 'account'/'savings' and debts for 'debt'
+ * Returns { id, warning } where warning is set if no match found
  */
 function findAccountIdByName(
   baseName: string,
   accountType: 'account' | 'debt' | 'savings',
   assets: { id: string; name: string }[],
   debts: { id: string; name: string }[],
-): string {
+): { id: string; warning?: string } {
   const lowerName = baseName.toLowerCase();
   
   if (accountType === 'debt') {
     const debt = debts.find(d => d.name.toLowerCase() === lowerName);
-    return debt?.id || '';
+    if (!debt) {
+      return { 
+        id: '', 
+        warning: `Debt account "${baseName}" not found. Create it or use "${baseName}#Debt" in CSV.` 
+      };
+    }
+    return { id: debt.id };
   } else {
     // For 'account' or 'savings', search in assets
-    // In the future, you could filter by tags if needed
     const asset = assets.find(a => a.name.toLowerCase() === lowerName);
-    return asset?.id || '';
+    if (!asset) {
+      return { 
+        id: '', 
+        warning: `Account "${baseName}" not found. Create it first or check the name matches exactly.` 
+      };
+    }
+    return { id: asset.id };
   }
 }
 
@@ -180,17 +193,29 @@ function assignAccountByDirection(
   rawAccountName: string | undefined,
   assets: { id: string; name: string }[],
   debts: { id: string; name: string }[],
-): { resolvedAccountId: string; resolvedAccountToId: string } {
+): { 
+  resolvedAccountId: string; 
+  resolvedAccountToId: string;
+  accountMatchWarning?: string;
+} {
   // If we have a per-row account name, use it
   if (rawAccountName) {
     const { baseName, accountType } = parseAccountName(rawAccountName);
-    const foundAccountId = findAccountIdByName(baseName, accountType, assets, debts);
+    const { id: foundAccountId, warning } = findAccountIdByName(baseName, accountType, assets, debts);
+    
     if (foundAccountId) {
       if (rawAmount >= 0) {
         return { resolvedAccountId: '', resolvedAccountToId: foundAccountId };
       } else {
         return { resolvedAccountId: foundAccountId, resolvedAccountToId: '' };
       }
+    } else {
+      // Account name specified but not found
+      return { 
+        resolvedAccountId: '', 
+        resolvedAccountToId: '',
+        accountMatchWarning: warning 
+      };
     }
   }
   
@@ -228,7 +253,7 @@ function parseCSV(
     let rawDate = '', rawType = '', rawDescription = '', rawAmount = 0, balance: number | undefined;
     let rawAccountName: string | undefined;
 
-    // NEW: Get account from column if specified
+    // Get account from column if specified
     if (csvConfig?.accountColumnName) {
       rawAccountName = get(csvConfig.accountColumnName);
     }
@@ -273,7 +298,7 @@ function parseCSV(
     const matchedRule = typeRules.find(r => r.bankCode.toUpperCase() === rawType.toUpperCase());
     const resolvedType: TransactionType = matchedRule ? matchedRule.mapsTo : (rawAmount >= 0 ? 'income' : 'expense');
 
-    const { resolvedAccountId, resolvedAccountToId } = assignAccountByDirection(
+    const { resolvedAccountId, resolvedAccountToId, accountMatchWarning } = assignAccountByDirection(
       rawAmount,
       csvConfig?.accountId || '',
       rawAccountName,
@@ -294,7 +319,8 @@ function parseCSV(
       isTransferCredit: false,
       skip: false,
       sourceCsvName: fileName,
-      rawAccountName, // Store for debugging
+      rawAccountName,
+      accountMatchWarning,
     });
   }
   return rows;
@@ -726,7 +752,7 @@ const CsvAssignPanel: React.FC<CsvAssignPanelProps> = ({ csvConfigs, onChange, o
             </span>
             <ArrowRight size={12} className="text-iron-dust shrink-0" />
             
-            {/* Account column selector - NEW */}
+            {/* Account column selector */}
             {cfg.headers.length > 0 && (
               <>
                 <span className="text-[10px] text-iron-dust font-mono">Account col:</span>
@@ -872,6 +898,17 @@ export const Categorize: React.FC = () => {
   const uniqueCategories = useMemo(() => Array.from(new Set(data.transactions.map(t => t.category))).sort(), [data.transactions]);
   const uniqueBankCodes  = useMemo(() => Array.from(new Set(rows.map(r => r.rawType))).filter(Boolean), [rows]);
 
+  // NEW: Track unmatched account warnings
+  const unmatchedAccounts = useMemo(() => {
+    const warnings = new Set<string>();
+    rows.forEach(r => {
+      if (r.accountMatchWarning) {
+        warnings.add(r.rawAccountName || 'Unknown');
+      }
+    });
+    return Array.from(warnings);
+  }, [rows]);
+
   const filterTypeGroups = useMemo<SelectGroup[]>(() => [{
     options: [
       { value: 'all', label: 'All Types' },
@@ -898,6 +935,7 @@ export const Categorize: React.FC = () => {
     skipped:   rows.filter(r => r.skip).length,
     transfers: rows.filter(r => r.isTransfer && !r.isTransferCredit).length,
     toImport:  rows.filter(r => !r.skip && !r.isTransferCredit && (r.resolvedAccountId || r.resolvedAccountToId)).length,
+    unmapped:  rows.filter(r => r.accountMatchWarning).length,
   }), [rows]);
 
   const buildInitialConfig = (name: string, text: string): CsvConfig => {
@@ -908,7 +946,7 @@ export const Categorize: React.FC = () => {
     return {
       csvName: name,
       accountId: '',
-      accountColumnName: headers.find(h => h.toLowerCase() === 'account') || '', // Auto-detect 'account' column
+      accountColumnName: headers.find(h => h.toLowerCase() === 'account') || '',
       amountColumns: isHalifax ? 2 : 1,
       amountCol: headers.find(h => ['value','amount'].includes(h.toLowerCase())) || '',
       debitCol:  headers.find(h => h.toLowerCase().includes('debit'))  || '',
@@ -1274,7 +1312,7 @@ export const Categorize: React.FC = () => {
                     ))}
                   </div>
                   {transferRules.map(rule => (
-                    <div key={rule.id} className="grid grid-cols-[1.5fr_1fr_1fr_4rem_2rem] gap-3 items-center px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
+                    <div key=={rule.id} className="grid grid-cols-[1.5fr_1fr_1fr_4rem_2rem] gap-3 items-center px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
                       <input value={rule.label}
                         onChange={e => updateTransferRule(rule.id, { label: e.target.value })}
                         placeholder="e.g. Halifax → NatWest"
@@ -1341,6 +1379,29 @@ export const Categorize: React.FC = () => {
 
             {rows.length > 0 && (
               <>
+                {/* NEW: Unmatched accounts warning */}
+                {unmatchedAccounts.length > 0 && (
+                  <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-sm p-4">
+                    <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-amber-300 mb-1">Account Name Mismatch</p>
+                      <p className="text-xs text-amber-200/80 mb-2">
+                        The following account names from your CSV could not be matched. Create these accounts first or check the naming convention:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {unmatchedAccounts.map(name => (
+                          <span key={name} className="px-2 py-1 bg-amber-500/20 border border-amber-500/40 rounded-sm text-xs font-mono text-amber-200">
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-amber-200/60 mt-2 font-mono">
+                        Use: AccountName = Asset, AccountName#Debt = Debt, AccountName#Savings = Savings
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-4 gap-3">
                   {[
                     { label: 'Total Rows',  value: stats.total,     color: 'text-white' },
@@ -1348,9 +1409,15 @@ export const Categorize: React.FC = () => {
                     { label: 'Transfers',   value: stats.transfers, color: 'text-blue-400' },
                     { label: 'Skipped',     value: stats.skipped,   color: 'text-iron-dust' },
                   ].map(s => (
-                    <div key={s.label} className="bg-[#131517] border border-white/10 rounded-sm p-4">
+                    <div key={s.label} className="bg-[#131517] border border-white/10 rounded-sm p-4 relative">
                       <div className={clsx('text-2xl font-bold font-mono', s.color)}>{s.value}</div>
                       <div className="text-[10px] text-iron-dust uppercase tracking-wider mt-1">{s.label}</div>
+                      {s.label === 'To Import' && stats.unmapped > 0 && (
+                        <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-amber-500/20 border border-amber-500/40 rounded-sm">
+                          <AlertTriangle size={9} className="text-amber-400" />
+                          <span className="text-[9px] font-mono text-amber-300">{stats.unmapped} unmapped</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1432,9 +1499,18 @@ export const Categorize: React.FC = () => {
                               row.skip            ? 'opacity-30 bg-black/20' :
                               row.isTransferCredit? 'opacity-40 bg-white/[0.01]' :
                               row.isTransfer      ? 'bg-blue-500/5 hover:bg-blue-500/10' :
+                              row.accountMatchWarning ? 'bg-amber-500/5 hover:bg-amber-500/10' :
                               idx % 2 === 0       ? 'bg-transparent hover:bg-white/[0.02]' : 'bg-white/[0.01] hover:bg-white/[0.03]'
                             )}>
-                            <td className="px-3 py-2 text-iron-dust/40 font-mono text-[10px]">{idx + 1}</td>
+                            <td className="px-3 py-2 text-iron-dust/40 font-mono text-[10px]">
+                              {row.accountMatchWarning && (
+                                <div className="flex items-center gap-1" title={row.accountMatchWarning}>
+                                  <AlertTriangle size={10} className="text-amber-400" />
+                                  <span>{idx + 1}</span>
+                                </div>
+                              )}
+                              {!row.accountMatchWarning && idx + 1}
+                            </td>
                             <td className="px-3 py-2 font-mono text-iron-dust text-[11px] whitespace-nowrap">{row.rawDate}</td>
                             <td className="px-3 py-2">
                               <span className="px-1.5 py-0.5 bg-black/40 border border-white/10 rounded-sm font-mono text-[10px] text-iron-dust">{row.rawType}</span>
@@ -1442,6 +1518,11 @@ export const Categorize: React.FC = () => {
                             <td className="px-3 py-2 max-w-[220px]">
                               <EditableCell value={row.resolvedDescription} onSave={v => updateRow(row.id, { resolvedDescription: v })}
                                 className="text-white text-[11px]" showRulePrompt onCreateRule={() => setRulePopup({ row, field: 'description' })} />
+                              {row.accountMatchWarning && (
+                                <span className="text-[9px] font-mono text-amber-400 block mt-0.5" title={row.accountMatchWarning}>
+                                  ⚠ {row.rawAccountName} not found
+                                </span>
+                              )}
                               {row.isTransfer && !row.isTransferCredit && <span className="text-[9px] font-mono text-blue-400 block mt-0.5">↔ transfer (debit side)</span>}
                               {row.isTransferCredit && <span className="text-[9px] font-mono text-white/30 block mt-0.5">↔ mirror — will be skipped</span>}
                             </td>
@@ -1462,13 +1543,13 @@ export const Categorize: React.FC = () => {
                             </td>
                             <td className="px-3 py-2">
                               <div className="w-32">
-                                <CustomSelect value={row.resolvedAccountId} onChange={v => updateRow(row.id, { resolvedAccountId: v })}
+                                <CustomSelect value={row.resolvedAccountId} onChange={v => updateRow(row.id, { resolvedAccountId: v, accountMatchWarning: undefined })}
                                   groups={rowAccountGroups} placeholder="— assign —" triggerClassName="px-2 py-1.5 text-xs" maxVisibleItems={8} />
                               </div>
                             </td>
                             <td className="px-3 py-2">
                               <div className="w-32">
-                                <CustomSelect value={row.resolvedAccountToId} onChange={v => updateRow(row.id, { resolvedAccountToId: v })}
+                                <CustomSelect value={row.resolvedAccountToId} onChange={v => updateRow(row.id, { resolvedAccountToId: v, accountMatchWarning: undefined })}
                                   groups={rowAccountGroups} placeholder="— assign —" triggerClassName="px-2 py-1.5 text-xs" maxVisibleItems={8} />
                               </div>
                             </td>
