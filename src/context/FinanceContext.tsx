@@ -309,6 +309,29 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         localStorage.setItem('lithos_last_sync', now.toString());
         const historyCache: Record<string, Record<string, HistoricalPricePoint>> = {};
 
+        // Fetch user-specific manual price history for all symbols in one query.
+        // These take precedence over the shared price_history_cache.
+        let userPriceMap: Record<string, Record<string, HistoricalPricePoint>> = {};
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const { data: userRows } = await supabase
+              .from('user_price_history')
+              .select('symbol, date, open, close')
+              .eq('user_id', session.user.id)
+              .in('symbol', uniqueSymbols)
+              .order('date', { ascending: true });
+            if (userRows && userRows.length > 0) {
+              userRows.forEach((row: { symbol: string; date: string; open: number | null; close: number }) => {
+                if (!userPriceMap[row.symbol]) userPriceMap[row.symbol] = {};
+                userPriceMap[row.symbol][row.date] = { open: row.open ?? null, close: row.close };
+              });
+            }
+          }
+        } catch (e) {
+          console.info('Could not fetch user_price_history:', e);
+        }
+
         await Promise.all(uniqueSymbols.map(async sym => {
           let history: Record<string, HistoricalPricePoint> = {};
           const fromDate = symbolFromDateMap[sym];
@@ -346,6 +369,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 });
               }
             } catch (e) { console.info(`Supabase cache miss for ${sym}`); }
+          }
+
+          // Merge user-specific prices on top — user prices take precedence over shared cache.
+          if (userPriceMap[sym]) {
+            Object.assign(history, userPriceMap[sym]);
           }
 
           if (Object.keys(history).length === 0) {
@@ -433,7 +461,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const map = new Map<string, any>();
     data.transactions.filter(t => t.type === 'investing' && t.accountId === accountId && t.symbol && t.quantity).forEach(t => {
       if (!map.has(t.symbol)) map.set(t.symbol, { symbol: t.symbol, quantity: 0, totalCost: 0, currency: t.currency || 'GBP' });
-      const h = map.get(t.symbol)!;
+      const h = map.get(t.symbol!)!;
       h.quantity += t.quantity || 0;
       h.totalCost += (t.amount || 0);
       if (t.currency) h.currency = t.currency;

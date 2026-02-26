@@ -126,7 +126,16 @@ export const Settings: React.FC = () => {
       return;
     }
 
-    const rows: Array<{ symbol: string; date: string; open: number | null; close: number; fetched_at: string }> = [];
+    // Resolve the authenticated user's ID for the insert
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setPriceImportPhase('error');
+      setPriceImportMessage('Not authenticated — please log in again');
+      return;
+    }
+    const userId = session.user.id;
+
+    const rows: Array<{ user_id: string; symbol: string; date: string; open: number | null; close: number; fetched_at: string }> = [];
     const errors: string[] = [];
 
     for (let i = 1; i < lines.length; i++) {
@@ -160,6 +169,7 @@ export const Settings: React.FC = () => {
       }
 
       rows.push({
+        user_id: userId,
         symbol: ticker,
         date: dateStr,
         open: openNum,
@@ -183,9 +193,11 @@ export const Settings: React.FC = () => {
 
     for (let i = 0; i < rows.length; i += BATCH) {
       const batch = rows.slice(i, i + BATCH);
+      // Write to user_price_history — each user owns their rows via RLS.
+      // This table is separate from the shared price_history_cache (Yahoo Finance data).
       const { error } = await supabase
-        .from('price_history_cache')
-        .upsert(batch, { onConflict: 'symbol,date', ignoreDuplicates: false });
+        .from('user_price_history')
+        .upsert(batch, { onConflict: 'user_id,symbol,date', ignoreDuplicates: false });
 
       if (error) {
         upsertErrors.push(error.message);
@@ -550,7 +562,7 @@ export const Settings: React.FC = () => {
             <div className="border-t border-white/5" />
             <div>
               <p className="text-sm font-bold text-white mb-1">Manual Price Import</p>
-              <p className="text-sm text-iron-dust mb-4">Upload a CSV file with daily open/close prices for custom tickers that aren't available on Yahoo Finance (e.g., pension funds, private instruments). Format: <code className="bg-black/30 px-1.5 py-0.5 rounded text-xs">date,ticker,open,close</code></p>
+              <p className="text-sm text-iron-dust mb-4">Upload a CSV file with daily open/close prices for custom tickers not available on Yahoo Finance (e.g. pension funds, private instruments). Prices are stored privately — only visible to you — and take precedence over Yahoo Finance data for the same ticker/date. Format: <code className="bg-black/30 px-1.5 py-0.5 rounded text-xs">date,ticker,open,close</code></p>
               <div className="flex gap-3 flex-wrap">
                 <button
                   onClick={handleDownloadPriceTemplate}
